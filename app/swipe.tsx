@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, Animated, PanResponder, Image
+  Dimensions, Animated, PanResponder, Image, Platform
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -137,6 +137,9 @@ export default function SwipeScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
   const position = useRef(new Animated.ValueXY()).current;
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startY = useRef(0);
 
   const vendors = ALL_VENDORS.filter(v => v.category === category);
 
@@ -155,6 +158,7 @@ export default function SwipeScreen() {
     outputRange: [1, 0],
   });
 
+  // Native mobile swipe
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -169,7 +173,34 @@ export default function SwipeScreen() {
     })
   ).current;
 
+  // Web mouse/touch handlers
+  const handleMouseDown = (e: any) => {
+    isDragging.current = true;
+    startX.current = e.clientX || e.touches?.[0]?.clientX || 0;
+    startY.current = e.clientY || e.touches?.[0]?.clientY || 0;
+  };
+
+  const handleMouseMove = (e: any) => {
+    if (!isDragging.current) return;
+    const clientX = e.clientX || e.touches?.[0]?.clientX || 0;
+    const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
+    const dx = clientX - startX.current;
+    const dy = clientY - startY.current;
+    position.setValue({ x: dx, y: dy });
+  };
+
+  const handleMouseUp = (e: any) => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    const clientX = e.clientX || e.changedTouches?.[0]?.clientX || 0;
+    const dx = clientX - startX.current;
+    if (dx > 120) swipeRight();
+    else if (dx < -120) swipeLeft();
+    else resetPosition();
+  };
+
   const swipeRight = () => {
+    setSavedCount(prev => prev + 1);
     Animated.timing(position, {
       toValue: { x: width + 100, y: 0 },
       duration: 250,
@@ -197,11 +228,6 @@ export default function SwipeScreen() {
     setCurrentIndex(prev => prev + 1);
   };
 
-  const handleHeart = () => {
-    setSavedCount(prev => prev + 1);
-    swipeRight();
-  };
-
   const vendor = vendors[currentIndex];
   const nextVendor = vendors[currentIndex + 1];
 
@@ -220,6 +246,16 @@ export default function SwipeScreen() {
       </View>
     );
   }
+
+  const webHandlers = Platform.OS === 'web' ? {
+    onMouseDown: handleMouseDown,
+    onMouseMove: handleMouseMove,
+    onMouseUp: handleMouseUp,
+    onMouseLeave: handleMouseUp,
+    onTouchStart: handleMouseDown,
+    onTouchMove: handleMouseMove,
+    onTouchEnd: handleMouseUp,
+  } : {};
 
   return (
     <View style={styles.container}>
@@ -264,7 +300,8 @@ export default function SwipeScreen() {
               ],
             },
           ]}
-          {...panResponder.panHandlers}
+          {...(Platform.OS !== 'web' ? panResponder.panHandlers : {})}
+          {...(Platform.OS === 'web' ? webHandlers : {})}
         >
           <TouchableOpacity
             style={styles.cardTapArea}
@@ -273,17 +310,14 @@ export default function SwipeScreen() {
           >
             <Image source={{ uri: vendor.image }} style={styles.cardImage} />
 
-            {/* Save overlay */}
             <Animated.View style={[styles.overlayLabel, styles.saveLabel, { opacity: likeOpacity }]}>
               <Text style={styles.overlayText}>SAVE</Text>
             </Animated.View>
 
-            {/* Pass overlay */}
             <Animated.View style={[styles.overlayLabel, styles.passLabel, { opacity: passOpacity }]}>
               <Text style={styles.overlayText}>PASS</Text>
             </Animated.View>
 
-            {/* Card Info */}
             <View style={styles.cardInfo}>
               <View style={styles.cardInfoTop}>
                 <View style={styles.cardInfoLeft}>
@@ -319,7 +353,7 @@ export default function SwipeScreen() {
         <TouchableOpacity style={styles.passBtn} onPress={swipeLeft}>
           <Text style={styles.passBtnText}>✕</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.heartBtn} onPress={handleHeart}>
+        <TouchableOpacity style={styles.heartBtn} onPress={swipeRight}>
           <Text style={styles.heartBtnText}>♥</Text>
         </TouchableOpacity>
       </View>
@@ -392,6 +426,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
+    cursor: 'grab',
   },
   cardBehind: {
     transform: [{ scale: 0.95 }],
