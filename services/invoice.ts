@@ -1,0 +1,136 @@
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
+export interface InvoiceData {
+  vendorName: string;
+  vendorPhone: string;
+  vendorCity: string;
+  clientName: string;
+  amount: number;
+  description: string;
+  invoiceNumber: string;
+  date: string;
+}
+
+export const generateInvoicePDF = async (data: InvoiceData): Promise<void> => {
+  const gst = data.amount * 0.18;
+  const total = data.amount + gst;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #2C2420; background: #fff; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 1px solid #E8E0D5; padding-bottom: 24px; }
+        .brand { font-size: 24px; letter-spacing: 6px; color: #2C2420; font-weight: 300; }
+        .brand-sub { font-size: 10px; color: #8C7B6E; letter-spacing: 2px; margin-top: 4px; }
+        .invoice-label { font-size: 12px; color: #8C7B6E; letter-spacing: 1px; text-align: right; }
+        .invoice-number { font-size: 20px; color: #C9A84C; font-weight: 500; text-align: right; }
+        .section { margin-bottom: 32px; }
+        .section-title { font-size: 10px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+        .from-to { display: flex; justify-content: space-between; }
+        .party { width: 45%; }
+        .party-name { font-size: 16px; font-weight: 500; color: #2C2420; margin-bottom: 4px; }
+        .party-detail { font-size: 13px; color: #8C7B6E; line-height: 1.6; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+        th { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; padding: 10px 0; border-bottom: 1px solid #E8E0D5; text-align: left; }
+        td { padding: 14px 0; border-bottom: 1px solid #F5F0E8; font-size: 14px; color: #2C2420; }
+        .totals { margin-left: auto; width: 280px; }
+        .total-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+        .total-row.final { border-top: 1px solid #2C2420; margin-top: 8px; padding-top: 12px; font-weight: 600; font-size: 16px; }
+        .total-label { color: #8C7B6E; }
+        .total-value { color: #2C2420; }
+        .final .total-value { color: #C9A84C; }
+        .footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid #E8E0D5; font-size: 11px; color: #8C7B6E; text-align: center; line-height: 1.8; }
+        .escrow-note { background: #2C2420; color: #C9A84C; padding: 16px 20px; border-radius: 8px; font-size: 12px; margin-top: 24px; text-align: center; letter-spacing: 0.5px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="brand">DREAMWEDDING</div>
+          <div class="brand-sub">INDIA'S PREMIUM WEDDING PLATFORM</div>
+        </div>
+        <div>
+          <div class="invoice-label">INVOICE</div>
+          <div class="invoice-number">#${data.invoiceNumber}</div>
+          <div style="font-size:12px;color:#8C7B6E;text-align:right;margin-top:4px;">${data.date}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="from-to">
+          <div class="party">
+            <div class="section-title">From</div>
+            <div class="party-name">${data.vendorName}</div>
+            <div class="party-detail">${data.vendorCity}<br>${data.vendorPhone}</div>
+          </div>
+          <div class="party">
+            <div class="section-title">To</div>
+            <div class="party-name">${data.clientName}</div>
+            <div class="party-detail">Wedding Client</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style="text-align:right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>${data.description}</td>
+              <td style="text-align:right">₹${data.amount.toLocaleString('en-IN')}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="totals">
+          <div class="total-row">
+            <span class="total-label">Subtotal</span>
+            <span class="total-value">₹${data.amount.toLocaleString('en-IN')}</span>
+          </div>
+          <div class="total-row">
+            <span class="total-label">GST (18%)</span>
+            <span class="total-value">₹${gst.toLocaleString('en-IN')}</span>
+          </div>
+          <div class="total-row final">
+            <span class="total-label">Total</span>
+            <span class="total-value">₹${total.toLocaleString('en-IN')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="escrow-note">
+        Token payment held securely in DreamWedding escrow · Released upon booking confirmation
+      </div>
+
+      <div class="footer">
+        Generated by The Dream Wedding · thedreamwedding.com<br>
+        This is a computer generated invoice and does not require a physical signature.
+      </div>
+    </body>
+    </html>
+  `;
+
+  const { uri } = await Print.printToFileAsync({ html });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/pdf',
+    dialogTitle: `Invoice ${data.invoiceNumber}`,
+    UTI: 'com.adobe.pdf',
+  });
+};
+
+export const generateInvoiceNumber = (): string => {
+  const date = new Date();
+  const year = date.getFullYear().toString().slice(-2);
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `DW${year}${month}${random}`;
+};
