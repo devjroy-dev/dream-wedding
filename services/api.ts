@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://dream-wedding-production.up.railway.app/api';
+const API_URL = 'https://dream-wedding-production-89ae.up.railway.app/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -180,5 +180,3 @@ export const markNotificationRead = async (id: string) => {
   const response = await api.patch(`/notifications/${id}`, { read: true });
   return response.data;
 };
-
-export default api;
