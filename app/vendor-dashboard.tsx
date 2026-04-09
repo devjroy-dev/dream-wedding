@@ -187,9 +187,12 @@ export default function VendorDashboardScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.previewBtn}>
-              <Text style={styles.previewBtnText}>Preview your profile as couples see it →</Text>
-            </TouchableOpacity>
+ <TouchableOpacity
+          style={styles.previewBtn}
+          onPress={() => router.push('/vendor-preview')}
+        >
+          <Text style={styles.previewBtnText}>Preview your profile as couples see it →</Text>
+        </TouchableOpacity>
 
           </View>
         )}

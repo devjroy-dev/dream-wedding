@@ -16,6 +16,7 @@ export default function RootLayout() {
         <Stack.Screen name="vendor-login" />
         <Stack.Screen name="vendor-onboarding" />
         <Stack.Screen name="vendor-dashboard" />
+        <Stack.Screen name="vendor-preview" />
         <Stack.Screen name="filter" />
         <Stack.Screen name="swipe" />
         <Stack.Screen name="vendor-profile" />
@@ -24,6 +25,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile" />
         <Stack.Screen name="inquiry" />
         <Stack.Screen name="payment" />
+        <Stack.Screen name="payment-success" />
         <Stack.Screen name="messaging" />
         <Stack.Screen name="compare" />
         <Stack.Screen name="notifications" />

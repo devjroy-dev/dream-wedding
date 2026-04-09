@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   Dimensions, ScrollView
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 
@@ -28,14 +28,13 @@ export default function RazorpayMockScreen() {
   const handlePay = () => {
     setProcessing(true);
     setTimeout(() => {
-      router.replace('/payment?step=3');
+      router.replace('/payment-success');
     }, 2000);
   };
 
   return (
     <View style={styles.container}>
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backBtn}>✕</Text>
@@ -49,7 +48,6 @@ export default function RazorpayMockScreen() {
         </View>
       </View>
 
-      {/* Amount */}
       <View style={styles.amountCard}>
         <Text style={styles.amountLabel}>Paying to</Text>
         <Text style={styles.amountVendor}>{vendor}</Text>
@@ -63,7 +61,6 @@ export default function RazorpayMockScreen() {
         contentContainerStyle={styles.scrollContent}
       >
 
-        {/* Payment Methods */}
         <Text style={styles.sectionLabel}>Payment Method</Text>
         <View style={styles.methodList}>
           {PAYMENT_METHODS.map((method, index) => (
@@ -90,7 +87,6 @@ export default function RazorpayMockScreen() {
           ))}
         </View>
 
-        {/* UPI Apps */}
         {selectedMethod === 'upi' && (
           <View style={styles.upiSection}>
             <Text style={styles.sectionLabel}>Select UPI App</Text>
@@ -113,7 +109,6 @@ export default function RazorpayMockScreen() {
           </View>
         )}
 
-        {/* Card fields mock */}
         {selectedMethod === 'card' && (
           <View style={styles.cardSection}>
             <Text style={styles.sectionLabel}>Card Details</Text>
@@ -138,7 +133,6 @@ export default function RazorpayMockScreen() {
           </View>
         )}
 
-        {/* Trust indicators */}
         <View style={styles.trustRow}>
           <Text style={styles.trustItem}>256-bit SSL</Text>
           <Text style={styles.trustDot}>·</Text>
@@ -150,7 +144,6 @@ export default function RazorpayMockScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Pay Button */}
       <View style={styles.bottomBar}>
         {processing ? (
           <View style={styles.processingBtn}>
