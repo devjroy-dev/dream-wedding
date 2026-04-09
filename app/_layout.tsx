@@ -25,7 +25,7 @@ export default function RootLayout() {
     if (user && inAuthGroup) {
       router.replace('/home');
     } else if (!user && !inAuthGroup) {
-      router.replace('/login');
+      router.replace('/home');
     }
   }, [user, segments]);
 
