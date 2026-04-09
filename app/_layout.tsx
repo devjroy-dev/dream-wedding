@@ -1,42 +1,7 @@
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { auth } from '../services/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { View, ActivityIndicator } from 'react-native';
 
 export default function RootLayout() {
-  const [user, setUser] = useState<any>(undefined);
-  const router = useRouter();
-  const segments = useSegments();
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (user === undefined) return;
-
-    const inAuthGroup = ['login', 'otp', 'splash', 'vendor-login'].includes(segments[0]);
-
-    if (user && inAuthGroup) {
-      router.replace('/home');
-    } else if (!user && !inAuthGroup) {
-      router.replace('/home');
-    }
-  }, [user, segments]);
-
-  if (user === undefined) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#C9A84C" />
-      </View>
-    );
-  }
-
   return (
     <>
       <StatusBar style="dark" />
