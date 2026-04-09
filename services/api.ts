@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://zany-space-guide-7vgq7rgjxgv5hrvj4-3001.app.github.dev/api';
+const API_URL = 'https://dream-wedding-production.up.railway.app/api';
 
 const api = axios.create({
   baseURL: API_URL,
