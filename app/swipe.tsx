@@ -283,18 +283,11 @@ export default function SwipeScreen() {
               style={styles.cardImage}
             />
 
-            {/* Gradient overlay using React Native Views */}
-            <View style={styles.gradientBottom} />
-
             {vendor.is_verified && (
               <View style={styles.verifiedBadge}>
                 <Text style={styles.verifiedText}>✓ Verified</Text>
               </View>
             )}
-
-            <View style={styles.ratingTopRight}>
-              <Text style={styles.ratingTopText}>★ {vendor.rating}</Text>
-            </View>
 
             <Animated.View style={[styles.overlayLabel, styles.saveLabel, { opacity: likeOpacity }]}>
               <Text style={styles.overlayText}>SAVE</Text>
@@ -306,8 +299,13 @@ export default function SwipeScreen() {
 
             <View style={styles.cardInfo}>
               <View style={styles.cardInfoTop}>
-                <Text style={styles.vendorName}>{vendor.name}</Text>
-                <Text style={styles.vendorCity}>{vendor.city}</Text>
+                <View style={styles.cardInfoLeft}>
+                  <Text style={styles.vendorName}>{vendor.name}</Text>
+                  <Text style={styles.vendorCity}>{vendor.city}</Text>
+                </View>
+                <View style={styles.ratingBadge}>
+                  <Text style={styles.ratingText}>★ {vendor.rating}</Text>
+                </View>
               </View>
 
               <View style={styles.cardInfoBottom}>
@@ -355,209 +353,52 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
   loadingText: { fontSize: 16, color: '#8C7B6E', letterSpacing: 0.5 },
-  toast: {
-    position: 'absolute',
-    top: 110,
-    alignSelf: 'center',
-    backgroundColor: '#2C2420',
-    borderRadius: 50,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    zIndex: 100,
-  },
+  toast: { position: 'absolute', top: 110, alignSelf: 'center', backgroundColor: '#2C2420', borderRadius: 50, paddingHorizontal: 20, paddingVertical: 10, zIndex: 100 },
   toastText: { fontSize: 13, color: '#C9A84C', fontWeight: '500', letterSpacing: 0.3 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    marginBottom: 8,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 8 },
   backBtn: { fontSize: 22, color: '#2C2420' },
   headerCenter: { alignItems: 'center', gap: 2 },
-  headerTitle: {
-    fontSize: 17,
-    color: '#2C2420',
-    fontWeight: '400',
-    letterSpacing: 1,
-  },
+  headerTitle: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
   headerCount: { fontSize: 11, color: '#8C7B6E', letterSpacing: 0.5 },
   filterBtn: { fontSize: 13, color: '#C9A84C', fontWeight: '500' },
-  hintRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
+  hintRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 12 },
   hint: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.5 },
   hintDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#8C7B6E', opacity: 0.5 },
   cardContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: {
-    position: 'absolute',
-    width: width - 32,
-    height: height * 0.60,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#1A1008',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  cardBehind: {
-    transform: [{ scale: 0.95 }],
-    top: 16,
-    opacity: 0.85,
-  },
+  card: { position: 'absolute', width: width - 40, height: height * 0.54, borderRadius: 16, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  cardBehind: { transform: [{ scale: 0.95 }], top: 14 },
   cardTapArea: { flex: 1 },
   cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  gradientBottom: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: '60%',
-    backgroundColor: 'rgba(10,6,3,0.75)',
-  },
-  verifiedBadge: {
-    position: 'absolute',
-    top: 18,
-    left: 18,
-    backgroundColor: '#C9A84C',
-    borderRadius: 50,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  verifiedText: { fontSize: 10, color: '#FFFFFF', fontWeight: '600', letterSpacing: 0.8 },
-  ratingTopRight: {
-    position: 'absolute',
-    top: 18,
-    right: 18,
-    backgroundColor: 'rgba(20,12,4,0.75)',
-    borderRadius: 50,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.4)',
-  },
-  ratingTopText: { fontSize: 12, color: '#C9A84C', fontWeight: '600' },
-  overlayLabel: {
-    position: 'absolute',
-    top: 40,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    borderWidth: 2.5,
-  },
-  saveLabel: { right: 22, borderColor: '#C9A84C' },
-  passLabel: { left: 22, borderColor: '#F5F0E8' },
-  overlayText: { fontSize: 16, fontWeight: '700', letterSpacing: 3, color: '#F5F0E8' },
-  cardInfo: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 22,
-    gap: 10,
-  },
-  cardInfoTop: { gap: 5 },
-  vendorName: {
-    fontSize: 30,
-    color: '#F5F0E8',
-    fontWeight: '400',
-    letterSpacing: 0.5,
-    lineHeight: 34,
-  },
-  vendorCity: { fontSize: 13, color: '#B8A99A', letterSpacing: 0.5 },
-  cardInfoBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  vendorPrice: {
-    fontSize: 15,
-    color: '#C9A84C',
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
+  verifiedBadge: { position: 'absolute', top: 16, left: 16, backgroundColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  verifiedText: { fontSize: 10, color: '#FFFFFF', fontWeight: '600', letterSpacing: 0.5 },
+  overlayLabel: { position: 'absolute', top: 36, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 4, borderWidth: 2 },
+  saveLabel: { right: 20, borderColor: '#C9A84C' },
+  passLabel: { left: 20, borderColor: '#F5F0E8' },
+  overlayText: { fontSize: 16, fontWeight: '700', letterSpacing: 2, color: '#F5F0E8' },
+  cardInfo: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(20,15,10,0.85)', padding: 18, gap: 10 },
+  cardInfoTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  cardInfoLeft: { gap: 3 },
+  vendorName: { fontSize: 18, color: '#F5F0E8', fontWeight: '500', letterSpacing: 0.2 },
+  vendorCity: { fontSize: 12, color: '#B8A99A' },
+  ratingBadge: { backgroundColor: '#C9A84C', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  ratingText: { fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
+  cardInfoBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  vendorPrice: { fontSize: 13, color: '#C9A84C', fontWeight: '500' },
   vibeTags: { flexDirection: 'row', gap: 6 },
-  vibeTag: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 50,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  vibeTagText: { fontSize: 10, color: '#F5F0E8', letterSpacing: 0.5 },
-  lookalikeBtn: {
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    paddingTop: 12,
-  },
-  lookalikeBtnText: { fontSize: 12, color: '#C9A84C', letterSpacing: 0.3 },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 48,
-    paddingVertical: 18,
-  },
-  passBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  passBtnText: { fontSize: 20, color: '#8C7B6E' },
-  heartBtn: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#2C2420',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#2C2420',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  heartBtnText: { fontSize: 26, color: '#C9A84C' },
+  vibeTag: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 2 },
+  vibeTagText: { fontSize: 10, color: '#F5F0E8', letterSpacing: 0.3 },
+  lookalikeBtn: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', paddingTop: 10 },
+  lookalikeBtnText: { fontSize: 12, color: '#C9A84C', letterSpacing: 0.2 },
+  actions: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 40, paddingVertical: 20 },
+  passBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E8E0D5', justifyContent: 'center', alignItems: 'center' },
+  passBtnText: { fontSize: 18, color: '#8C7B6E' },
+  heartBtn: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
+  heartBtnText: { fontSize: 24, color: '#C9A84C' },
   genieBar: { paddingHorizontal: 24, paddingBottom: 32, alignItems: 'center' },
   genieText: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.3 },
-  emptyContainer: {
-    flex: 1,
-    backgroundColor: '#F5F0E8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 14,
-    padding: 40,
-  },
-  emptyTitle: {
-    fontSize: 32,
-    color: '#2C2420',
-    fontWeight: '300',
-    letterSpacing: 0.5,
-  },
+  emptyContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center', gap: 14, padding: 40 },
+  emptyTitle: { fontSize: 26, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
   emptySubtitle: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },
-  emptyBtn: {
-    marginTop: 16,
-    backgroundColor: '#2C2420',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-  },
+  emptyBtn: { marginTop: 16, backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 14, paddingHorizontal: 32 },
   emptyBtnText: { fontSize: 14, color: '#F5F0E8', fontWeight: '500' },
 });
