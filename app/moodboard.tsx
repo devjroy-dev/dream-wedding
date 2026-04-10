@@ -112,6 +112,18 @@ export default function MoodboardScreen() {
         <Text style={styles.count}>{saved.length} saved</Text>
       </View>
 
+      {/* Trending This Week */}
+      <TouchableOpacity
+        style={styles.trendingBtn}
+        onPress={() => router.push('/swipe')}
+      >
+        <View style={styles.trendingLeft}>
+          <Text style={styles.trendingTitle}>✨ Trending This Week</Text>
+          <Text style={styles.trendingSub}>See who couples are saving right now</Text>
+        </View>
+        <Text style={styles.trendingArrow}>›</Text>
+      </TouchableOpacity>
+
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -235,9 +247,14 @@ export default function MoodboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
   loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 12 },
   title: { fontSize: 28, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
   count: { fontSize: 13, color: '#8C7B6E' },
+  trendingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, marginBottom: 14, padding: 16, backgroundColor: '#2C2420', borderRadius: 14 },
+  trendingLeft: { gap: 3 },
+  trendingTitle: { fontSize: 14, color: '#C9A84C', fontWeight: '600' },
+  trendingSub: { fontSize: 12, color: '#8C7B6E' },
+  trendingArrow: { fontSize: 20, color: '#C9A84C' },
   filterScroll: { maxHeight: 44, marginBottom: 16 },
   filterContent: { paddingHorizontal: 24, gap: 8, alignItems: 'center' },
   filterTab: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 50, borderWidth: 1, borderColor: '#E8E0D5', backgroundColor: '#FFFFFF' },

@@ -1,92 +1,65 @@
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, ActivityIndicator } from 'react-native';
 
-function AuthGate({ children }: { children: React.ReactNode }) {
+export default function SplashScreen() {
   const router = useRouter();
-  const segments = useSegments();
-  const [checking, setChecking] = useState(true);
+  const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    checkSession();
-  }, []);
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
 
-  const checkSession = async () => {
-    try {
-      const currentScreen = segments[0] as string;
-
-      // These screens never need auth checks — let them through always
-      const openScreens = [
-        'index', 'splash', 'login', 'otp',
-        'user-type', 'onboarding',
-        'vendor-login', 'vendor-onboarding',
-        undefined
-      ];
-
-      if (openScreens.includes(currentScreen)) {
-        setChecking(false);
-        return;
-      }
-
-      const user = await AsyncStorage.getItem('user_session');
-      const vendorUser = await AsyncStorage.getItem('vendor_session');
-
-      if (!user && !vendorUser) {
+    const timer = setTimeout(async () => {
+      try {
+        const vendorSession = await AsyncStorage.getItem('vendor_session');
+        if (vendorSession) {
+          const parsed = JSON.parse(vendorSession);
+          if (parsed.onboarded && parsed.vendorId) {
+            router.replace('/vendor-dashboard');
+            return;
+          }
+        }
+        const userSession = await AsyncStorage.getItem('user_session');
+        if (userSession) {
+          router.replace('/home');
+          return;
+        }
+        router.replace('/login');
+      } catch (e) {
         router.replace('/login');
       }
-    } catch (e) {
-      router.replace('/login');
-    } finally {
-      setChecking(false);
-    }
-  };
+    }, 2000);
 
-  if (checking) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#C9A84C" />
-      </View>
-    );
-  }
+    return () => clearTimeout(timer);
+  }, []);
 
-  return <>{children}</>;
-}
-
-export default function RootLayout() {
   return (
-    <>
-      <StatusBar style="dark" />
-      <AuthGate>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="splash" />
-          <Stack.Screen name="login" />
-          <Stack.Screen name="otp" />
-          <Stack.Screen name="user-type" />
-          <Stack.Screen name="onboarding" />
-          <Stack.Screen name="home" />
-          <Stack.Screen name="vendor-login" />
-          <Stack.Screen name="vendor-onboarding" />
-          <Stack.Screen name="vendor-dashboard" />
-          <Stack.Screen name="vendor-preview" />
-          <Stack.Screen name="filter" />
-          <Stack.Screen name="swipe" />
-          <Stack.Screen name="vendor-profile" />
-          <Stack.Screen name="moodboard" />
-          <Stack.Screen name="bts-planner" />
-          <Stack.Screen name="profile" />
-          <Stack.Screen name="inquiry" />
-          <Stack.Screen name="payment" />
-          <Stack.Screen name="payment-success" />
-          <Stack.Screen name="messaging" />
-          <Stack.Screen name="compare" />
-          <Stack.Screen name="notifications" />
-          <Stack.Screen name="lookalike" />
-          <Stack.Screen name="wedding-website" />
-        </Stack>
-      </AuthGate>
-    </>
+    <View style={styles.container}>
+      <Animated.Text style={[styles.tagline, { opacity }]}>
+        Your Dreams Start Here.
+      </Animated.Text>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F0E8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tagline: {
+    fontSize: 28,
+    color: '#2C2420',
+    fontWeight: '600',
+    letterSpacing: 1,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+});

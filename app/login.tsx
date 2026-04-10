@@ -70,50 +70,54 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
 
-      <View style={styles.logoSection}>
-        <Text style={styles.logoTop}>The</Text>
-        <Text style={styles.logoMain}>Dream Wedding</Text>
-        <View style={styles.logoDivider} />
-        <Text style={styles.logoTagline}>India's Premium Wedding Platform</Text>
+      {/* Top section — logo + welcome centered */}
+      <View style={styles.topSection}>
+        <View style={styles.logoSection}>
+          <Text style={styles.logoTop}>The</Text>
+          <Text style={styles.logoMain}>Dream Wedding</Text>
+          <View style={styles.logoDivider} />
+          <Text style={styles.logoTagline}>India's Premium Wedding Platform</Text>
+        </View>
+
+        <View style={styles.welcomeSection}>
+          <Text style={styles.welcomeText}>Welcome</Text>
+          <Text style={styles.subText}>Sign in to begin planning your dream wedding</Text>
+        </View>
       </View>
 
+      {/* Bottom section — buttons */}
       <View style={styles.buttonSection}>
-        <Text style={styles.welcomeText}>Welcome</Text>
-        <Text style={styles.subText}>Sign in to continue planning your dream wedding</Text>
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={handleGoogleLogin}
+          disabled={googleLoading}
+        >
+          {googleLoading ? (
+            <ActivityIndicator color="#2C2420" />
+          ) : (
+            <View style={styles.googleButtonInner}>
+              <Text style={styles.googleIcon}>G</Text>
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
-        <View style={styles.buttons}>
-          <TouchableOpacity
-            style={styles.googleButton}
-            onPress={handleGoogleLogin}
-            disabled={googleLoading}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color="#2C2420" />
-            ) : (
-              <View style={styles.googleButtonInner}>
-                <Text style={styles.googleIcon}>G</Text>
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => router.push('/otp')}
-          >
-            <Text style={styles.primaryButtonText}>Continue with Phone</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.verifyNote}>
-            We'll verify your identity to keep your bookings secure
-          </Text>
+        <View style={styles.dividerRow}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>or</Text>
+          <View style={styles.dividerLine} />
         </View>
+
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => router.push('/otp')}
+        >
+          <Text style={styles.primaryButtonText}>Continue with Phone</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.verifyNote}>
+          We'll verify your identity to keep your bookings secure
+        </Text>
 
         <TouchableOpacity onPress={() => router.push('/vendor-login')}>
           <Text style={styles.vendorLink}>Vendor? Sign in here →</Text>
@@ -130,24 +134,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F0E8',
     paddingHorizontal: 28,
     paddingBottom: 48,
+    paddingTop: 60,
     justifyContent: 'space-between',
   },
-  logoSection: {
+  topSection: {
     flex: 1,
     justifyContent: 'center',
+    gap: 40,
+  },
+  logoSection: {
     alignItems: 'center',
     gap: 8,
-    paddingTop: 60,
   },
   logoTop: {
-    fontSize: 18,
+    fontSize: 16,
     color: '#8C7B6E',
     fontWeight: '300',
-    letterSpacing: 6,
+    letterSpacing: 8,
     textTransform: 'uppercase',
   },
   logoMain: {
-    fontSize: 34,
+    fontSize: 36,
     color: '#2C2420',
     fontWeight: '500',
     letterSpacing: 3,
@@ -165,23 +172,25 @@ const styles = StyleSheet.create({
     letterSpacing: 2.5,
     textTransform: 'uppercase',
   },
-  buttonSection: {
-    gap: 20,
+  welcomeSection: {
+    alignItems: 'center',
+    gap: 8,
   },
   welcomeText: {
-    fontSize: 30,
+    fontSize: 42,
     color: '#2C2420',
     fontWeight: '300',
-    letterSpacing: 1,
+    letterSpacing: 2,
+    textAlign: 'center',
   },
   subText: {
     fontSize: 14,
     color: '#8C7B6E',
-    marginTop: -12,
     lineHeight: 22,
+    textAlign: 'center',
   },
-  buttons: {
-    gap: 12,
+  buttonSection: {
+    gap: 14,
   },
   googleButton: {
     width: '100%',

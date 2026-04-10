@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,13 +34,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (checking) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#C9A84C" />
-      </View>
-    );
-  }
+  if (checking) return null;
 
   return <>{children}</>;
 }

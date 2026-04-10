@@ -273,11 +273,7 @@ export default function SwipeScreen() {
           {...(Platform.OS !== 'web' ? panResponder.panHandlers : {})}
           {...(Platform.OS === 'web' ? webHandlers : {})}
         >
-          <TouchableOpacity
-            style={styles.cardTapArea}
-            onPress={() => router.push(`/vendor-profile?id=${vendor.id}`)}
-            activeOpacity={1}
-          >
+          <View style={styles.cardTapArea}>
             <Image
               source={{ uri: vendor.portfolio_images?.[0] || vendor.image }}
               style={styles.cardImage}
@@ -328,7 +324,7 @@ export default function SwipeScreen() {
                 <Text style={styles.lookalikeBtnText}>Find similar style in my budget →</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </Animated.View>
       </View>
 
