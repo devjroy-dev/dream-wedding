@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 17,
     color: '#2C2420',
-    fontFamily: 'CormorantGaramond_500Medium',
+    fontWeight: '400',
     letterSpacing: 1,
   },
   headerCount: { fontSize: 11, color: '#8C7B6E', letterSpacing: 0.5 },
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
   vendorName: {
     fontSize: 30,
     color: '#F5F0E8',
-    fontFamily: 'CormorantGaramond_500Medium',
+    fontWeight: '400',
     letterSpacing: 0.5,
     lineHeight: 34,
   },
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 32,
     color: '#2C2420',
-    fontFamily: 'CormorantGaramond_300Light',
+    fontWeight: '300',
     letterSpacing: 0.5,
   },
   emptySubtitle: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },

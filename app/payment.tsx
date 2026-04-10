@@ -1,327 +1,277 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import {
-  ActivityIndicator, Alert, ScrollView,
-  StyleSheet, Text, TouchableOpacity, View
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, TextInput, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BOOKING_PROTECTION_FEE, initiatePayment } from '../services/razorpay';
-import { getVendor, createBooking } from '../services/api';
+import { getVendors } from '../services/api';
 
-export default function PaymentScreen() {
+const { width } = Dimensions.get('window');
+
+const CATEGORIES = [
+  { id: 'venues', label: 'Venues', sub: 'Palaces, farmhouses & luxury hotels' },
+  { id: 'photographers', label: 'Photographers', sub: 'Candid, traditional & cinematic' },
+  { id: 'mua', label: 'Makeup Artists', sub: 'Bridal & party makeup' },
+  { id: 'designers', label: 'Designers', sub: 'Bridal & groom wear' },
+  { id: 'choreographers', label: 'Choreographers', sub: 'Sangeet & performance prep' },
+  { id: 'content-creators', label: 'Content Creators', sub: 'BTS Reels & short films' },
+  { id: 'dj', label: 'DJ & Music', sub: 'Live music & DJ services' },
+  { id: 'event-managers', label: 'Event Managers', sub: 'Luxury & destination weddings' },
+  { id: 'jewellery', label: 'Jewellery Designers', sub: 'Bridal & custom jewellery' },
+];
+
+export default function HomeScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
-  const [step, setStep] = useState(1);
-  const [agreed, setAgreed] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [vendor, setVendor] = useState<any>(null);
-  const [userSession, setUserSession] = useState<any>(null);
-  const [loadingVendor, setLoadingVendor] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [userName, setUserName] = useState('there');
+  const [weddingDate, setWeddingDate] = useState<Date | null>(null);
+  const [daysUntil, setDaysUntil] = useState<number | null>(null);
+  const [coPlannerOnline] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, [id]);
+    loadSession();
+  }, []);
 
-  const loadData = async () => {
+  const loadSession = async () => {
     try {
-      setLoadingVendor(true);
       const session = await AsyncStorage.getItem('user_session');
-      if (session) setUserSession(JSON.parse(session));
-      const result = await getVendor(id as string);
-      if (result.success) setVendor(result.data);
-    } catch (e) {
-      console.log('Error loading vendor:', e);
-    } finally {
-      setLoadingVendor(false);
-    }
-  };
-
-  const vendorName = vendor?.name || 'Vendor';
-  const vendorCategory = vendor?.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || '';
-  const vendorCity = vendor?.city || '';
-  const totalAmount = vendor?.starting_price || 300000;
-  const tokenAmount = Math.round(totalAmount * 0.2);
-  const platformFee = BOOKING_PROTECTION_FEE;
-  const userName = userSession?.name || 'Guest';
-  const userPhone = userSession?.phone || '9999999999';
-
-  const formatAmount = (amount: number) =>
-    `₹${amount.toLocaleString('en-IN')}`;
-
-  const weddingDate = userSession?.wedding_date
-    ? new Date(userSession.wedding_date).toLocaleDateString('en-IN', {
-        day: 'numeric', month: 'long', year: 'numeric'
-      })
-    : 'Your wedding date';
-
-  const handlePayment = async () => {
-    try {
-      setLoading(true);
-      await initiatePayment({
-        amount: tokenAmount + platformFee,
-        vendorName,
-        description: `Token payment for ${vendorName} · ${weddingDate}`,
-        userName,
-        userPhone,
-      });
-
-      // Create booking in backend
-      let bookingId = '';
-      try {
-        const bookingResult = await createBooking({
-          user_id: userSession?.userId,
-          vendor_id: id,
-          vendor_name: vendorName,
-          vendor_category: vendorCategory,
-          token_amount: tokenAmount,
-          total_amount: totalAmount,
-          platform_fee: platformFee,
-          status: 'pending_confirmation',
-          wedding_date: userSession?.wedding_date,
-        });
-        bookingId = bookingResult?.data?.id || '';
-      } catch (e) {
-        console.log('Booking creation failed:', e);
-      }
-
-      // Navigate to success screen with real data
-      router.replace({
-        pathname: '/payment-success',
-        params: {
-          vendorName,
-          tokenAmount: tokenAmount.toString(),
-          weddingDate,
-          bookingId,
+      if (session) {
+        const parsed = JSON.parse(session);
+        if (parsed.name) setUserName(parsed.name.split(' ')[0]);
+        if (parsed.wedding_date) {
+          const date = new Date(parsed.wedding_date);
+          setWeddingDate(date);
+          const days = Math.max(0, Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+          setDaysUntil(days);
         }
-      });
-    } catch (error: any) {
-      if (error?.code !== 'PAYMENT_CANCELLED') {
-        Alert.alert('Payment Failed', 'Something went wrong. Please try again.');
       }
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) {}
   };
 
-  if (loadingVendor) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#C9A84C" size="large" />
-      </View>
-    );
-  }
+  const filteredCategories = CATEGORIES.filter(cat =>
+    cat.label.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  // STEP 2 — Confirm & Pay
-  if (step === 2) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => setStep(1)}>
-            <Text style={styles.backBtn}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Confirm Payment</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Booking Summary</Text>
-            {[
-              { key: 'Vendor', val: vendorName },
-              { key: 'Category', val: vendorCategory },
-              { key: 'City', val: vendorCity },
-              { key: 'Wedding Date', val: weddingDate },
-              { key: 'Total Package', val: formatAmount(totalAmount) },
-            ].map((row, i, arr) => (
-              <View key={row.key}>
-                <View style={styles.cardRow}>
-                  <Text style={styles.cardKey}>{row.key}</Text>
-                  <Text style={styles.cardVal}>{row.val}</Text>
-                </View>
-                {i < arr.length - 1 && <View style={styles.cardDivider} />}
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Payment Breakdown</Text>
-            <View style={styles.cardRow}>
-              <View>
-                <Text style={styles.cardKey}>Token Amount</Text>
-                <Text style={styles.cardHint}>20% of total package</Text>
-              </View>
-              <Text style={styles.cardAmount}>{formatAmount(tokenAmount)}</Text>
-            </View>
-            <View style={styles.cardDivider} />
-            <View style={styles.cardRow}>
-              <View>
-                <Text style={styles.cardKey}>Booking Protection</Text>
-                <Text style={styles.cardHint}>The Dream Wedding guarantee</Text>
-              </View>
-              <Text style={styles.cardAmount}>{formatAmount(platformFee)}</Text>
-            </View>
-            <View style={styles.cardDivider} />
-            <View style={styles.cardRow}>
-              <Text style={[styles.cardKey, { fontWeight: '600', color: '#2C2420' }]}>Total Due Now</Text>
-              <Text style={styles.cardTotal}>{formatAmount(tokenAmount + platformFee)}</Text>
-            </View>
-          </View>
-
-          <View style={styles.escrowCard}>
-            <Text style={styles.escrowTitle}>The Dream Wedding Booking Protection</Text>
-            {[
-              'Your token is held securely in escrow',
-              'Released to vendor only after they confirm',
-              'Full refund if vendor cancels or doesn\'t confirm within 48 hours',
-              'All disputes handled by The Dream Wedding',
-            ].map((point, i) => (
-              <View key={i} style={styles.escrowPoint}>
-                <Text style={styles.escrowPointDot}>✓</Text>
-                <Text style={styles.escrowPointText}>{point}</Text>
-              </View>
-            ))}
-          </View>
-
-          <TouchableOpacity style={styles.agreeRow} onPress={() => setAgreed(!agreed)}>
-            <View style={[styles.checkbox, agreed && styles.checkboxActive]}>
-              {agreed && <Text style={styles.checkboxTick}>✓</Text>}
-            </View>
-            <Text style={styles.agreeText}>
-              I agree to the Terms of Service and understand the refund policy
-            </Text>
-          </TouchableOpacity>
-
-          <View style={{ height: 40 }} />
-        </ScrollView>
-
-        <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={[styles.payBtn, (!agreed || loading) && styles.payBtnDisabled]}
-            disabled={!agreed || loading}
-            onPress={handlePayment}
-          >
-            {loading
-              ? <ActivityIndicator color="#F5F0E8" />
-              : <Text style={styles.payBtnText}>Pay {formatAmount(tokenAmount + platformFee)}</Text>
-            }
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // STEP 1 — Overview
   return (
     <View style={styles.container}>
+
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backBtn}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Lock the Date</Text>
-        <View style={{ width: 24 }} />
+        <View>
+          <Text style={styles.greeting}>Hello, {userName}</Text>
+          <Text style={styles.subGreeting}>Find your dream wedding team</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notifBtn}>
+            <Text style={styles.notifIcon}>🔔</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/profile')} style={styles.avatar}>
+            <Text style={styles.avatarText}>{userName[0]?.toUpperCase() || 'D'}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
 
-        <View style={styles.vendorCard}>
-          <View style={styles.vendorAvatar}>
-            <Text style={styles.vendorAvatarText}>{vendorName[0]}</Text>
+        {/* Wedding Countdown — clean minimal version */}
+        {daysUntil !== null && (
+          <View style={styles.countdownStrip}>
+            <View style={styles.countdownLeft}>
+              <Text style={styles.countdownNumber}>{daysUntil}</Text>
+              <Text style={styles.countdownLabel}>days to go</Text>
+            </View>
+            <View style={styles.countdownDivider} />
+            <View style={styles.countdownRight}>
+              <Text style={styles.countdownDate}>
+                {weddingDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </Text>
+              <Text style={styles.countdownSub}>Your wedding day ✨</Text>
+            </View>
           </View>
-          <View style={styles.vendorInfo}>
-            <Text style={styles.vendorName}>{vendorName}</Text>
-            <Text style={styles.vendorMeta}>{vendorCategory} · {vendorCity}</Text>
-            <Text style={styles.vendorDate}>For: {weddingDate}</Text>
+        )}
+
+        {/* Genie Budget */}
+        <TouchableOpacity style={styles.genieBar} onPress={() => router.push('/bts-planner')}>
+          <View style={styles.genieLeft}>
+            <Text style={styles.genieTitle}>Genie Budget</Text>
+            <Text style={styles.genieSubtitle}>Heart vendors to track your estimated spend</Text>
           </View>
+          <Text style={styles.genieArrow}>›</Text>
+        </TouchableOpacity>
+
+        {/* Search */}
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>⌕</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search vendors, categories..."
+            placeholderTextColor="#8C7B6E"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text style={styles.searchClear}>✕</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>What is a token payment?</Text>
-          <Text style={styles.infoText}>
-            A token payment (20% of total) secures your date with the vendor. It's held safely by The Dream Wedding until the vendor confirms. The remaining balance is paid directly to the vendor later.
-          </Text>
+        {/* Categories */}
+        <View style={styles.categoriesSection}>
+          <Text style={styles.sectionTitle}>Categories</Text>
+          {filteredCategories.map((cat, index) => (
+            <View key={cat.id}>
+              <TouchableOpacity
+                style={styles.categoryRow}
+                onPress={() => router.push(`/filter?category=${cat.id}`)}
+              >
+                <View style={styles.categoryText}>
+                  <Text style={styles.categoryLabel}>{cat.label}</Text>
+                  <Text style={styles.categorySub}>{cat.sub}</Text>
+                </View>
+                <Text style={styles.categoryArrow}>›</Text>
+              </TouchableOpacity>
+              {index < filteredCategories.length - 1 && <View style={styles.rowDivider} />}
+            </View>
+          ))}
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.cardRow}>
-            <Text style={styles.cardKey}>Token Amount</Text>
-            <Text style={styles.cardAmount}>{formatAmount(tokenAmount)}</Text>
+        {/* Trending This Week — as a button at bottom of categories */}
+        <TouchableOpacity
+          style={styles.trendingBtn}
+          onPress={() => router.push('/swipe')}
+        >
+          <View style={styles.trendingBtnLeft}>
+            <Text style={styles.trendingBtnTitle}>✨ Trending This Week</Text>
+            <Text style={styles.trendingBtnSub}>See who couples are saving right now</Text>
           </View>
-          <View style={styles.cardDivider} />
-          <View style={styles.cardRow}>
-            <Text style={styles.cardKey}>Booking Protection Fee</Text>
-            <Text style={styles.cardAmount}>{formatAmount(platformFee)}</Text>
-          </View>
-          <View style={styles.cardDivider} />
-          <View style={styles.cardRow}>
-            <Text style={[styles.cardKey, { fontWeight: '600', color: '#2C2420' }]}>Total Due Now</Text>
-            <Text style={styles.cardTotal}>{formatAmount(tokenAmount + platformFee)}</Text>
-          </View>
-          <Text style={styles.remainingNote}>
-            Remaining {formatAmount(totalAmount - tokenAmount)} paid directly to vendor
-          </Text>
-        </View>
+          <Text style={styles.trendingBtnArrow}>›</Text>
+        </TouchableOpacity>
 
-        <View style={styles.escrowCard}>
-          <Text style={styles.escrowTitle}>Protected by The Dream Wedding</Text>
-          <Text style={styles.escrowSubtext}>
-            Full refund if vendor cancels or doesn't confirm within 48 hours. Your ₹999 booking protection fee is non-refundable.
-          </Text>
-        </View>
+        {/* Referral Banner */}
+        <TouchableOpacity style={styles.referralBanner}>
+          <View style={styles.referralLeft}>
+            <Text style={styles.referralTitle}>Invite a friend</Text>
+            <Text style={styles.referralSub}>Get 1 month Premium free when they sign up</Text>
+          </View>
+          <Text style={styles.referralArrow}>›</Text>
+        </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
+        {/* Post Wedding */}
+        <TouchableOpacity style={styles.postWeddingCard}>
+          <View style={styles.postWeddingLeft}>
+            <Text style={styles.postWeddingTitle}>After the wedding</Text>
+            <Text style={styles.postWeddingSubtitle}>Book your anniversary shoot, honeymoon photographer & more</Text>
+          </View>
+          <Text style={styles.postWeddingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.payBtn} onPress={() => setStep(2)}>
-          <Text style={styles.payBtnText}>Continue to Payment →</Text>
+      {/* Bottom Nav */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity style={styles.navItem}>
+          <View style={styles.navDot} />
+          <Text style={[styles.navLabel, styles.navActive]}>Home</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/moodboard')}>
+          <Text style={styles.navLabel}>Moodboard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/bts-planner')}>
+          <Text style={styles.navLabel}>Planner</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/profile')}>
+          <Text style={styles.navLabel}>Profile</Text>
         </TouchableOpacity>
       </View>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
-  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 24 },
-  backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
-  title: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
+  greeting: { fontSize: 28, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
+  subGreeting: { fontSize: 13, color: '#8C7B6E', marginTop: 4, letterSpacing: 0.3 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  notifBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
+  notifIcon: { fontSize: 16 },
+  avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: '#C9A84C', fontSize: 16, fontWeight: '500' },
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 24, gap: 16 },
-  vendorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8E0D5', gap: 14 },
-  vendorAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
-  vendorAvatarText: { fontSize: 22, color: '#C9A84C', fontWeight: '300' },
-  vendorInfo: { flex: 1, gap: 4 },
-  vendorName: { fontSize: 17, color: '#2C2420', fontWeight: '500' },
-  vendorMeta: { fontSize: 13, color: '#8C7B6E' },
-  vendorDate: { fontSize: 12, color: '#C9A84C', fontWeight: '500' },
-  infoCard: { backgroundColor: '#FFF8EC', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: '#E8D9B5', gap: 8 },
-  infoTitle: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
-  infoText: { fontSize: 13, color: '#8C7B6E', lineHeight: 22 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#E8E0D5' },
-  cardTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500', marginBottom: 14 },
-  cardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 },
-  cardDivider: { height: 1, backgroundColor: '#E8E0D5' },
-  cardKey: { fontSize: 14, color: '#8C7B6E' },
-  cardHint: { fontSize: 11, color: '#8C7B6E', marginTop: 2 },
-  cardVal: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
-  cardAmount: { fontSize: 15, color: '#C9A84C', fontWeight: '600' },
-  cardTotal: { fontSize: 20, color: '#2C2420', fontWeight: '600' },
-  remainingNote: { fontSize: 11, color: '#8C7B6E', textAlign: 'center', marginTop: 8 },
-  escrowCard: { backgroundColor: '#2C2420', borderRadius: 16, padding: 20, gap: 12 },
-  escrowTitle: { fontSize: 14, color: '#C9A84C', fontWeight: '500', letterSpacing: 0.3 },
-  escrowSubtext: { fontSize: 13, color: '#B8A99A', lineHeight: 20 },
-  escrowPoint: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  escrowPointDot: { fontSize: 12, color: '#C9A84C', fontWeight: '700', marginTop: 1 },
-  escrowPointText: { fontSize: 13, color: '#B8A99A', flex: 1, lineHeight: 20 },
-  agreeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  checkbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 1.5, borderColor: '#C9A84C', justifyContent: 'center', alignItems: 'center', marginTop: 1 },
-  checkboxActive: { backgroundColor: '#2C2420', borderColor: '#2C2420' },
-  checkboxTick: { color: '#C9A84C', fontSize: 12, fontWeight: '700' },
-  agreeText: { flex: 1, fontSize: 13, color: '#8C7B6E', lineHeight: 20 },
-  bottomBar: { paddingHorizontal: 24, paddingVertical: 20, paddingBottom: 36, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8' },
-  payBtn: { backgroundColor: '#2C2420', borderRadius: 14, paddingVertical: 17, alignItems: 'center', shadowColor: '#2C2420', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 12, elevation: 4 },
-  payBtnDisabled: { opacity: 0.3 },
-  payBtnText: { fontSize: 15, color: '#F5F0E8', fontWeight: '500', letterSpacing: 0.5 },
+
+  // Countdown — clean minimal strip
+  countdownStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 24,
+    marginBottom: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    gap: 16,
+  },
+  countdownLeft: { alignItems: 'center', minWidth: 60 },
+  countdownNumber: { fontSize: 32, color: '#C9A84C', fontWeight: '300', letterSpacing: 1 },
+  countdownLabel: { fontSize: 10, color: '#8C7B6E', letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 },
+  countdownDivider: { width: 1, height: 40, backgroundColor: '#E8E0D5' },
+  countdownRight: { flex: 1, gap: 4 },
+  countdownDate: { fontSize: 15, color: '#2C2420', fontWeight: '400', letterSpacing: 0.3 },
+  countdownSub: { fontSize: 12, color: '#8C7B6E' },
+
+  genieBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, marginBottom: 16, paddingVertical: 14, paddingHorizontal: 18, backgroundColor: '#FFF8EC', borderRadius: 10, borderWidth: 1, borderColor: '#E8D9B5' },
+  genieLeft: { gap: 3 },
+  genieTitle: { fontSize: 14, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
+  genieSubtitle: { fontSize: 12, color: '#8C7B6E' },
+  genieArrow: { fontSize: 20, color: '#C9A84C' },
+
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', marginHorizontal: 24, borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingHorizontal: 14, paddingVertical: 12, marginBottom: 24, gap: 8 },
+  searchIcon: { fontSize: 18, color: '#8C7B6E' },
+  searchInput: { flex: 1, fontSize: 14, color: '#2C2420' },
+  searchClear: { fontSize: 12, color: '#8C7B6E', padding: 4 },
+
+  categoriesSection: { paddingHorizontal: 24, marginBottom: 16 },
+  sectionTitle: { fontSize: 11, color: '#8C7B6E', letterSpacing: 2, textTransform: 'uppercase', fontWeight: '500', marginBottom: 16 },
+  categoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 20 },
+  categoryText: { gap: 5 },
+  categoryLabel: { fontSize: 20, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
+  categorySub: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.2 },
+  categoryArrow: { fontSize: 22, color: '#C9A84C' },
+  rowDivider: { height: 1, backgroundColor: '#E8E0D5' },
+
+  trendingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 24,
+    marginBottom: 16,
+    padding: 18,
+    backgroundColor: '#2C2420',
+    borderRadius: 14,
+  },
+  trendingBtnLeft: { gap: 4 },
+  trendingBtnTitle: { fontSize: 15, color: '#C9A84C', fontWeight: '500' },
+  trendingBtnSub: { fontSize: 12, color: '#8C7B6E' },
+  trendingBtnArrow: { fontSize: 22, color: '#C9A84C' },
+
+  referralBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, padding: 18, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E8E0D5', marginBottom: 12 },
+  referralLeft: { flex: 1, gap: 4 },
+  referralTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
+  referralSub: { fontSize: 12, color: '#8C7B6E', lineHeight: 18 },
+  referralArrow: { fontSize: 20, color: '#C9A84C' },
+
+  postWeddingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, padding: 18, backgroundColor: '#FFF8EC', borderRadius: 12, borderWidth: 1, borderColor: '#E8D9B5', marginBottom: 12 },
+  postWeddingLeft: { flex: 1, gap: 4 },
+  postWeddingTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
+  postWeddingSubtitle: { fontSize: 12, color: '#8C7B6E', lineHeight: 18 },
+  postWeddingArrow: { fontSize: 20, color: '#C9A84C' },
+
+  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8', position: 'absolute', bottom: 0, width: '100%' },
+  navItem: { alignItems: 'center', gap: 4 },
+  navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C9A84C' },
+  navLabel: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.3 },
+  navActive: { color: '#2C2420', fontWeight: '600' },
 });

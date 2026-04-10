@@ -124,14 +124,14 @@ const styles = StyleSheet.create({
   logoTop: {
     fontSize: 18,
     color: '#8C7B6E',
-    fontFamily: 'CormorantGaramond_300Light',
+    fontWeight: '300',
     letterSpacing: 8,
     textTransform: 'uppercase',
   },
   logoMain: {
     fontSize: 48,
     color: '#2C2420',
-    fontFamily: 'CormorantGaramond_500Medium',
+    fontWeight: '400',
     letterSpacing: 3,
     textAlign: 'center',
     lineHeight: 54,
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
   dreamLine: {
     fontSize: 22,
     color: '#2C2420',
-    fontFamily: 'CormorantGaramond_300Light',
+    fontWeight: '300',
     letterSpacing: 1.5,
   },
   footer: {

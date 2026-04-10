@@ -1,12 +1,8 @@
-import { CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_500Medium, CormorantGaramond_600SemiBold, useFonts } from '@expo-google-fonts/cormorant-garamond';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-
-SplashScreen.preventAutoHideAsync();
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -40,38 +36,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   };
 
   if (checking) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#C9A84C" />
-      </View>
-    );
+    return null;
   }
 
   return <>{children}</>;
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
-    CormorantGaramond_300Light,
-    CormorantGaramond_400Regular,
-    CormorantGaramond_500Medium,
-    CormorantGaramond_600SemiBold,
-  });
-
-  useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded]);
-
-  if (!fontsLoaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#C9A84C" />
-      </View>
-    );
-  }
-
   return (
     <>
       <StatusBar style="dark" />
