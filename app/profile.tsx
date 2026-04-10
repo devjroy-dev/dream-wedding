@@ -1,27 +1,159 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, ScrollView
+  ScrollView, Alert, ActivityIndicator, Modal, TextInput
 } from 'react-native';
 import { useRouter } from 'expo-router';
-
-const { width } = Dimensions.get('window');
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateUser } from '../services/api';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [reminders, setReminders] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  useEffect(() => {
+    loadSession();
+  }, []);
+
+  const loadSession = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('user_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setSession(parsed);
+        setEditName(parsed.name || '');
+      }
+    } catch (e) {}
+    finally { setLoading(false); }
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      setSavingEdit(true);
+      const updated = { ...session, name: editName.trim() };
+      await AsyncStorage.setItem('user_session', JSON.stringify(updated));
+      if (session?.userId) {
+        try { await updateUser(session.userId, { name: editName.trim() }); } catch (e) {}
+      }
+      setSession(updated);
+      setShowEditModal(false);
+    } catch (e) {
+      Alert.alert('Error', 'Could not save changes.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            await AsyncStorage.removeItem('user_session');
+            await AsyncStorage.removeItem('vendor_session');
+            router.replace('/login');
+          }
+        }
+      ]
+    );
+  };
+
+  const formatDate = (isoDate: string) => {
+    try {
+      return new Date(isoDate).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'long', year: 'numeric'
+      });
+    } catch { return isoDate; }
+  };
+
+  const formatBudget = (budget: number) => {
+    if (!budget) return 'Not set';
+    if (budget >= 10000000) return '₹1Cr+';
+    if (budget >= 5000000) return '₹50L – ₹1Cr';
+    if (budget >= 2500000) return '₹25L – ₹50L';
+    if (budget >= 1000000) return '₹10L – ₹25L';
+    return '₹5L – ₹10L';
+  };
+
+  const formatFunctions = (functions: string[]) => {
+    if (!functions || functions.length === 0) return 'Not set';
+    return functions.map(f => f.charAt(0).toUpperCase() + f.slice(1)).join(', ');
+  };
+
+  const userName = session?.name || 'Guest';
+  const userPhone = session?.phone || 'Not set';
+  const weddingDate = session?.wedding_date ? formatDate(session.wedding_date) : 'Not set';
+  const city = session?.city || 'Not set';
+  const budget = formatBudget(session?.budget);
+  const functions = formatFunctions(session?.functions);
+
+  const daysUntil = session?.wedding_date
+    ? Math.max(0, Math.ceil((new Date(session.wedding_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color="#C9A84C" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
 
+      {/* Edit Name Modal */}
+      <Modal visible={showEditModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Profile</Text>
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalInputLabel}>Your Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Enter your name"
+                placeholderTextColor="#8C7B6E"
+                value={editName}
+                onChangeText={setEditName}
+                autoFocus
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.modalBtn, savingEdit && { opacity: 0.6 }]}
+              onPress={handleSaveEdit}
+              disabled={savingEdit}
+            >
+              {savingEdit
+                ? <ActivityIndicator color="#F5F0E8" />
+                : <Text style={styles.modalBtnText}>Save Changes</Text>
+              }
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowEditModal(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Profile</Text>
         <TouchableOpacity
           style={styles.notificationsBtn}
           onPress={() => router.push('/notifications')}
         >
-          <Text style={styles.notificationsBtnText}>Notifications</Text>
+          <Text style={styles.notificationsBtnText}>🔔 Notifications</Text>
         </TouchableOpacity>
       </View>
 
@@ -34,14 +166,18 @@ export default function ProfileScreen() {
         {/* User Card */}
         <View style={styles.userCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>D</Text>
+            <Text style={styles.avatarText}>
+              {userName[0]?.toUpperCase() || 'G'}
+            </Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>Dev</Text>
-            <Text style={styles.userPhone}>+91 98765 43210</Text>
-            <Text style={styles.userWedding}>December 2025 · Delhi NCR</Text>
+            <Text style={styles.userName}>{userName}</Text>
+            <Text style={styles.userPhone}>{userPhone}</Text>
+            {daysUntil !== null && (
+              <Text style={styles.userWedding}>{daysUntil} days to go · {city}</Text>
+            )}
           </View>
-          <TouchableOpacity style={styles.editBtn}>
+          <TouchableOpacity style={styles.editBtn} onPress={() => setShowEditModal(true)}>
             <Text style={styles.editBtnText}>Edit</Text>
           </TouchableOpacity>
         </View>
@@ -49,16 +185,22 @@ export default function ProfileScreen() {
         {/* Subscription */}
         <View style={styles.subscriptionCard}>
           <View>
-            <Text style={styles.subscriptionPlan}>Basic Plan</Text>
-            <Text style={styles.subscriptionDetail}>3 vendor unlocks remaining</Text>
+            <Text style={styles.subscriptionPlan}>Premium Plan</Text>
+            <Text style={styles.subscriptionDetail}>Unlimited vendor access</Text>
           </View>
-          <TouchableOpacity style={styles.upgradeBtn}>
-            <Text style={styles.upgradeBtnText}>Upgrade</Text>
-          </TouchableOpacity>
+          <View style={styles.subscriptionBadge}>
+            <Text style={styles.subscriptionBadgeText}>Active</Text>
+          </View>
         </View>
 
         {/* Referral */}
-        <TouchableOpacity style={styles.referralCard}>
+        <TouchableOpacity
+          style={styles.referralCard}
+          onPress={() => Alert.alert(
+            'Invite a Friend',
+            'Share your referral link:\n\nthedreamwedding.com/invite/your-code\n\nGet 1 month Premium free when they sign up!'
+          )}
+        >
           <View style={styles.referralLeft}>
             <Text style={styles.referralTitle}>Invite a friend</Text>
             <Text style={styles.referralSub}>Get 1 month Premium free when they sign up</Text>
@@ -74,7 +216,13 @@ export default function ProfileScreen() {
               <Text style={styles.cardTitle}>No co-planner linked</Text>
               <Text style={styles.cardSub}>Invite your partner or parent to plan together</Text>
             </View>
-            <TouchableOpacity style={styles.linkBtn}>
+            <TouchableOpacity
+              style={styles.linkBtn}
+              onPress={() => Alert.alert(
+                'Invite Co-planner',
+                'Share this link with your partner:\n\nthedreamwedding.com/join/your-code\n\nLive sync coming soon!'
+              )}
+            >
               <Text style={styles.linkBtnText}>Invite</Text>
             </TouchableOpacity>
           </View>
@@ -85,20 +233,26 @@ export default function ProfileScreen() {
           <Text style={styles.sectionLabel}>Wedding Details</Text>
           <View style={styles.listCard}>
             {[
-              { key: 'Date', val: 'December 2025' },
-              { key: 'City', val: 'Delhi NCR' },
-              { key: 'Budget', val: '₹25L – ₹50L' },
-              { key: 'Functions', val: 'Mehendi, Sangeet, Wedding, Reception' },
+              { key: 'Date', val: weddingDate },
+              { key: 'City', val: city },
+              { key: 'Budget', val: budget },
+              { key: 'Functions', val: functions },
             ].map((item, index, arr) => (
               <View key={item.key}>
                 <View style={styles.listRow}>
                   <Text style={styles.listKey}>{item.key}</Text>
-                  <Text style={styles.listVal}>{item.val}</Text>
+                  <Text style={styles.listVal} numberOfLines={2}>{item.val}</Text>
                 </View>
                 {index < arr.length - 1 && <View style={styles.listDivider} />}
               </View>
             ))}
           </View>
+          <TouchableOpacity
+            style={styles.editDetailsBtn}
+            onPress={() => router.push('/onboarding')}
+          >
+            <Text style={styles.editDetailsBtnText}>Update wedding details →</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Notifications */}
@@ -132,14 +286,14 @@ export default function ProfileScreen() {
           <Text style={styles.sectionLabel}>Account</Text>
           <View style={styles.listCard}>
             {[
-              'Privacy Policy',
-              'Terms of Service',
-              'Help & Support',
-              'Rate DreamWedding',
+              { label: 'Privacy Policy', onPress: () => Alert.alert('Privacy Policy', 'Available at thedreamwedding.com/privacy') },
+              { label: 'Terms of Service', onPress: () => Alert.alert('Terms of Service', 'Available at thedreamwedding.com/terms') },
+              { label: 'Help & Support', onPress: () => Alert.alert('Support', 'Email us at hello@thedreamwedding.com') },
+              { label: 'Rate The Dream Wedding', onPress: () => Alert.alert('Thank you!', 'App Store rating coming when we launch on the store.') },
             ].map((item, index, arr) => (
-              <View key={item}>
-                <TouchableOpacity style={styles.listRow}>
-                  <Text style={styles.listKey}>{item}</Text>
+              <View key={item.label}>
+                <TouchableOpacity style={styles.listRow} onPress={item.onPress}>
+                  <Text style={styles.listKey}>{item.label}</Text>
                   <Text style={styles.listArrow}>›</Text>
                 </TouchableOpacity>
                 {index < arr.length - 1 && <View style={styles.listDivider} />}
@@ -149,18 +303,16 @@ export default function ProfileScreen() {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() => router.replace('/login')}
-        >
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutBtnText}>Log Out</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>DreamWedding v1.0.0</Text>
+        <Text style={styles.version}>The Dream Wedding v1.0.0</Text>
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
+      {/* Bottom Nav */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
           <Text style={styles.navLabel}>Home</Text>
@@ -182,310 +334,71 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F0E8',
-    paddingTop: 60,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 28,
-    color: '#2C2420',
-    fontWeight: '300',
-    letterSpacing: 0.5,
-  },
-  notificationsBtn: {
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    borderRadius: 50,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  notificationsBtnText: {
-    fontSize: 12,
-    color: '#8C7B6E',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    gap: 20,
-  },
-  userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    gap: 14,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#2C2420',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 20,
-    color: '#C9A84C',
-    fontWeight: '400',
-  },
-  userInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  userName: {
-    fontSize: 17,
-    color: '#2C2420',
-    fontWeight: '500',
-  },
-  userPhone: {
-    fontSize: 13,
-    color: '#8C7B6E',
-  },
-  userWedding: {
-    fontSize: 12,
-    color: '#C9A84C',
-  },
-  editBtn: {
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  editBtnText: {
-    fontSize: 13,
-    color: '#2C2420',
-  },
-  subscriptionCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFF8EC',
-    borderRadius: 14,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E8D9B5',
-  },
-  subscriptionPlan: {
-    fontSize: 15,
-    color: '#2C2420',
-    fontWeight: '500',
-  },
-  subscriptionDetail: {
-    fontSize: 12,
-    color: '#8C7B6E',
-    marginTop: 3,
-  },
-  upgradeBtn: {
-    backgroundColor: '#2C2420',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  upgradeBtnText: {
-    fontSize: 13,
-    color: '#F5F0E8',
-    fontWeight: '500',
-  },
-  referralCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-  },
-  referralLeft: {
-    flex: 1,
-    gap: 4,
-  },
-  referralTitle: {
-    fontSize: 15,
-    color: '#2C2420',
-    fontWeight: '500',
-  },
-  referralSub: {
-    fontSize: 12,
-    color: '#8C7B6E',
-    lineHeight: 18,
-  },
-  referralArrow: {
-    fontSize: 20,
-    color: '#C9A84C',
-  },
-  section: {
-    gap: 10,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    color: '#8C7B6E',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    fontWeight: '500',
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    gap: 12,
-  },
-  cardLeft: {
-    flex: 1,
-    gap: 3,
-  },
-  cardTitle: {
-    fontSize: 14,
-    color: '#2C2420',
-    fontWeight: '500',
-  },
-  cardSub: {
-    fontSize: 12,
-    color: '#8C7B6E',
-  },
-  linkBtn: {
-    borderWidth: 1,
-    borderColor: '#C9A84C',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  linkBtnText: {
-    fontSize: 13,
-    color: '#C9A84C',
-    fontWeight: '500',
-  },
-  listCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    overflow: 'hidden',
-  },
-  listRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  },
-  listKey: {
-    fontSize: 14,
-    color: '#2C2420',
-  },
-  listVal: {
-    fontSize: 13,
-    color: '#8C7B6E',
-    flex: 1,
-    textAlign: 'right',
-    marginLeft: 16,
-  },
-  listArrow: {
-    fontSize: 20,
-    color: '#C9A84C',
-  },
-  listDivider: {
-    height: 1,
-    backgroundColor: '#E8E0D5',
-    marginHorizontal: 16,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    color: '#2C2420',
-  },
-  toggle: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#E8E0D5',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  toggleActive: {
-    backgroundColor: '#2C2420',
-  },
-  toggleThumb: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#FFFFFF',
-  },
-  toggleThumbActive: {
-    alignSelf: 'flex-end',
-  },
-  logoutBtn: {
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  logoutBtnText: {
-    fontSize: 14,
-    color: '#E57373',
-    fontWeight: '500',
-  },
-  version: {
-    textAlign: 'center',
-    fontSize: 11,
-    color: '#8C7B6E',
-    letterSpacing: 0.5,
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 16,
-    paddingBottom: 28,
-    borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
-    backgroundColor: '#F5F0E8',
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-  },
-  navItem: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  navDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#C9A84C',
-  },
-  navLabel: {
-    fontSize: 12,
-    color: '#8C7B6E',
-    letterSpacing: 0.3,
-  },
-  navActive: {
-    color: '#2C2420',
-    fontWeight: '600',
-  },
+  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
+  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
+  title: { fontSize: 28, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
+  notificationsBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 50, paddingHorizontal: 14, paddingVertical: 7, backgroundColor: '#FFFFFF' },
+  notificationsBtnText: { fontSize: 12, color: '#8C7B6E' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 24, gap: 16, paddingBottom: 40 },
+  userCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8E0D5', gap: 14 },
+  avatar: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: 22, color: '#C9A84C', fontWeight: '400' },
+  userInfo: { flex: 1, gap: 4 },
+  userName: { fontSize: 18, color: '#2C2420', fontWeight: '500' },
+  userPhone: { fontSize: 13, color: '#8C7B6E' },
+  userWedding: { fontSize: 12, color: '#C9A84C' },
+  editBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7 },
+  editBtnText: { fontSize: 13, color: '#2C2420' },
+  subscriptionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#2C2420', borderRadius: 16, padding: 18 },
+  subscriptionPlan: { fontSize: 15, color: '#F5F0E8', fontWeight: '500' },
+  subscriptionDetail: { fontSize: 12, color: '#8C7B6E', marginTop: 3 },
+  subscriptionBadge: { backgroundColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 14, paddingVertical: 6 },
+  subscriptionBadgeText: { fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
+  referralCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF8EC', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8D9B5' },
+  referralLeft: { flex: 1, gap: 4 },
+  referralTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
+  referralSub: { fontSize: 12, color: '#8C7B6E', lineHeight: 18 },
+  referralArrow: { fontSize: 20, color: '#C9A84C' },
+  section: { gap: 10 },
+  sectionLabel: { fontSize: 12, color: '#8C7B6E', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: '500' },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
+  cardLeft: { flex: 1, gap: 3 },
+  cardTitle: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
+  cardSub: { fontSize: 12, color: '#8C7B6E' },
+  linkBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7 },
+  linkBtnText: { fontSize: 13, color: '#C9A84C', fontWeight: '500' },
+  listCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E8E0D5', overflow: 'hidden' },
+  listRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 16 },
+  listKey: { fontSize: 14, color: '#2C2420' },
+  listVal: { fontSize: 13, color: '#8C7B6E', flex: 1, textAlign: 'right', marginLeft: 16 },
+  listArrow: { fontSize: 20, color: '#C9A84C' },
+  listDivider: { height: 1, backgroundColor: '#E8E0D5', marginHorizontal: 16 },
+  editDetailsBtn: { paddingVertical: 8, alignItems: 'center' },
+  editDetailsBtnText: { fontSize: 13, color: '#C9A84C', letterSpacing: 0.3 },
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 16 },
+  toggleLabel: { fontSize: 14, color: '#2C2420' },
+  toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: '#E8E0D5', justifyContent: 'center', paddingHorizontal: 2 },
+  toggleActive: { backgroundColor: '#2C2420' },
+  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF' },
+  toggleThumbActive: { alignSelf: 'flex-end' },
+  logoutBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 12, paddingVertical: 16, alignItems: 'center', backgroundColor: '#FFFFFF' },
+  logoutBtnText: { fontSize: 14, color: '#E57373', fontWeight: '500' },
+  version: { textAlign: 'center', fontSize: 11, color: '#8C7B6E', letterSpacing: 0.5 },
+  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8', position: 'absolute', bottom: 0, width: '100%' },
+  navItem: { alignItems: 'center', gap: 4 },
+  navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C9A84C' },
+  navLabel: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.3 },
+  navActive: { color: '#2C2420', fontWeight: '600' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: '#F5F0E8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 28, gap: 16 },
+  modalTitle: { fontSize: 22, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
+  modalInputGroup: { gap: 8 },
+  modalInputLabel: { fontSize: 13, color: '#8C7B6E', letterSpacing: 0.3 },
+  modalInput: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 14, paddingHorizontal: 16, fontSize: 15, color: '#2C2420' },
+  modalBtn: { backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 16, alignItems: 'center' },
+  modalBtnText: { fontSize: 15, color: '#F5F0E8', fontWeight: '500' },
+  modalCancel: { alignItems: 'center', paddingVertical: 8 },
+  modalCancelText: { fontSize: 14, color: '#8C7B6E' },
 });

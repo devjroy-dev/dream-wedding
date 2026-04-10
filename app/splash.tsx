@@ -1,89 +1,92 @@
-import { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, Animated } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, ActivityIndicator } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
-export default function SplashScreen() {
+function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  const segments = useSegments();
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 1200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      Animated.sequence([
-        Animated.delay(1500),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        router.replace('/login');
-      });
-    });
+    checkSession();
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <Animated.View style={[
-        styles.centerContent,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }]
-        }
-      ]}>
-        <Text style={styles.taglineMain}>Your Dream Wedding.</Text>
-        <Text style={styles.taglineSub}>It all starts here.</Text>
-        <View style={styles.divider} />
-      </Animated.View>
-    </View>
-  );
+  const checkSession = async () => {
+    try {
+      const currentScreen = segments[0] as string;
+
+      // These screens never need auth checks — let them through always
+      const openScreens = [
+        'index', 'splash', 'login', 'otp',
+        'user-type', 'onboarding',
+        'vendor-login', 'vendor-onboarding',
+        undefined
+      ];
+
+      if (openScreens.includes(currentScreen)) {
+        setChecking(false);
+        return;
+      }
+
+      const user = await AsyncStorage.getItem('user_session');
+      const vendorUser = await AsyncStorage.getItem('vendor_session');
+
+      if (!user && !vendorUser) {
+        router.replace('/login');
+      }
+    } catch (e) {
+      router.replace('/login');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (checking) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color="#C9A84C" />
+      </View>
+    );
+  }
+
+  return <>{children}</>;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    width,
-    height,
-    backgroundColor: '#F5F0E8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  centerContent: {
-    alignItems: 'center',
-    gap: 16,
-  },
-  taglineMain: {
-    fontSize: 30,
-    color: '#2C2420',
-    fontWeight: '300',
-    letterSpacing: 2,
-    textAlign: 'center',
-  },
-  taglineSub: {
-    fontSize: 16,
-    color: '#8C7B6E',
-    fontWeight: '300',
-    letterSpacing: 3,
-    textAlign: 'center',
-  },
-  divider: {
-    width: 40,
-    height: 1,
-    backgroundColor: '#C9A84C',
-    opacity: 0.8,
-    marginTop: 8,
-  },
-});
+export default function RootLayout() {
+  return (
+    <>
+      <StatusBar style="dark" />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="splash" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="otp" />
+          <Stack.Screen name="user-type" />
+          <Stack.Screen name="onboarding" />
+          <Stack.Screen name="home" />
+          <Stack.Screen name="vendor-login" />
+          <Stack.Screen name="vendor-onboarding" />
+          <Stack.Screen name="vendor-dashboard" />
+          <Stack.Screen name="vendor-preview" />
+          <Stack.Screen name="filter" />
+          <Stack.Screen name="swipe" />
+          <Stack.Screen name="vendor-profile" />
+          <Stack.Screen name="moodboard" />
+          <Stack.Screen name="bts-planner" />
+          <Stack.Screen name="profile" />
+          <Stack.Screen name="inquiry" />
+          <Stack.Screen name="payment" />
+          <Stack.Screen name="payment-success" />
+          <Stack.Screen name="messaging" />
+          <Stack.Screen name="compare" />
+          <Stack.Screen name="notifications" />
+          <Stack.Screen name="lookalike" />
+          <Stack.Screen name="wedding-website" />
+        </Stack>
+      </AuthGate>
+    </>
+  );
+}

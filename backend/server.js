@@ -402,7 +402,224 @@ app.post('/api/seed', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// ==================
+// ESCROW & BOOKING CONFIRMATION
+// ==================
 
+// Vendor confirms booking — releases escrow to vendor
+app.post('/api/bookings/:id/confirm', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get booking
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    if (booking.status !== 'pending_confirmation') {
+      return res.status(400).json({ success: false, error: 'Booking is not pending confirmation' });
+    }
+
+    // Update booking status to confirmed
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({
+        status: 'confirmed',
+        confirmed_at: new Date().toISOString(),
+        escrow_status: 'released_to_vendor',
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Create notification for couple
+    await supabase.from('notifications').insert([{
+      user_id: booking.user_id,
+      title: 'Booking Confirmed!',
+      message: `Your booking with ${booking.vendor_name} has been confirmed. Your date is locked!`,
+      type: 'booking_confirmed',
+      read: false,
+    }]);
+
+    res.json({ success: true, data, message: 'Booking confirmed. Escrow released to vendor.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Vendor declines booking — refunds token to couple, platform keeps ₹999
+app.post('/api/bookings/:id/decline', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({
+        status: 'declined',
+        declined_at: new Date().toISOString(),
+        decline_reason: reason || 'Vendor unavailable',
+        escrow_status: 'refunded_to_couple',
+        platform_fee_retained: true, // ₹999 kept by platform
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Notify couple of refund
+    await supabase.from('notifications').insert([{
+      user_id: booking.user_id,
+      title: 'Booking Declined — Refund Initiated',
+      message: `${booking.vendor_name} was unable to confirm your booking. Your token of ₹${booking.token_amount?.toLocaleString('en-IN')} will be refunded within 3-5 business days. Your ₹999 booking protection fee is non-refundable.`,
+      type: 'booking_declined',
+      read: false,
+    }]);
+
+    res.json({ success: true, data, message: 'Booking declined. Token refund initiated. Platform fee retained.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Auto-refund check — run this via cron or call manually
+// Refunds all bookings where vendor hasn't confirmed within 48 hours
+app.post('/api/bookings/check-expired', async (req, res) => {
+  try {
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+    // Find all pending bookings older than 48 hours
+    const { data: expiredBookings, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('status', 'pending_confirmation')
+      .lt('created_at', cutoff);
+
+    if (fetchError) throw fetchError;
+    if (!expiredBookings || expiredBookings.length === 0) {
+      return res.json({ success: true, message: 'No expired bookings found', refunded: 0 });
+    }
+
+    // Update all expired bookings
+    const ids = expiredBookings.map(b => b.id);
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        status: 'auto_refunded',
+        escrow_status: 'refunded_to_couple',
+        platform_fee_retained: true,
+        auto_refunded_at: new Date().toISOString(),
+      })
+      .in('id', ids);
+
+    if (updateError) throw updateError;
+
+    // Notify each couple
+    const notifications = expiredBookings.map(booking => ({
+      user_id: booking.user_id,
+      title: 'Auto-Refund Initiated',
+      message: `${booking.vendor_name} did not confirm within 48 hours. Your token of ₹${booking.token_amount?.toLocaleString('en-IN')} will be refunded within 3-5 business days. Your ₹999 booking protection fee is non-refundable.`,
+      type: 'auto_refund',
+      read: false,
+    }));
+
+    await supabase.from('notifications').insert(notifications);
+
+    res.json({
+      success: true,
+      message: `${expiredBookings.length} expired bookings auto-refunded`,
+      refunded: expiredBookings.length,
+      bookingIds: ids,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get booking details with escrow status
+app.get('/api/bookings/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*, vendors(*), users(*)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Vendor cancels AFTER confirming — couple gets refund, platform keeps ₹999
+app.post('/api/bookings/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    if (booking.status !== 'confirmed') {
+      return res.status(400).json({ success: false, error: 'Only confirmed bookings can be cancelled' });
+    }
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({
+        status: 'cancelled_by_vendor',
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: reason || 'Vendor cancelled',
+        escrow_status: 'refunded_to_couple',
+        platform_fee_retained: true,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Notify couple
+    await supabase.from('notifications').insert([{
+      user_id: booking.user_id,
+      title: 'Vendor Cancelled — Refund Initiated',
+      message: `Unfortunately ${booking.vendor_name} had to cancel your booking. Your full token of ₹${booking.token_amount?.toLocaleString('en-IN')} will be refunded within 3-5 business days.`,
+      type: 'booking_cancelled',
+      read: false,
+    }]);
+
+    res.json({ success: true, data, message: 'Booking cancelled. Full token refund initiated.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);

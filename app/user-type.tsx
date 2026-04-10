@@ -1,7 +1,6 @@
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-
-const { width, height } = Dimensions.get('window');
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const USER_TYPES = [
   {
@@ -9,28 +8,46 @@ const USER_TYPES = [
     label: 'We are a Couple',
     sub: 'Planning our dream wedding together',
     route: '/onboarding',
+    userType: 'couple',
   },
   {
     id: 'parent',
     label: 'I am a Parent',
     sub: 'Planning my son or daughter\'s wedding',
     route: '/onboarding',
+    userType: 'parent',
   },
   {
     id: 'vendor',
     label: 'I am a Vendor',
     sub: 'Photographer, venue, MUA or other professional',
-    route: '/vendor-onboarding',
+    route: '/vendor-login',
+    userType: 'vendor',
   },
 ];
 
 export default function UserTypeScreen() {
   const router = useRouter();
 
+  const handleSelect = async (type: typeof USER_TYPES[0]) => {
+    try {
+      // Update session with user type
+      const existing = await AsyncStorage.getItem('user_session');
+      const parsed = existing ? JSON.parse(existing) : {};
+      await AsyncStorage.setItem('user_session', JSON.stringify({
+        ...parsed,
+        userType: type.userType,
+      }));
+    } catch (e) {}
+    router.replace(type.route as any);
+  };
+
   return (
     <View style={styles.container}>
+
       <View style={styles.header}>
-        <Text style={styles.logo}>DreamWedding</Text>
+        <Text style={styles.logoTop}>The</Text>
+        <Text style={styles.logoMain}>Dream Wedding</Text>
         <View style={styles.logoDivider} />
       </View>
 
@@ -43,7 +60,7 @@ export default function UserTypeScreen() {
             <View key={type.id}>
               <TouchableOpacity
                 style={styles.row}
-                onPress={() => router.replace(type.route as any)}
+                onPress={() => handleSelect(type)}
               >
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>{type.label}</Text>
@@ -55,7 +72,12 @@ export default function UserTypeScreen() {
             </View>
           ))}
         </View>
+
+        <Text style={styles.note}>
+          You can always switch later from your profile settings
+        </Text>
       </View>
+
     </View>
   );
 }
@@ -69,20 +91,28 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    gap: 14,
+    gap: 6,
     marginBottom: 64,
   },
-  logo: {
-    fontSize: 28,
-    color: '#2C2420',
+  logoTop: {
+    fontSize: 14,
+    color: '#8C7B6E',
     fontWeight: '300',
-    letterSpacing: 8,
+    letterSpacing: 6,
+    textTransform: 'uppercase',
+  },
+  logoMain: {
+    fontSize: 30,
+    color: '#2C2420',
+    fontWeight: '500',
+    letterSpacing: 3,
+    textAlign: 'center',
   },
   logoDivider: {
     width: 36,
-    height: 1,
+    height: 1.5,
     backgroundColor: '#C9A84C',
-    opacity: 0.6,
+    marginTop: 6,
   },
   content: {
     flex: 1,
@@ -101,11 +131,16 @@ const styles = StyleSheet.create({
   },
   list: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E8E0D5',
     overflow: 'hidden',
     marginTop: 8,
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
   },
   row: {
     flexDirection: 'row',
@@ -135,5 +170,11 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#E8E0D5',
     marginHorizontal: 20,
+  },
+  note: {
+    fontSize: 12,
+    color: '#8C7B6E',
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
 });

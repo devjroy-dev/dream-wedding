@@ -2,47 +2,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+  ActivityIndicator, Alert, Dimensions, Image, Modal,
+  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uploadImage } from '../services/cloudinary';
 import { generateInvoicePDF, generateInvoiceNumber } from '../services/invoice';
-import { getBenchmark } from '../services/api';
+import { getBenchmark, getLeads, getInvoices } from '../services/api';
 
 const { width } = Dimensions.get('window');
 
 const TABS = ['Overview', 'Inquiries', 'Calendar', 'Tools', 'Reviews', 'Clients'];
 
-const MOCK_INQUIRIES = [
-  { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi, I\'m Priya, interested in Photography for Wedding on Dec 15. Are you available?', status: 'new' },
-  { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Hi, I\'m Sneha, interested in Photography for Sangeet on Nov 20. Are you available?', status: 'replied' },
-  { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Hi, I\'m Ananya, interested in Photography for Reception on Jan 5. Are you available?', status: 'new' },
-];
-
 const BLOCKED_DATES = ['Dec 10, 2025', 'Dec 15, 2025', 'Dec 22, 2025', 'Jan 1, 2026'];
-
-const LEAD_PIPELINE = [
-  { id: '1', name: 'Priya & Rahul', stage: 'New Inquiry', date: 'Dec 15', value: '₹3,00,000' },
-  { id: '2', name: 'Sneha & Arjun', stage: 'Quoted', date: 'Nov 20', value: '₹1,50,000' },
-  { id: '3', name: 'Ananya & Dev', stage: 'New Inquiry', date: 'Jan 5', value: '₹3,00,000' },
-  { id: '4', name: 'Kavya & Rohan', stage: 'Token Received', date: 'Feb 14', value: '₹3,00,000' },
-  { id: '5', name: 'Meera & Vikram', stage: 'Completed', date: 'Oct 10', value: '₹3,00,000' },
-];
-
-const INITIAL_CLIENTS = [
-  { id: '1', name: 'Rohit & Simran', phone: '9876543210', wedding_date: 'March 15, 2026', status: 'upcoming', invited: false },
-  { id: '2', name: 'Amit & Pooja', phone: '9988776655', wedding_date: 'February 8, 2026', status: 'upcoming', invited: true },
-  { id: '3', name: 'Vikram & Neha', phone: '9123456789', wedding_date: 'October 20, 2025', status: 'completed', invited: false },
-];
 
 const STAGE_COLORS: Record<string, string> = {
   'New Inquiry': '#C9A84C',
@@ -56,31 +28,97 @@ const PROMOS = [
   { id: '2', title: 'Free Pre-Wedding Shoot', expires: 'Dec 15, 2025', active: false, leads: 0 },
 ];
 
+const INITIAL_CLIENTS = [
+  { id: '1', name: 'Rohit & Simran', phone: '9876543210', wedding_date: 'March 15, 2026', status: 'upcoming', invited: false },
+  { id: '2', name: 'Amit & Pooja', phone: '9988776655', wedding_date: 'February 8, 2026', status: 'upcoming', invited: true },
+  { id: '3', name: 'Vikram & Neha', phone: '9123456789', wedding_date: 'October 20, 2025', status: 'completed', invited: false },
+];
+
 export default function VendorDashboardScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Overview');
   const [isLive, setIsLive] = useState(true);
+  const [vendorSession, setVendorSession] = useState<any>(null);
+
+  // Tools state
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [invoiceClient, setInvoiceClient] = useState('');
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Clients state
   const [clients, setClients] = useState(INITIAL_CLIENTS);
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
   const [newClientDate, setNewClientDate] = useState('');
+
+  // Promo state
   const [promos, setPromos] = useState(PROMOS);
   const [showPromoForm, setShowPromoForm] = useState(false);
   const [newPromoTitle, setNewPromoTitle] = useState('');
   const [newPromoExpiry, setNewPromoExpiry] = useState('');
+
+  // Data state
   const [benchmark, setBenchmark] = useState<any>(null);
+  const [leads, setLeads] = useState<any[]>([]);
+  const [leadsLoading, setLeadsLoading] = useState(false);
 
   useEffect(() => {
-    getBenchmark('photographers', 'Delhi NCR')
-      .then(res => { if (res.success) setBenchmark(res.data); })
-      .catch(() => {});
+    loadSession();
   }, []);
+
+  useEffect(() => {
+    if (vendorSession?.vendorId) {
+      loadBenchmark();
+      if (activeTab === 'Inquiries') loadLeads();
+    }
+  }, [vendorSession, activeTab]);
+
+  const loadSession = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('vendor_session');
+      if (stored) setVendorSession(JSON.parse(stored));
+    } catch (e) {}
+  };
+
+  const loadBenchmark = async () => {
+    try {
+      const category = vendorSession?.category || 'photographers';
+      const city = vendorSession?.city || 'Delhi NCR';
+      const res = await getBenchmark(category, city);
+      if (res.success) setBenchmark(res.data);
+    } catch (e) {}
+  };
+
+  const loadLeads = async () => {
+    try {
+      setLeadsLoading(true);
+      const res = await getLeads(vendorSession.vendorId);
+      if (res.success && res.data?.length > 0) setLeads(res.data);
+    } catch (e) {}
+    finally { setLeadsLoading(false); }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            await AsyncStorage.removeItem('vendor_session');
+            await AsyncStorage.removeItem('user_session');
+            router.replace('/login');
+          }
+        }
+      ]
+    );
+  };
 
   const handleImageUpload = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -99,7 +137,7 @@ export default function VendorDashboardScreen() {
         const url = await uploadImage(result.assets[0].uri);
         setPortfolioImages(prev => [...prev, url]);
         Alert.alert('Uploaded!', 'Photo added to your portfolio.');
-      } catch (error) {
+      } catch {
         Alert.alert('Upload failed', 'Please try again.');
       } finally {
         setUploadingImage(false);
@@ -140,16 +178,16 @@ export default function VendorDashboardScreen() {
     }
     try {
       await generateInvoicePDF({
-        vendorName: 'Arjun Mehta Photography',
-        vendorPhone: '9999999999',
-        vendorCity: 'Delhi NCR',
+        vendorName: vendorSession?.vendorName || 'Your Business',
+        vendorPhone: vendorSession?.phone || '',
+        vendorCity: vendorSession?.city || '',
         clientName: invoiceClient,
         amount: parseInt(invoiceAmount),
-        description: 'Wedding Photography Services',
+        description: 'Wedding Services',
         invoiceNumber: generateInvoiceNumber(),
         date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }),
       });
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Could not generate invoice. Please try again.');
     }
   };
@@ -159,19 +197,39 @@ export default function VendorDashboardScreen() {
       Alert.alert('Missing info', 'Please fill in all fields.');
       return;
     }
-    const newPromo = {
+    setPromos(prev => [...prev, {
       id: Date.now().toString(),
       title: newPromoTitle,
       expires: newPromoExpiry,
       active: true,
       leads: 0,
-    };
-    setPromos(prev => [...prev, newPromo]);
+    }]);
     setNewPromoTitle('');
     setNewPromoExpiry('');
     setShowPromoForm(false);
     Alert.alert('Promo Live!', 'Couples in your city will be notified of your offer.');
   };
+
+  const vendorName = vendorSession?.vendorName || 'Your Business';
+  const vendorCategory = vendorSession?.category
+    ? vendorSession.category.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
+    : 'Vendor';
+  const vendorCity = vendorSession?.city || '';
+  const vendorPlan = vendorSession?.plan || 'basic';
+
+  const displayLeads = leads.length > 0 ? leads : [
+    { id: '1', name: 'Priya & Rahul', stage: 'New Inquiry', date: 'Dec 15', value: '₹3,00,000' },
+    { id: '2', name: 'Sneha & Arjun', stage: 'Quoted', date: 'Nov 20', value: '₹1,50,000' },
+    { id: '3', name: 'Ananya & Dev', stage: 'New Inquiry', date: 'Jan 5', value: '₹3,00,000' },
+    { id: '4', name: 'Kavya & Rohan', stage: 'Token Received', date: 'Feb 14', value: '₹3,00,000' },
+    { id: '5', name: 'Meera & Vikram', stage: 'Completed', date: 'Oct 10', value: '₹3,00,000' },
+  ];
+
+  const MOCK_INQUIRIES = [
+    { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi, I\'m interested in your services for my Wedding on Dec 15. Are you available?', status: 'new' },
+    { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Hi, I\'m interested in your services for Sangeet on Nov 20. Are you available?', status: 'replied' },
+    { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Hi, I\'m interested in your services for Reception on Jan 5. Are you available?', status: 'new' },
+  ];
 
   return (
     <View style={styles.container}>
@@ -216,12 +274,17 @@ export default function VendorDashboardScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.businessName}>Arjun Mehta Photography</Text>
-          <Text style={styles.category}>Photographer · Delhi NCR</Text>
+          <Text style={styles.businessName}>{vendorName}</Text>
+          <Text style={styles.category}>{vendorCategory}{vendorCity ? ` · ${vendorCity}` : ''}</Text>
         </View>
-        <TouchableOpacity style={[styles.liveToggle, isLive && styles.liveToggleActive]} onPress={() => setIsLive(!isLive)}>
+        <TouchableOpacity
+          style={[styles.liveToggle, isLive && styles.liveToggleActive]}
+          onPress={() => setIsLive(!isLive)}
+        >
           <View style={[styles.liveDot, isLive && styles.liveDotActive]} />
-          <Text style={[styles.liveToggleText, isLive && styles.liveToggleTextActive]}>{isLive ? 'Live' : 'Paused'}</Text>
+          <Text style={[styles.liveToggleText, isLive && styles.liveToggleTextActive]}>
+            {isLive ? 'Live' : 'Paused'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -275,11 +338,15 @@ export default function VendorDashboardScreen() {
 
             <View style={styles.subscriptionCard}>
               <View>
-                <Text style={styles.subscriptionPlan}>Premium Plan</Text>
-                <Text style={styles.subscriptionDetail}>Renews January 1, 2026</Text>
+                <Text style={styles.subscriptionPlan}>
+                  {vendorPlan === 'premium' ? 'Premium Plan' : 'Basic Plan'}
+                </Text>
+                <Text style={styles.subscriptionDetail}>
+                  {vendorPlan === 'premium' ? 'Priority placement active' : 'Upgrade for priority placement'}
+                </Text>
               </View>
               <View style={styles.verifiedBadge}>
-                <Text style={styles.verifiedBadgeText}>✓ Verified</Text>
+                <Text style={styles.verifiedBadgeText}>✓ Active</Text>
               </View>
             </View>
 
@@ -288,10 +355,10 @@ export default function VendorDashboardScreen() {
               {benchmark ? (
                 <>
                   <Text style={styles.benchmarkText}>
-                    Average starting price for photographers in Delhi NCR is ₹{benchmark.avgStartingPrice.toLocaleString('en-IN')} across {benchmark.vendorCount} vendors. Average rating: {benchmark.avgRating}★
+                    Average starting price for {vendorCategory} in {vendorCity} is ₹{benchmark.avgStartingPrice?.toLocaleString('en-IN')} across {benchmark.vendorCount} vendors.
                   </Text>
                   <Text style={[styles.benchmarkText, { color: '#C9A84C', marginTop: 4 }]}>
-                    Range: ₹{benchmark.minStartingPrice.toLocaleString('en-IN')} – ₹{benchmark.maxStartingPrice.toLocaleString('en-IN')}
+                    Range: ₹{benchmark.minStartingPrice?.toLocaleString('en-IN')} – ₹{benchmark.maxStartingPrice?.toLocaleString('en-IN')}
                   </Text>
                 </>
               ) : (
@@ -328,25 +395,31 @@ export default function VendorDashboardScreen() {
         {activeTab === 'Inquiries' && (
           <View style={styles.tabPane}>
             <Text style={styles.sectionLabel}>Lead Pipeline</Text>
-            <View style={styles.listCard}>
-              {LEAD_PIPELINE.map((lead, index) => (
-                <View key={lead.id}>
-                  <View style={styles.leadRow}>
-                    <View style={styles.leadInfo}>
-                      <Text style={styles.leadName}>{lead.name}</Text>
-                      <Text style={styles.leadDate}>{lead.date}</Text>
-                    </View>
-                    <View style={styles.leadRight}>
-                      <Text style={styles.leadValue}>{lead.value}</Text>
-                      <View style={[styles.stageBadge, { backgroundColor: STAGE_COLORS[lead.stage] + '20' }]}>
-                        <Text style={[styles.stageBadgeText, { color: STAGE_COLORS[lead.stage] }]}>{lead.stage}</Text>
+            {leadsLoading ? (
+              <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
+            ) : (
+              <View style={styles.listCard}>
+                {displayLeads.map((lead: any, index: number) => (
+                  <View key={lead.id}>
+                    <View style={styles.leadRow}>
+                      <View style={styles.leadInfo}>
+                        <Text style={styles.leadName}>{lead.name}</Text>
+                        <Text style={styles.leadDate}>{lead.date}</Text>
+                      </View>
+                      <View style={styles.leadRight}>
+                        <Text style={styles.leadValue}>{lead.value}</Text>
+                        <View style={[styles.stageBadge, { backgroundColor: (STAGE_COLORS[lead.stage] || '#8C7B6E') + '20' }]}>
+                          <Text style={[styles.stageBadgeText, { color: STAGE_COLORS[lead.stage] || '#8C7B6E' }]}>
+                            {lead.stage}
+                          </Text>
+                        </View>
                       </View>
                     </View>
+                    {index < displayLeads.length - 1 && <View style={styles.listDivider} />}
                   </View>
-                  {index < LEAD_PIPELINE.length - 1 && <View style={styles.listDivider} />}
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
+            )}
 
             <Text style={styles.sectionLabel}>Incoming Inquiries</Text>
             {MOCK_INQUIRIES.map(inquiry => (
@@ -365,7 +438,7 @@ export default function VendorDashboardScreen() {
                 <Text style={styles.inquiryMessage} numberOfLines={2}>"{inquiry.message}"</Text>
                 {inquiry.status === 'new' && (
                   <View style={styles.inquiryActions}>
-                    <TouchableOpacity style={styles.replyBtn}>
+                    <TouchableOpacity style={styles.replyBtn} onPress={() => router.push('/messaging')}>
                       <Text style={styles.replyBtnText}>Reply</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.confirmBtn}>
@@ -382,7 +455,7 @@ export default function VendorDashboardScreen() {
         {activeTab === 'Calendar' && (
           <View style={styles.tabPane}>
             <Text style={styles.sectionLabel}>Availability</Text>
-            <Text style={styles.calendarHint}>Block dates you're already booked so you don't appear in couples' filtered search</Text>
+            <Text style={styles.calendarHint}>Block dates you're already booked so couples see accurate availability</Text>
             <View style={styles.listCard}>
               <View style={styles.blockedHeader}>
                 <Text style={styles.blockedTitle}>Blocked Dates</Text>
@@ -399,7 +472,10 @@ export default function VendorDashboardScreen() {
                 </View>
               ))}
             </View>
-            <TouchableOpacity style={styles.blockDateBtn}>
+            <TouchableOpacity
+              style={styles.blockDateBtn}
+              onPress={() => Alert.alert('Block a Date', 'Full calendar integration coming soon. Your blocked dates are saved.')}
+            >
               <Text style={styles.blockDateBtnText}>+ Block a Date</Text>
             </TouchableOpacity>
           </View>
@@ -440,7 +516,10 @@ export default function VendorDashboardScreen() {
               <View style={styles.toolHeader}>
                 <Text style={styles.toolTitle}>Portfolio Photos</Text>
                 <TouchableOpacity style={styles.toolAction} onPress={handleImageUpload} disabled={uploadingImage}>
-                  {uploadingImage ? <ActivityIndicator size="small" color="#C9A84C" /> : <Text style={styles.toolActionText}>+ Upload</Text>}
+                  {uploadingImage
+                    ? <ActivityIndicator size="small" color="#C9A84C" />
+                    : <Text style={styles.toolActionText}>+ Upload</Text>
+                  }
                 </TouchableOpacity>
               </View>
               <Text style={styles.toolDesc}>Upload photos to your public portfolio</Text>
@@ -460,7 +539,7 @@ export default function VendorDashboardScreen() {
                   <Text style={styles.toolActionText}>{showInvoiceForm ? 'Cancel' : 'Create Invoice'}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Create and send professional invoices with auto GST calculation</Text>
+              <Text style={styles.toolDesc}>Professional invoices with auto GST calculation</Text>
               {showInvoiceForm && (
                 <View style={styles.invoiceForm}>
                   <TextInput style={styles.invoiceInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={invoiceClient} onChangeText={setInvoiceClient} />
@@ -472,7 +551,7 @@ export default function VendorDashboardScreen() {
                     </View>
                   ) : null}
                   <TouchableOpacity style={styles.generateBtn} onPress={handleGenerateInvoice}>
-                    <Text style={styles.generateBtnText}>Generate Invoice</Text>
+                    <Text style={styles.generateBtnText}>Generate Invoice PDF</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -480,80 +559,8 @@ export default function VendorDashboardScreen() {
 
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Contract Templates</Text>
-                <TouchableOpacity style={styles.toolAction}>
-                  <Text style={styles.toolActionText}>View</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.toolDesc}>Standard wedding photography contracts ready to send</Text>
-              <View style={styles.templateList}>
-                {['Full Day Coverage', 'Pre-Wedding Shoot', 'Album Package'].map((template, index, arr) => (
-                  <View key={template}>
-                    <TouchableOpacity style={styles.templateRow}>
-                      <Text style={styles.templateName}>{template}</Text>
-                      <Text style={styles.templateArrow}>›</Text>
-                    </TouchableOpacity>
-                    {index < arr.length - 1 && <View style={styles.listDivider} />}
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.toolCard}>
-              <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Payment Tracker</Text>
-                <TouchableOpacity style={styles.toolAction}>
-                  <Text style={styles.toolActionText}>View All</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.toolDesc}>Track all incoming payments and pending amounts</Text>
-              <View style={styles.paymentTrackerRow}>
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={styles.paymentTrackerAmount}>₹9L</Text>
-                  <Text style={styles.paymentTrackerLabel}>Received</Text>
-                </View>
-                <View style={styles.paymentTrackerDivider} />
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={[styles.paymentTrackerAmount, { color: '#C9A84C' }]}>₹6L</Text>
-                  <Text style={styles.paymentTrackerLabel}>Pending</Text>
-                </View>
-                <View style={styles.paymentTrackerDivider} />
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={styles.paymentTrackerAmount}>₹60K</Text>
-                  <Text style={styles.paymentTrackerLabel}>In Escrow</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.toolCard}>
-              <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Portfolio Analytics</Text>
-                <TouchableOpacity style={styles.toolAction}>
-                  <Text style={styles.toolActionText}>View</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.toolDesc}>See which photos get the most saves and views</Text>
-              <View style={styles.analyticsList}>
-                {[
-                  { photo: 'Beach Wedding Shot', saves: 47, views: 312 },
-                  { photo: 'Bridal Portrait', saves: 38, views: 289 },
-                  { photo: 'Candid Reception', saves: 31, views: 198 },
-                ].map((item, index, arr) => (
-                  <View key={item.photo}>
-                    <View style={styles.analyticsRow}>
-                      <Text style={styles.analyticsPhoto}>{item.photo}</Text>
-                      <Text style={styles.analyticsStats}>{item.saves} saves · {item.views} views</Text>
-                    </View>
-                    {index < arr.length - 1 && <View style={styles.listDivider} />}
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.toolCard}>
-              <View style={styles.toolHeader}>
                 <Text style={styles.toolTitle}>GST & Tax Summary</Text>
-                <TouchableOpacity style={styles.toolAction}>
+                <TouchableOpacity style={styles.toolAction} onPress={() => Alert.alert('Coming Soon', 'Annual GST report PDF download is being built.')}>
                   <Text style={styles.toolActionText}>Download</Text>
                 </TouchableOpacity>
               </View>
@@ -576,12 +583,57 @@ export default function VendorDashboardScreen() {
 
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
+                <Text style={styles.toolTitle}>Payment Tracker</Text>
+              </View>
+              <Text style={styles.toolDesc}>Track all incoming payments and pending amounts</Text>
+              <View style={styles.paymentTrackerRow}>
+                <View style={styles.paymentTrackerItem}>
+                  <Text style={styles.paymentTrackerAmount}>₹9L</Text>
+                  <Text style={styles.paymentTrackerLabel}>Received</Text>
+                </View>
+                <View style={styles.paymentTrackerDivider} />
+                <View style={styles.paymentTrackerItem}>
+                  <Text style={[styles.paymentTrackerAmount, { color: '#C9A84C' }]}>₹6L</Text>
+                  <Text style={styles.paymentTrackerLabel}>Pending</Text>
+                </View>
+                <View style={styles.paymentTrackerDivider} />
+                <View style={styles.paymentTrackerItem}>
+                  <Text style={styles.paymentTrackerAmount}>₹60K</Text>
+                  <Text style={styles.paymentTrackerLabel}>In Escrow</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
                 <Text style={styles.toolTitle}>Refer a Vendor</Text>
-                <TouchableOpacity style={styles.toolAction}>
+                <TouchableOpacity style={styles.toolAction} onPress={() => Alert.alert('Refer a Vendor', 'Share your referral link:\n\nthedreamwedding.com/vendor-refer/your-code\n\nGet 1 month free when they join!')}>
                   <Text style={styles.toolActionText}>Share Link</Text>
                 </TouchableOpacity>
               </View>
               <Text style={styles.toolDesc}>Refer another vendor and get 1 month subscription free</Text>
+            </View>
+
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <Text style={styles.toolTitle}>Portfolio Analytics</Text>
+              </View>
+              <Text style={styles.toolDesc}>See which photos get the most saves and views</Text>
+              <View style={styles.analyticsList}>
+                {[
+                  { photo: 'Top portfolio image', saves: 47, views: 312 },
+                  { photo: 'Second image', saves: 38, views: 289 },
+                  { photo: 'Third image', saves: 31, views: 198 },
+                ].map((item, index, arr) => (
+                  <View key={item.photo}>
+                    <View style={styles.analyticsRow}>
+                      <Text style={styles.analyticsPhoto}>{item.photo}</Text>
+                      <Text style={styles.analyticsStats}>{item.saves} saves · {item.views} views</Text>
+                    </View>
+                    {index < arr.length - 1 && <View style={styles.listDivider} />}
+                  </View>
+                ))}
+              </View>
             </View>
           </View>
         )}
@@ -593,6 +645,7 @@ export default function VendorDashboardScreen() {
               <Text style={styles.ratingBig}>4.9</Text>
               <Text style={styles.ratingStars}>★★★★★</Text>
               <Text style={styles.ratingCount}>124 reviews</Text>
+              <Text style={styles.ratingNote}>Only app-booked couples can leave reviews</Text>
             </View>
             <Text style={styles.sectionLabel}>Video Reviews</Text>
             {[
@@ -630,7 +683,7 @@ export default function VendorDashboardScreen() {
             <View style={styles.viralCard}>
               <Text style={styles.viralTitle}>Your network is your growth engine</Text>
               <Text style={styles.viralText}>
-                Add your existing clients to The Dream Wedding. They'll get onboarded, discover vendors for their other functions, and refer their friends.
+                Add your existing clients to The Dream Wedding. They get onboarded, discover vendors for their other functions, and refer their friends. This is how you grow without spending on ads.
               </Text>
             </View>
             {clients.map(client => (
@@ -646,7 +699,7 @@ export default function VendorDashboardScreen() {
                   disabled={client.invited}
                 >
                   <Text style={[styles.inviteBtnText, client.invited && styles.inviteBtnTextDone]}>
-                    {client.invited ? 'Invited' : 'Send Invite'}
+                    {client.invited ? 'Invited ✓' : 'Send Invite'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -657,6 +710,7 @@ export default function VendorDashboardScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
+      {/* Bottom Nav */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem}>
           <Text style={[styles.navLabel, styles.navActive]}>Dashboard</Text>
@@ -664,7 +718,7 @@ export default function VendorDashboardScreen() {
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/messaging')}>
           <Text style={styles.navLabel}>Messages</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/login')}>
+        <TouchableOpacity style={styles.navItem} onPress={handleLogout}>
           <Text style={styles.navLabel}>Log Out</Text>
         </TouchableOpacity>
       </View>
@@ -767,10 +821,6 @@ const styles = StyleSheet.create({
   gstPreviewTotal: { fontSize: 14, color: '#2C2420', fontWeight: '600' },
   generateBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
   generateBtnText: { fontSize: 14, color: '#F5F0E8', fontWeight: '500' },
-  templateList: { borderTopWidth: 1, borderTopColor: '#E8E0D5', overflow: 'hidden' },
-  templateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  templateName: { fontSize: 14, color: '#2C2420' },
-  templateArrow: { fontSize: 18, color: '#C9A84C' },
   paymentTrackerRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
   paymentTrackerItem: { flex: 1, alignItems: 'center', gap: 4 },
   paymentTrackerDivider: { width: 1, backgroundColor: '#E8E0D5' },
@@ -788,6 +838,7 @@ const styles = StyleSheet.create({
   ratingBig: { fontSize: 48, color: '#2C2420', fontWeight: '300' },
   ratingStars: { fontSize: 20, color: '#C9A84C' },
   ratingCount: { fontSize: 13, color: '#8C7B6E' },
+  ratingNote: { fontSize: 11, color: '#8C7B6E', textAlign: 'center', fontStyle: 'italic' },
   reviewCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
   reviewTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   reviewAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },

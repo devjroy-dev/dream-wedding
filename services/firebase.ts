@@ -1,15 +1,31 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { initializeAuth, getAuth, getReactNativePersistence } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDA78KQVB_96wSrjMMJx-Jc4TCCzS-9Rk8",
-  authDomain: "dream-wedding-f4814.firebaseapp.com",
-  projectId: "dream-wedding-f4814",
-  storageBucket: "dream-wedding-f4814.firebasestorage.app",
-  messagingSenderId: "313911929264",
-  appId: "1:313911929264:web:8674b85da3b0eef146ce75"
+  apiKey: "AIzaSyDzXw3pC_CmSW_q87I_fIUKNVfUIM806h8",
+  authDomain: "the-dream-wedding-aa214.firebaseapp.com",
+  projectId: "the-dream-wedding-aa214",
+  storageBucket: "the-dream-wedding-aa214.firebasestorage.app",
+  messagingSenderId: "707007171164",
+  appId: "1:707007171164:web:8bf008a9e8d5a5c1503499"
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
+let auth: any;
+try {
+  if (Platform.OS !== 'web') {
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
+  } else {
+    auth = getAuth(app);
+  }
+} catch (e) {
+  auth = getAuth(app);
+}
+
+export { auth };
 export default app;

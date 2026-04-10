@@ -1,32 +1,51 @@
-import { useRouter } from 'expo-router';
-import { ApplicationVerifier, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator, Alert, StyleSheet, Text,
+  TextInput, TouchableOpacity, View, Platform
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../services/firebase';
+import { createOrGetUser } from '../services/api';
 
 export default function OTPScreen() {
   const router = useRouter();
+  const { mode } = useLocalSearchParams();
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [verificationId, setVerificationId] = useState('');
+
+  const isEmailMode = mode === 'email';
 
   const handleSendOTP = async () => {
     try {
       setLoading(true);
       const phoneNumber = `+91${phone}`;
       const provider = new PhoneAuthProvider(auth);
-      const recaptchaVerifier = {
-        type: 'recaptcha',
-        verify: () => Promise.resolve('token'),
-      } as unknown as ApplicationVerifier;
-      const id = await provider.verifyPhoneNumber(phoneNumber, recaptchaVerifier);
+
+      // On native: Firebase handles reCAPTCHA via Play Services automatically
+      // We pass a minimal verifier that satisfies the type
+      const fakeVerifier = {
+        type: 'recaptcha' as const,
+        verify: () => Promise.resolve(''),
+      } as any;
+
+      const id = await provider.verifyPhoneNumber(phoneNumber, fakeVerifier);
       setVerificationId(id);
       setOtpSent(true);
+      Alert.alert('Code Sent', `Verification code sent to +91 ${phone}`);
     } catch (error: any) {
-      Alert.alert('Error', 'Could not send OTP. Please try again.');
-      console.error(error);
+      console.error('OTP send error:', error?.code, error?.message);
+      const msg = error?.code === 'auth/invalid-phone-number'
+        ? 'Please enter a valid 10-digit phone number.'
+        : error?.code === 'auth/too-many-requests'
+        ? 'Too many attempts. Please try again later.'
+        : 'Could not send OTP. Please check your number and try again.';
+      Alert.alert('Error', msg);
     } finally {
       setLoading(false);
     }
@@ -36,14 +55,78 @@ export default function OTPScreen() {
     try {
       setLoading(true);
       const credential = PhoneAuthProvider.credential(verificationId, otp);
-      await signInWithCredential(auth, credential);
+      const result = await signInWithCredential(auth, credential);
+      const firebaseUID = result.user.uid;
+      const userPhone = result.user.phoneNumber || `+91${phone}`;
+
+      // Create or get user in backend
+      let userData = null;
+      try {
+        const userResult = await createOrGetUser(userPhone);
+        userData = userResult.data;
+      } catch (e) {
+        console.log('Backend user creation failed, continuing with Firebase UID');
+      }
+
+      // Save session
+      await AsyncStorage.setItem('user_session', JSON.stringify({
+        uid: firebaseUID,
+        userId: userData?.id || firebaseUID,
+        phone: userPhone,
+        userType: 'couple',
+        name: userData?.name || '',
+      }));
+
       router.replace('/user-type');
     } catch (error: any) {
-      Alert.alert('Invalid Code', 'The code you entered is incorrect. Please try again.');
+      console.error('OTP verify error:', error?.code, error?.message);
+      const msg = error?.code === 'auth/invalid-verification-code'
+        ? 'The code you entered is incorrect. Please try again.'
+        : error?.code === 'auth/code-expired'
+        ? 'This code has expired. Please request a new one.'
+        : 'Verification failed. Please try again.';
+      Alert.alert('Error', msg);
     } finally {
       setLoading(false);
     }
   };
+
+  if (isEmailMode) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.backBtn}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.logo}>The Dream Wedding</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.content}>
+          <Text style={styles.title}>Your email{'\n'}address</Text>
+          <Text style={styles.subtitle}>We'll send you a magic link</Text>
+          <TextInput
+            style={styles.inputFull}
+            placeholder="your@email.com"
+            placeholderTextColor="#8C7B6E"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            value={email}
+            onChangeText={setEmail}
+          />
+          <TouchableOpacity
+            style={[styles.button, (!email.includes('@') || loading) && styles.buttonDisabled]}
+            onPress={() => Alert.alert('Coming Soon', 'Email login will be available shortly. Please use phone login.')}
+            disabled={!email.includes('@') || loading}
+          >
+            <Text style={styles.buttonText}>Send Magic Link</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.changeNumber}>Use phone instead</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -51,7 +134,7 @@ export default function OTPScreen() {
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backBtn}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.logo}>DreamWedding</Text>
+        <Text style={styles.logo}>The Dream Wedding</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -59,7 +142,7 @@ export default function OTPScreen() {
         {!otpSent ? (
           <>
             <Text style={styles.title}>Your phone{'\n'}number</Text>
-            <Text style={styles.subtitle}>We'll send a verification code</Text>
+            <Text style={styles.subtitle}>We'll send a 6-digit verification code</Text>
             <View style={styles.phoneRow}>
               <View style={styles.countryCode}>
                 <Text style={styles.countryCodeText}>+91</Text>
@@ -79,7 +162,10 @@ export default function OTPScreen() {
               onPress={handleSendOTP}
               disabled={phone.length !== 10 || loading}
             >
-              {loading ? <ActivityIndicator color="#F5F0E8" /> : <Text style={styles.buttonText}>Send Code</Text>}
+              {loading
+                ? <ActivityIndicator color="#F5F0E8" />
+                : <Text style={styles.buttonText}>Send Code</Text>
+              }
             </TouchableOpacity>
           </>
         ) : (
@@ -101,9 +187,12 @@ export default function OTPScreen() {
               onPress={handleVerify}
               disabled={otp.length !== 6 || loading}
             >
-              {loading ? <ActivityIndicator color="#F5F0E8" /> : <Text style={styles.buttonText}>Verify</Text>}
+              {loading
+                ? <ActivityIndicator color="#F5F0E8" />
+                : <Text style={styles.buttonText}>Verify</Text>
+              }
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setOtpSent(false)}>
+            <TouchableOpacity onPress={() => { setOtpSent(false); setOtp(''); }}>
               <Text style={styles.changeNumber}>Change number</Text>
             </TouchableOpacity>
           </>
@@ -132,10 +221,11 @@ const styles = StyleSheet.create({
     width: 24,
   },
   logo: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#C9A84C',
-    fontWeight: '400',
-    letterSpacing: 4,
+    fontWeight: '500',
+    letterSpacing: 2,
+    textAlign: 'center',
   },
   content: {
     flex: 1,
@@ -174,6 +264,16 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    borderRadius: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    color: '#2C2420',
+    backgroundColor: '#FFFFFF',
+  },
+  inputFull: {
     borderWidth: 1,
     borderColor: '#E8E0D5',
     borderRadius: 10,

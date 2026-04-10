@@ -1,33 +1,44 @@
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-
-const { width, height } = Dimensions.get('window');
+import { useState } from 'react';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    Alert.alert('Coming Soon', 'Google login is being set up. Please use phone login for now.');
+  };
 
   return (
     <View style={styles.container}>
 
-      {/* Logo Section */}
+      {/* Logo Section — centred vertically in top half */}
       <View style={styles.logoSection}>
-        <Text style={styles.logo}>DreamWedding</Text>
+        <Text style={styles.logoTop}>The</Text>
+        <Text style={styles.logoMain}>Dream Wedding</Text>
         <View style={styles.logoDivider} />
         <Text style={styles.logoTagline}>India's Premium Wedding Platform</Text>
       </View>
 
-      {/* Buttons */}
+      {/* Buttons — anchored to bottom */}
       <View style={styles.buttonSection}>
         <Text style={styles.welcomeText}>Welcome</Text>
         <Text style={styles.subText}>Sign in to continue planning your dream wedding</Text>
 
         <View style={styles.buttons}>
-          <TouchableOpacity style={styles.socialButton}>
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
+          <TouchableOpacity style={styles.socialButton} onPress={handleGoogleLogin}>
+            {googleLoading
+              ? <ActivityIndicator color="#2C2420" />
+              : <Text style={styles.socialButtonText}>Continue with Google</Text>
+            }
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.socialButton}>
-            <Text style={styles.socialButtonText}>Continue with Instagram</Text>
+          <TouchableOpacity
+            style={styles.socialButton}
+            onPress={() => router.push('/otp?mode=email')}
+          >
+            <Text style={styles.socialButtonText}>Continue with Email</Text>
           </TouchableOpacity>
 
           <View style={styles.dividerRow}>
@@ -62,37 +73,47 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F0E8',
     paddingHorizontal: 28,
-    paddingTop: 80,
     paddingBottom: 48,
     justifyContent: 'space-between',
   },
   logoSection: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
+    paddingTop: 60,
   },
-  logo: {
+  logoTop: {
+    fontSize: 18,
+    color: '#8C7B6E',
+    fontWeight: '300',
+    letterSpacing: 6,
+    textTransform: 'uppercase',
+  },
+  logoMain: {
     fontSize: 34,
     color: '#2C2420',
-    fontWeight: '300',
-    letterSpacing: 8,
+    fontWeight: '500',
+    letterSpacing: 3,
+    textAlign: 'center',
   },
   logoDivider: {
-    width: 36,
-    height: 1,
+    width: 40,
+    height: 1.5,
     backgroundColor: '#C9A84C',
-    opacity: 0.7,
+    marginVertical: 4,
   },
   logoTagline: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#8C7B6E',
-    letterSpacing: 2,
+    letterSpacing: 2.5,
     textTransform: 'uppercase',
   },
   buttonSection: {
-    gap: 24,
+    gap: 20,
   },
   welcomeText: {
-    fontSize: 32,
+    fontSize: 30,
     color: '#2C2420',
     fontWeight: '300',
     letterSpacing: 1,
@@ -100,7 +121,7 @@ const styles = StyleSheet.create({
   subText: {
     fontSize: 14,
     color: '#8C7B6E',
-    marginTop: -16,
+    marginTop: -12,
     lineHeight: 22,
   },
   buttons: {
@@ -110,7 +131,7 @@ const styles = StyleSheet.create({
     width: '100%',
     borderWidth: 1,
     borderColor: '#E8E0D5',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -124,7 +145,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginVertical: 4,
+    marginVertical: 2,
   },
   dividerLine: {
     flex: 1,
@@ -138,9 +159,14 @@ const styles = StyleSheet.create({
   primaryButton: {
     width: '100%',
     backgroundColor: '#2C2420',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 3,
   },
   primaryButtonText: {
     color: '#F5F0E8',

@@ -1,54 +1,89 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, ScrollView, TextInput, KeyboardAvoidingView, Platform
+  Dimensions, ScrollView, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { joinConversation, sendSocketMessage, onReceiveMessage, offReceiveMessage } from '../services/socket';
-import { getMessages } from '../services/api';
+import { getMessages, getUserBookings } from '../services/api';
 
 const { width } = Dimensions.get('window');
-
-const MOCK_USER_ID = 'user_001';
-
-const CONVERSATIONS = [
-  { id: '1', vendorId: 'vendor_001', vendorName: 'Joseph Radhik', category: 'Photographer', lastMessage: 'Yes, I am available for December 15th.', time: '2m ago', unread: 2 },
-  { id: '2', vendorId: 'vendor_002', vendorName: 'The Leela Palace', category: 'Venue', lastMessage: 'We have the Grand Ballroom available.', time: '1h ago', unread: 0 },
-];
 
 export default function MessagingScreen() {
   const router = useRouter();
   const [activeConversation, setActiveConversation] = useState<any>(null);
   const [newMessage, setNewMessage] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
-  const [conversations, setConversations] = useState(CONVERSATIONS);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [userId, setUserId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    if (!activeConversation) return;
+    initSession();
+  }, []);
 
-    // Load message history
-    getMessages(MOCK_USER_ID, activeConversation.vendorId)
+  const initSession = async () => {
+    try {
+      const session = await AsyncStorage.getItem('user_session');
+      if (session) {
+        const parsed = JSON.parse(session);
+        const uid = parsed.userId || parsed.uid;
+        setUserId(uid);
+        loadConversations(uid);
+      }
+    } catch (e) {
+      setLoading(false);
+    }
+  };
+
+  const loadConversations = async (uid: string) => {
+    try {
+      const result = await getUserBookings(uid);
+      if (result.success && result.data?.length > 0) {
+        const convs = result.data.map((booking: any) => ({
+          id: booking.id,
+          vendorId: booking.vendor_id,
+          vendorName: booking.vendor_name || 'Vendor',
+          category: booking.vendor_category || '',
+          lastMessage: 'Tap to open chat',
+          time: '',
+          unread: 0,
+        }));
+        setConversations(convs);
+      } else {
+        setConversations([]);
+      }
+    } catch (e) {
+      setConversations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeConversation || !userId) return;
+
+    getMessages(userId, activeConversation.vendorId)
       .then(res => {
         if (res.success) setMessages(res.data);
       })
       .catch(() => setMessages([]));
 
-    // Join socket room
-    joinConversation(MOCK_USER_ID, activeConversation.vendorId);
+    joinConversation(userId, activeConversation.vendorId);
 
-    // Listen for new messages
     onReceiveMessage((msg) => {
       setMessages(prev => [...prev, msg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     });
 
     return () => offReceiveMessage();
-  }, [activeConversation]);
+  }, [activeConversation, userId]);
 
   const sendMessage = () => {
-    if (newMessage.trim() === '' || !activeConversation) return;
-    sendSocketMessage(MOCK_USER_ID, activeConversation.vendorId, newMessage.trim(), 'user');
+    if (newMessage.trim() === '' || !activeConversation || !userId) return;
+    sendSocketMessage(userId, activeConversation.vendorId, newMessage.trim(), 'user');
     setNewMessage('');
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
@@ -78,6 +113,11 @@ export default function MessagingScreen() {
           contentContainerStyle={styles.messagesContent}
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
         >
+          {messages.length === 0 && (
+            <View style={styles.emptyChat}>
+              <Text style={styles.emptyChatText}>Start the conversation with {activeConversation.vendorName}</Text>
+            </View>
+          )}
           {messages.map((msg, index) => (
             <View
               key={msg.id || index}
@@ -124,31 +164,45 @@ export default function MessagingScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {conversations.map((conv, index) => (
-          <View key={conv.id}>
-            <TouchableOpacity style={styles.conversationRow} onPress={() => setActiveConversation(conv)}>
-              <View style={styles.convAvatar}>
-                <Text style={styles.convAvatarText}>{conv.vendorName[0]}</Text>
-              </View>
-              <View style={styles.convInfo}>
-                <View style={styles.convTopRow}>
-                  <Text style={styles.convName}>{conv.vendorName}</Text>
-                  <Text style={styles.convTime}>{conv.time}</Text>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color="#C9A84C" />
+        </View>
+      ) : conversations.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyTitle}>No messages yet</Text>
+          <Text style={styles.emptySubtitle}>Send an inquiry to a vendor to start chatting</Text>
+          <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/home')}>
+            <Text style={styles.emptyBtnText}>Discover Vendors</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {conversations.map((conv, index) => (
+            <View key={conv.id}>
+              <TouchableOpacity style={styles.conversationRow} onPress={() => setActiveConversation(conv)}>
+                <View style={styles.convAvatar}>
+                  <Text style={styles.convAvatarText}>{conv.vendorName[0]}</Text>
                 </View>
-                <Text style={styles.convCategory}>{conv.category}</Text>
-                <Text style={styles.convLastMessage} numberOfLines={1}>{conv.lastMessage}</Text>
-              </View>
-              {conv.unread > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadBadgeText}>{conv.unread}</Text>
+                <View style={styles.convInfo}>
+                  <View style={styles.convTopRow}>
+                    <Text style={styles.convName}>{conv.vendorName}</Text>
+                    <Text style={styles.convTime}>{conv.time}</Text>
+                  </View>
+                  <Text style={styles.convCategory}>{conv.category}</Text>
+                  <Text style={styles.convLastMessage} numberOfLines={1}>{conv.lastMessage}</Text>
                 </View>
-              )}
-            </TouchableOpacity>
-            {index < conversations.length - 1 && <View style={styles.convDivider} />}
-          </View>
-        ))}
-      </ScrollView>
+                {conv.unread > 0 && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{conv.unread}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              {index < conversations.length - 1 && <View style={styles.convDivider} />}
+            </View>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -158,6 +212,14 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 16 },
   backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
   title: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 40 },
+  emptyTitle: { fontSize: 22, color: '#2C2420', fontWeight: '300' },
+  emptySubtitle: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },
+  emptyBtn: { marginTop: 16, backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 14, paddingHorizontal: 32 },
+  emptyBtnText: { fontSize: 14, color: '#F5F0E8', fontWeight: '500' },
+  emptyChat: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+  emptyChatText: { fontSize: 14, color: '#8C7B6E', textAlign: 'center' },
   chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#E8E0D5', gap: 12 },
   chatHeaderInfo: { flex: 1, gap: 2 },
   chatHeaderName: { fontSize: 16, color: '#2C2420', fontWeight: '500' },

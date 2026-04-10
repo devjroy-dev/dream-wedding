@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, ScrollView
+  Dimensions, ScrollView, Platform
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 const { width } = Dimensions.get('window');
 
@@ -18,29 +19,22 @@ const CITIES = [
 ];
 
 const BUDGET_RANGES = [
-  { id: '0-1', label: 'Under ₹1L' },
-  { id: '1-3', label: '₹1L – ₹3L' },
-  { id: '3-5', label: '₹3L – ₹5L' },
-  { id: '5-10', label: '₹5L – ₹10L' },
-  { id: '10+', label: '₹10L+' },
+  { id: '100000', label: 'Under ₹1L', sub: 'Budget friendly' },
+  { id: '300000', label: '₹1L – ₹3L', sub: 'Great value' },
+  { id: '500000', label: '₹3L – ₹5L', sub: 'Premium' },
+  { id: '1000000', label: '₹5L – ₹10L', sub: 'Luxury' },
+  { id: '99999999', label: '₹10L+', sub: 'Ultra premium' },
 ];
-
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-const YEARS = ['2025', '2026', '2027', '2028'];
 
 export default function FilterScreen() {
   const router = useRouter();
-  const { category } = useLocalSearchParams();
-  const [selectedMonth, setSelectedMonth] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
+  const { category, from } = useLocalSearchParams();
+
+  const [weddingDate, setWeddingDate] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedBudget, setSelectedBudget] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
-  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const toggleVibe = (vibe: string) => {
     setSelectedVibes(prev =>
@@ -49,21 +43,53 @@ export default function FilterScreen() {
   };
 
   const categoryLabel = (category as string)
-    ?.replace('-', ' ')
+    ?.replace(/-/g, ' ')
     .replace(/\b\w/g, l => l.toUpperCase()) || 'Vendors';
 
-  const dateLabel = selectedMonth && selectedYear
-    ? `${selectedMonth} ${selectedYear}`
-    : 'Select date';
+  const formatDate = (date: Date) => date.toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  const handleApply = () => {
+    const params = new URLSearchParams();
+    if (category) params.append('category', category as string);
+    if (selectedCity) params.append('city', selectedCity);
+    if (selectedBudget) params.append('budget', selectedBudget);
+    if (weddingDate) params.append('date', weddingDate.toISOString());
+    if (selectedVibes.length > 0) params.append('vibes', selectedVibes.join(','));
+    router.push(`/swipe?${params.toString()}`);
+  };
+
+  const handleClear = () => {
+    setWeddingDate(null);
+    setSelectedBudget('');
+    setSelectedCity('');
+    setSelectedVibes([]);
+  };
+
+  const activeFilters = [
+    weddingDate, selectedBudget, selectedCity, selectedVibes.length > 0
+  ].filter(Boolean).length;
 
   return (
     <View style={styles.container}>
+
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backBtn}>←</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
+          <Text style={styles.headerBackText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>{categoryLabel}</Text>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>{categoryLabel}</Text>
+          <Text style={styles.headerSub}>Refine your search</Text>
+        </View>
+        {activeFilters > 0 ? (
+          <TouchableOpacity onPress={handleClear}>
+            <Text style={styles.clearText}>Clear all</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 56 }} />
+        )}
       </View>
 
       <ScrollView
@@ -71,92 +97,101 @@ export default function FilterScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Date */}
+
+        {/* Wedding Date */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Wedding Date</Text>
-          <Text style={styles.sectionHint}>Booked vendors will be hidden</Text>
+          <Text style={styles.sectionHint}>Only available vendors will be shown</Text>
+
           <TouchableOpacity
-            style={styles.dateInput}
-            onPress={() => setShowDatePicker(!showDatePicker)}
+            style={styles.dateCard}
+            onPress={() => setShowDatePicker(true)}
           >
-            <Text style={selectedMonth ? styles.dateInputSelected : styles.dateInputPlaceholder}>
-              {dateLabel}
-            </Text>
-            <Text style={styles.dateChevron}>›</Text>
+            <View style={styles.dateCardLeft}>
+              <Text style={styles.dateCardIcon}>📅</Text>
+              <View>
+                <Text style={styles.dateCardLabel}>
+                  {weddingDate ? formatDate(weddingDate) : 'Select your wedding date'}
+                </Text>
+                {!weddingDate && (
+                  <Text style={styles.dateCardHint}>Tap to choose</Text>
+                )}
+              </View>
+            </View>
+            {weddingDate && (
+              <TouchableOpacity onPress={() => setWeddingDate(null)}>
+                <Text style={styles.dateCardClear}>✕</Text>
+              </TouchableOpacity>
+            )}
           </TouchableOpacity>
 
           {showDatePicker && (
-            <View style={styles.datePicker}>
-              <View style={styles.yearRow}>
-                {YEARS.map(year => (
-                  <TouchableOpacity
-                    key={year}
-                    style={[styles.yearBtn, selectedYear === year && styles.yearBtnSelected]}
-                    onPress={() => setSelectedYear(year)}
-                  >
-                    <Text style={[styles.yearBtnText, selectedYear === year && styles.yearBtnTextSelected]}>
-                      {year}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.monthGrid}>
-                {MONTHS.map(month => (
-                  <TouchableOpacity
-                    key={month}
-                    style={[styles.monthBtn, selectedMonth === month && styles.monthBtnSelected]}
-                    onPress={() => {
-                      setSelectedMonth(month);
-                      setShowDatePicker(false);
-                    }}
-                  >
-                    <Text style={[styles.monthBtnText, selectedMonth === month && styles.monthBtnTextSelected]}>
-                      {month.slice(0, 3)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+            <View style={styles.datePickerWrapper}>
+              <DateTimePicker
+                value={weddingDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'calendar'}
+                minimumDate={new Date()}
+                onChange={(event, date) => {
+                  if (Platform.OS === 'android') setShowDatePicker(false);
+                  if (date) setWeddingDate(date);
+                }}
+                style={styles.datePicker}
+              />
+              {Platform.OS === 'ios' && (
+                <TouchableOpacity
+                  style={styles.datePickerDone}
+                  onPress={() => setShowDatePicker(false)}
+                >
+                  <Text style={styles.datePickerDoneText}>Done</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
 
-        <View style={styles.divider} />
+        <View style={styles.sectionDivider} />
 
         {/* Budget */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Budget Range</Text>
-          <Text style={styles.sectionHint}>Per vendor for this category</Text>
-          <View style={styles.optionList}>
-            {BUDGET_RANGES.map((b, index) => (
-              <View key={b.id}>
-                <TouchableOpacity
-                  style={styles.optionRow}
-                  onPress={() => setSelectedBudget(b.id)}
-                >
-                  <Text style={[styles.optionText, selectedBudget === b.id && styles.optionTextSelected]}>
-                    {b.label}
-                  </Text>
-                  {selectedBudget === b.id && <Text style={styles.optionCheck}>✓</Text>}
-                </TouchableOpacity>
-                {index < BUDGET_RANGES.length - 1 && <View style={styles.optionDivider} />}
-              </View>
+          <Text style={styles.sectionLabel}>Budget per Vendor</Text>
+          <Text style={styles.sectionHint}>For this category specifically</Text>
+          <View style={styles.budgetGrid}>
+            {BUDGET_RANGES.map(b => (
+              <TouchableOpacity
+                key={b.id}
+                style={[styles.budgetCard, selectedBudget === b.id && styles.budgetCardSelected]}
+                onPress={() => setSelectedBudget(selectedBudget === b.id ? '' : b.id)}
+              >
+                <Text style={[styles.budgetLabel, selectedBudget === b.id && styles.budgetLabelSelected]}>
+                  {b.label}
+                </Text>
+                <Text style={[styles.budgetSub, selectedBudget === b.id && styles.budgetSubSelected]}>
+                  {b.sub}
+                </Text>
+                {selectedBudget === b.id && (
+                  <View style={styles.budgetCheck}>
+                    <Text style={styles.budgetCheckText}>✓</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             ))}
           </View>
         </View>
 
-        <View style={styles.divider} />
+        <View style={styles.sectionDivider} />
 
         {/* City */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>City</Text>
-          <View style={styles.pillGrid}>
+          <View style={styles.cityGrid}>
             {CITIES.map(city => (
               <TouchableOpacity
                 key={city}
-                style={[styles.pill, selectedCity === city && styles.pillSelected]}
-                onPress={() => setSelectedCity(city)}
+                style={[styles.cityChip, selectedCity === city && styles.cityChipSelected]}
+                onPress={() => setSelectedCity(selectedCity === city ? '' : city)}
               >
-                <Text style={[styles.pillText, selectedCity === city && styles.pillTextSelected]}>
+                <Text style={[styles.cityChipText, selectedCity === city && styles.cityChipTextSelected]}>
                   {city}
                 </Text>
               </TouchableOpacity>
@@ -164,280 +199,178 @@ export default function FilterScreen() {
           </View>
         </View>
 
-        <View style={styles.divider} />
+        <View style={styles.sectionDivider} />
 
         {/* Vibe */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Vibe</Text>
-          <Text style={styles.sectionHint}>Select all that match your style</Text>
-          <View style={styles.pillGrid}>
+          <Text style={styles.sectionLabel}>Vibe & Style</Text>
+          <Text style={styles.sectionHint}>Select all that match your aesthetic</Text>
+          <View style={styles.vibeGrid}>
             {VIBE_TAGS.map(vibe => (
               <TouchableOpacity
                 key={vibe}
-                style={[styles.pill, selectedVibes.includes(vibe) && styles.pillSelected]}
+                style={[styles.vibeChip, selectedVibes.includes(vibe) && styles.vibeChipSelected]}
                 onPress={() => toggleVibe(vibe)}
               >
-                <Text style={[styles.pillText, selectedVibes.includes(vibe) && styles.pillTextSelected]}>
+                <Text style={[styles.vibeChipText, selectedVibes.includes(vibe) && styles.vibeChipTextSelected]}>
                   {vibe}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
+
+        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Bottom Bar */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={styles.clearBtn}
-          onPress={() => {
-            setSelectedMonth('');
-            setSelectedYear('');
-            setSelectedBudget('');
-            setSelectedCity('');
-            setSelectedVibes([]);
-          }}
-        >
-          <Text style={styles.clearBtnText}>Clear</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.startBtn}
-          onPress={() => router.push(`/swipe?category=${category}`)}
-        >
-          <Text style={styles.startBtnText}>Start Swiping</Text>
+        <TouchableOpacity style={styles.startBtn} onPress={handleApply}>
+          <Text style={styles.startBtnText}>
+            Show Vendors{activeFilters > 0 ? ` · ${activeFilters} filter${activeFilters > 1 ? 's' : ''}` : ''}
+          </Text>
         </TouchableOpacity>
       </View>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F0E8',
-    paddingTop: 60,
-  },
+  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     marginBottom: 8,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E0D5',
   },
-  backBtn: {
-    fontSize: 22,
-    color: '#2C2420',
-    width: 24,
-  },
-  title: {
-    fontSize: 17,
-    color: '#2C2420',
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 120,
-  },
-  section: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    gap: 12,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    color: '#2C2420',
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
-  sectionHint: {
-    fontSize: 12,
-    color: '#8C7B6E',
-    marginTop: -6,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E8E0D5',
-    marginHorizontal: 24,
-  },
-  dateInput: {
+  headerBackBtn: { width: 34, height: 34, justifyContent: 'center' },
+  headerBackText: { fontSize: 22, color: '#2C2420' },
+  headerCenter: { alignItems: 'center', gap: 2 },
+  headerTitle: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
+  headerSub: { fontSize: 11, color: '#8C7B6E', letterSpacing: 0.5 },
+  clearText: { fontSize: 13, color: '#C9A84C', fontWeight: '500', width: 56, textAlign: 'right' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 40 },
+  section: { paddingHorizontal: 24, paddingVertical: 24, gap: 14 },
+  sectionLabel: { fontSize: 13, color: '#2C2420', fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase' },
+  sectionHint: { fontSize: 12, color: '#8C7B6E', marginTop: -8 },
+  sectionDivider: { height: 1, backgroundColor: '#E8E0D5', marginHorizontal: 24 },
+  dateCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     borderWidth: 1,
     borderColor: '#E8E0D5',
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
   },
-  dateInputPlaceholder: {
-    fontSize: 14,
-    color: '#8C7B6E',
-  },
-  dateInputSelected: {
-    fontSize: 14,
-    color: '#2C2420',
-    fontWeight: '500',
-  },
-  dateChevron: {
-    fontSize: 20,
-    color: '#C9A84C',
-  },
-  datePicker: {
+  dateCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  dateCardIcon: { fontSize: 22 },
+  dateCardLabel: { fontSize: 15, color: '#2C2420', fontWeight: '400' },
+  dateCardHint: { fontSize: 12, color: '#8C7B6E', marginTop: 2 },
+  dateCardClear: { fontSize: 16, color: '#8C7B6E', padding: 4 },
+  datePickerWrapper: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    padding: 16,
-    gap: 12,
-  },
-  yearRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  yearBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  yearBtnSelected: {
-    backgroundColor: '#2C2420',
-    borderColor: '#2C2420',
-  },
-  yearBtnText: {
-    fontSize: 13,
-    color: '#2C2420',
-  },
-  yearBtnTextSelected: {
-    color: '#F5F0E8',
-    fontWeight: '500',
-  },
-  monthGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  monthBtn: {
-    width: '22%',
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  monthBtnSelected: {
-    backgroundColor: '#2C2420',
-    borderColor: '#2C2420',
-  },
-  monthBtnText: {
-    fontSize: 12,
-    color: '#2C2420',
-  },
-  monthBtnTextSelected: {
-    color: '#F5F0E8',
-    fontWeight: '500',
-  },
-  optionList: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#E8E0D5',
     overflow: 'hidden',
   },
-  optionRow: {
+  datePicker: { backgroundColor: '#FFFFFF' },
+  datePickerDone: {
+    borderTopWidth: 1,
+    borderTopColor: '#E8E0D5',
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  datePickerDoneText: { fontSize: 15, color: '#C9A84C', fontWeight: '500' },
+  budgetGrid: { gap: 10 },
+  budgetCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
   },
-  optionText: {
-    fontSize: 15,
-    color: '#2C2420',
-  },
-  optionTextSelected: {
-    color: '#C9A84C',
-    fontWeight: '500',
-  },
-  optionCheck: {
-    color: '#C9A84C',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  optionDivider: {
-    height: 1,
-    backgroundColor: '#E8E0D5',
-    marginHorizontal: 16,
-  },
-  pillGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    borderRadius: 50,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
-  },
-  pillSelected: {
+  budgetCardSelected: {
     backgroundColor: '#2C2420',
     borderColor: '#2C2420',
   },
-  pillText: {
-    fontSize: 13,
-    color: '#2C2420',
+  budgetLabel: { fontSize: 16, color: '#2C2420', fontWeight: '400' },
+  budgetLabelSelected: { color: '#F5F0E8', fontWeight: '500' },
+  budgetSub: { fontSize: 12, color: '#8C7B6E' },
+  budgetSubSelected: { color: '#8C7B6E' },
+  budgetCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#C9A84C',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  pillTextSelected: {
-    color: '#F5F0E8',
+  budgetCheckText: { fontSize: 12, color: '#FFFFFF', fontWeight: '700' },
+  cityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  cityChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 50,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    backgroundColor: '#FFFFFF',
   },
+  cityChipSelected: { backgroundColor: '#2C2420', borderColor: '#2C2420' },
+  cityChipText: { fontSize: 13, color: '#2C2420', letterSpacing: 0.2 },
+  cityChipTextSelected: { color: '#F5F0E8', fontWeight: '500' },
+  vibeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  vibeChip: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 50,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    backgroundColor: '#FFFFFF',
+  },
+  vibeChipSelected: { backgroundColor: '#C9A84C', borderColor: '#C9A84C' },
+  vibeChipText: { fontSize: 13, color: '#2C2420', letterSpacing: 0.2 },
+  vibeChipTextSelected: { color: '#FFFFFF', fontWeight: '500' },
   bottomBar: {
-    flexDirection: 'row',
-    gap: 12,
     paddingHorizontal: 24,
-    paddingVertical: 24,
+    paddingVertical: 20,
     paddingBottom: 36,
     borderTopWidth: 1,
     borderTopColor: '#E8E0D5',
     backgroundColor: '#F5F0E8',
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-  },
-  clearBtn: {
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    borderRadius: 10,
-    paddingVertical: 15,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  clearBtnText: {
-    fontSize: 14,
-    color: '#8C7B6E',
   },
   startBtn: {
-    flex: 1,
     backgroundColor: '#2C2420',
-    borderRadius: 10,
-    paddingVertical: 15,
+    borderRadius: 14,
+    paddingVertical: 17,
     alignItems: 'center',
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  startBtnText: {
-    fontSize: 15,
-    color: '#F5F0E8',
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
+  startBtnText: { fontSize: 15, color: '#F5F0E8', fontWeight: '500', letterSpacing: 0.5 },
 });
