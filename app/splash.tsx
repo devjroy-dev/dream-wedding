@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
-import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import { useEffect, useRef } from 'react';
+import { Animated, Dimensions, StyleSheet, Text, View } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -157,7 +157,6 @@ const styles = StyleSheet.create({
     color: '#2C2420',
     fontFamily: 'CormorantGaramond_300Light',
     letterSpacing: 1.5,
-    fontStyle: 'italic',
   },
   footer: {
     position: 'absolute',
