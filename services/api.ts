@@ -208,3 +208,61 @@ export const unblockDate = async (id: string) => {
   const response = await api.delete(`/availability/${id}`);
   return response.data;
 };
+// ==================
+// INVOICES — FULL
+// ==================
+
+export const saveInvoice = async (invoiceData: any) => {
+  const response = await api.post('/invoices/save', invoiceData);
+  return response.data;
+};
+
+export const updateInvoiceStatus = async (id: string, status: string) => {
+  const response = await api.patch(`/invoices/${id}`, { status });
+  return response.data;
+};
+
+// ==================
+// TDS LEDGER
+// ==================
+
+export const getTDSLedger = async (vendorId: string, financial_year?: string) => {
+  const params: any = {};
+  if (financial_year) params.financial_year = financial_year;
+  const response = await api.get(`/tds/${vendorId}`, { params });
+  return response.data;
+};
+
+export const getTDSSummary = async (vendorId: string) => {
+  const response = await api.get(`/tds/${vendorId}/summary`);
+  return response.data;
+};
+
+export const addTDSEntry = async (entryData: any) => {
+  const response = await api.post('/tds', entryData);
+  return response.data;
+};
+
+// ==================
+// VENDOR CLIENTS
+// ==================
+
+export const getVendorClients = async (vendorId: string) => {
+  const response = await api.get(`/vendor-clients/${vendorId}`);
+  return response.data;
+};
+
+export const addVendorClient = async (clientData: any) => {
+  const response = await api.post('/vendor-clients', clientData);
+  return response.data;
+};
+
+export const updateVendorClient = async (id: string, data: any) => {
+  const response = await api.patch(`/vendor-clients/${id}`, data);
+  return response.data;
+};
+
+export const deleteVendorClient = async (id: string) => {
+  const response = await api.delete(`/vendor-clients/${id}`);
+  return response.data;
+};

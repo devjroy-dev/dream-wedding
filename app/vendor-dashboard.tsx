@@ -152,6 +152,8 @@ export default function VendorDashboardScreen() {
 
   // Tools state
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [showInvoiceHistory, setShowInvoiceHistory] = useState(false);
+  const [updatingInvoiceId, setUpdatingInvoiceId] = useState<string | null>(null);
   const [invoiceClient, setInvoiceClient] = useState('');
   const [invoicePhone, setInvoicePhone] = useState('');
   const [invoiceAmount, setInvoiceAmount] = useState('');
@@ -628,6 +630,22 @@ export default function VendorDashboardScreen() {
       setShowInvoiceForm(false);
 
     } catch { Alert.alert('Error', 'Could not generate invoice.'); }
+  };
+
+  const handleMarkInvoicePaid = async (invoiceId: string) => {
+    try {
+      setUpdatingInvoiceId(invoiceId);
+      await fetch(`${API}/api/invoices/save`.replace('/save', `/${invoiceId}`).replace('/invoices/', '/invoices/'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'paid' }),
+      });
+      setInvoices(prev => prev.map((inv: any) => inv.id === invoiceId ? { ...inv, status: 'paid' } : inv));
+    } catch (e) {
+      Alert.alert('Error', 'Could not update invoice status.');
+    } finally {
+      setUpdatingInvoiceId(null);
+    }
   };
 
   const handleDownloadGSTReport = async () => {
@@ -1283,6 +1301,60 @@ export default function VendorDashboardScreen() {
                   <TouchableOpacity style={styles.goldBtn} onPress={handleGenerateInvoice}>
                     <Text style={styles.goldBtnText}>GENERATE & SAVE INVOICE</Text>
                   </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Invoice History */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="list" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Invoice History</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowInvoiceHistory(!showInvoiceHistory)}>
+                  <Text style={styles.toolActionText}>{showInvoiceHistory ? 'Hide' : 'Show All'}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.toolDesc}>All invoices — app bookings and independent clients. Tap to mark as paid.</Text>
+              {showInvoiceHistory && (
+                <View style={{ gap: 0 }}>
+                  {invoices.length === 0 ? (
+                    <Text style={styles.emptyText}>No invoices yet. Create your first invoice above.</Text>
+                  ) : (
+                    invoices.map((inv: any, index: number) => (
+                      <View key={inv.id}>
+                        <View style={styles.invoiceHistoryRow}>
+                          <View style={{ flex: 1, gap: 3 }}>
+                            <Text style={styles.invoiceHistoryClient}>{inv.client_name || 'Client'}</Text>
+                            <Text style={styles.invoiceHistoryMeta}>
+                              {inv.invoice_number || 'INV'} · {inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-IN') : ''}
+                            </Text>
+                            {inv.description ? <Text style={styles.invoiceHistoryDesc} numberOfLines={1}>{inv.description}</Text> : null}
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            <Text style={styles.invoiceHistoryAmount}>Rs.{(inv.total_amount || inv.amount || 0).toLocaleString('en-IN')}</Text>
+                            <TouchableOpacity
+                              style={[styles.invoiceStatusBtn, { backgroundColor: inv.status === 'paid' ? '#4CAF5020' : '#FFF8EC', borderColor: inv.status === 'paid' ? '#4CAF50' : '#C9A84C' }]}
+                              onPress={() => inv.status !== 'paid' && handleMarkInvoicePaid(inv.id)}
+                              disabled={inv.status === 'paid' || updatingInvoiceId === inv.id}
+                            >
+                              {updatingInvoiceId === inv.id ? (
+                                <ActivityIndicator size="small" color="#C9A84C" />
+                              ) : (
+                                <Text style={[styles.invoiceStatusText, { color: inv.status === 'paid' ? '#4CAF50' : '#C9A84C' }]}>
+                                  {inv.status === 'paid' ? 'Paid' : 'Mark Paid'}
+                                </Text>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        {index < invoices.length - 1 && <View style={styles.listDivider} />}
+                      </View>
+                    ))
+                  )}
                 </View>
               )}
             </View>
@@ -1951,5 +2023,12 @@ const styles = StyleSheet.create({
   spotlightDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.07)' },
   spotlightHint: { fontSize: 10, color: 'rgba(140,123,110,0.55)', fontFamily: 'DMSans_300Light' },
   noticeCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFF8EC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E8D9B5' },
+  invoiceHistoryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14 },
+  invoiceHistoryClient: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  invoiceHistoryMeta: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  invoiceHistoryDesc: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', fontStyle: 'italic' },
+  invoiceHistoryAmount: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  invoiceStatusBtn: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, alignItems: 'center', minWidth: 80 },
+  invoiceStatusText: { fontSize: 11, fontFamily: 'DMSans_500Medium' },
   noticeCardText: { flex: 1, fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
 });

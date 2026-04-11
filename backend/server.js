@@ -581,6 +581,22 @@ app.post('/api/invoices', async (req, res) => {
   }
 });
 
+// Update invoice status
+app.patch('/api/invoices/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_invoices')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Full invoice save with TDS tracking
 app.post('/api/invoices/save', async (req, res) => {
   try {
