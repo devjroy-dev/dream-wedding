@@ -46,7 +46,7 @@ app.get('/api/vendors', async (req, res) => {
     const { category, city } = req.query;
     let query = supabase.from('vendors').select('*').eq('subscription_active', true);
     if (category) query = query.eq('category', category);
-    if (city) query = query.eq('city', city);
+    if (city) query = query.ilike('city', `%${city}%`);
     const { data, error } = await query;
     if (error) throw error;
     res.json({ success: true, data });
