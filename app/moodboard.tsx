@@ -392,6 +392,42 @@ export default function MoodboardScreen() {
           </View>
         )}
 
+        <TouchableOpacity
+          style={{
+            marginHorizontal: 24,
+            marginBottom: 12,
+            backgroundColor: '#FAFAF8',
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: '#E8E0D5',
+            borderStyle: 'dashed',
+            opacity: 0.8,
+            padding: 16,
+          }}
+          onPress={() => Alert.alert(
+            'Live Activity Signals — Build 2',
+            'Coming in Build 2: Real-time signals on every saved vendor — Booked 3 times this week, 12 couples comparing right now, Price increased last month. The same psychological mechanic that drives Booking.com conversions. Makes every card in your Moodboard feel alive and urgent.',
+            [{ text: 'Perfect!' }]
+          )}
+          activeOpacity={0.85}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5', justifyContent: 'center', alignItems: 'center' }}>
+              <Feather name="activity" size={16} color="#C9A84C" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' }}>Live Activity Signals</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Feather name="lock" size={9} color="#C9A84C" />
+                  <Text style={{ fontSize: 9, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: 3 }}>See real-time booking activity on every saved vendor — Booked 3 times this week, 12 couples comparing now.</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
         <View style={{ height: 120 }} />
 
       </ScrollView>

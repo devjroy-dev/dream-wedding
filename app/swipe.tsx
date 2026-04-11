@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
+  Alert, View, Text, StyleSheet, TouchableOpacity,
   Dimensions, Animated, PanResponder, Image,
   ActivityIndicator
 } from 'react-native';
@@ -436,6 +436,19 @@ export default function SwipeScreen() {
             ) : (
               <View style={styles.vendorInfo}>
                 <Text style={styles.vendorName}>{vendor.name}</Text>
+                <TouchableOpacity
+                  onPress={() => Alert.alert(
+                    'Social Proof Signals — Build 2',
+                    'Coming in Build 2: Real-time activity signals on every vendor card. Couples will see how many others have saved or booked this vendor this month — the same psychological mechanic that drives Amazon purchases. Zero extra data needed, just a query on existing saves.',
+                    [{ text: 'Got it' }]
+                  )}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.socialProofBadge}>
+                    <Feather name="lock" size={8} color="#C9A84C" />
+                    <Text style={styles.socialProofText}>47 couples saved this month</Text>
+                  </View>
+                </TouchableOpacity>
                 <View style={styles.vendorMeta}>
                   <Feather name="map-pin" size={11} color="#C9A84C" />
                   <Text style={styles.vendorCity}>{vendor.city}</Text>
@@ -947,6 +960,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#C9A84C',
     fontFamily: 'DMSans_400Regular',
+    letterSpacing: 0.3,
+  },
+  socialProofBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(201,168,76,0.12)',
+    borderRadius: 50,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(201,168,76,0.25)',
+    alignSelf: 'flex-start',
+  },
+  socialProofText: {
+    fontSize: 9,
+    color: '#C9A84C',
+    fontFamily: 'DMSans_300Light',
     letterSpacing: 0.3,
   },
 });

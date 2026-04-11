@@ -1062,6 +1062,79 @@ export default function VendorDashboardScreen() {
               )}
             </View>
 
+            {/* ADDITIONAL LOCKED TOOLS */}
+            <TouchableOpacity
+              style={styles.toolCard}
+              onPress={() => Alert.alert(
+                'WhatsApp Broadcast Tool — Build 2',
+                'One tap sends a promotional message to all your past clients on WhatsApp simultaneously. Create the message in the app, select your audience, hit send. Every decorator and photographer wants this — it alone justifies the ₹2,999/month subscription. Coming in Build 2.',
+                [{ text: 'I need this!' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.toolHeader, { opacity: 0.6 }]}>
+                <View style={styles.toolTitleRow}>
+                  <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
+                    <Feather name="send" size={14} color="#8C7B6E" />
+                  </View>
+                  <Text style={[styles.toolTitle, { color: '#8C7B6E' }]}>WhatsApp Broadcast</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                  <Feather name="lock" size={10} color="#C9A84C" />
+                  <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
+                </View>
+              </View>
+              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>One tap sends a promo to all past clients on WhatsApp. The most requested vendor feature in India.</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.toolCard}
+              onPress={() => Alert.alert(
+                'Spotlight Auction — Build 2',
+                'The top 3 Spotlight positions are earned by algorithm — saves, enquiries and bookings. But positions 4-10 can be bid for at ₹999/month each. High perceived value, low price, scales automatically. You compete on quality for the top spots and on budget for the visibility spots. Coming in Build 2.',
+                [{ text: 'Smart!' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.toolHeader, { opacity: 0.6 }]}>
+                <View style={styles.toolTitleRow}>
+                  <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
+                    <Feather name="trending-up" size={14} color="#8C7B6E" />
+                  </View>
+                  <Text style={[styles.toolTitle, { color: '#8C7B6E' }]}>Spotlight Auction</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                  <Feather name="lock" size={10} color="#C9A84C" />
+                  <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
+                </View>
+              </View>
+              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>Bid for Spotlight positions 4-10 at ₹999/month. Top 3 are always earned by algorithm — never sold.</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.toolCard}
+              onPress={() => Alert.alert(
+                'Free Starter Tier — Build 2',
+                'A ₹99/month or free tier below Basic — just a profile and one enquiry per month. No CRM, no GST, no portfolio uploads. The goal is width in Year 1: get as many vendors into the ecosystem as possible, then push them up the tier ladder. Coming in Build 2.',
+                [{ text: 'Good thinking' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.toolHeader, { opacity: 0.6 }]}>
+                <View style={styles.toolTitleRow}>
+                  <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
+                    <Feather name="gift" size={14} color="#8C7B6E" />
+                  </View>
+                  <Text style={[styles.toolTitle, { color: '#8C7B6E' }]}>Free Starter Tier</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                  <Feather name="lock" size={10} color="#C9A84C" />
+                  <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
+                </View>
+              </View>
+              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>A free listing tier for new vendors. Basic profile, 1 enquiry/month. Lower barrier to join, natural upgrade path.</Text>
+            </TouchableOpacity>
+
             {/* BUILD 2 LOCKED TOOLS */}
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
             <LockedFeature

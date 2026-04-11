@@ -26,7 +26,7 @@ import {
 
 const { width } = Dimensions.get('window');
 
-const TABS = ['Budget', 'Guests', 'Registry', 'To Do', 'Payments', 'Journey'];
+const TABS = ['Budget', 'Guests', 'Registry', 'To Do', 'Payments', 'Journey', 'Website'];
 
 const DEFAULT_BUDGET_CATEGORIES = [
   { id: '1', category: 'Venue', budgeted: 800000, icon: 'home' },
@@ -1061,6 +1061,98 @@ export default function BTSPlannerScreen() {
           </View>
         )}
 
+        {/* WEBSITE TAB */}
+        {activeTab === 'Website' && (
+          <View style={styles.tabContent}>
+            <TouchableOpacity
+              style={styles.lockedFeatureCard}
+              onPress={() => Alert.alert(
+                'Wedding Website Generator — Build 2',
+                'One tap and your couple gets a beautiful wedding page at thedreamwedding.in/your-names with your date, venue, RSVP link and gift registry. Every guest who visits sees The Dream Wedding branding — our best organic acquisition channel. Coming in Build 2.',
+                [{ text: 'Can't wait!' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={styles.lockedFeatureInner}>
+                <View style={styles.lockedIconBox}>
+                  <Feather name="globe" size={22} color="#C9A84C" />
+                </View>
+                <View style={styles.lockedTextBlock}>
+                  <View style={styles.lockedTitleRow}>
+                    <Text style={styles.lockedTitle}>Wedding Website</Text>
+                    <View style={styles.lockedBadge}>
+                      <Feather name="lock" size={9} color="#C9A84C" />
+                      <Text style={styles.lockedBadgeText}>Build 2</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.lockedDesc}>
+                    One tap to create your personalised wedding page — thedreamwedding.in/priya-rahul. Share with guests, collect RSVPs, link your gift registry.
+                  </Text>
+                  <Text style={styles.lockedCta}>Tap to learn more →</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.lockedFeatureCard}
+              onPress={() => Alert.alert(
+                'Digital Invitations — Build 2',
+                'Beautiful animated digital invitations that match your wedding aesthetic. Send via WhatsApp, email or link. Track who has opened and RSVP'd. Coming in Build 2.',
+                [{ text: 'Exciting!' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={styles.lockedFeatureInner}>
+                <View style={styles.lockedIconBox}>
+                  <Feather name="mail" size={22} color="#C9A84C" />
+                </View>
+                <View style={styles.lockedTextBlock}>
+                  <View style={styles.lockedTitleRow}>
+                    <Text style={styles.lockedTitle}>Digital Invitations</Text>
+                    <View style={styles.lockedBadge}>
+                      <Feather name="lock" size={9} color="#C9A84C" />
+                      <Text style={styles.lockedBadgeText}>Build 2</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.lockedDesc}>
+                    Animated digital invitations matching your wedding aesthetic. Send via WhatsApp or link. Track opens and RSVPs in real time.
+                  </Text>
+                  <Text style={styles.lockedCta}>Tap to learn more →</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.lockedFeatureCard}
+              onPress={() => Alert.alert(
+                'Style Match AI — Build 3',
+                'Upload a photo of a look you love — a lehenga, a decor setup, a cake — and our AI finds the vendors on The Dream Wedding who can recreate it. Powered by the data flywheel we are building today. Coming in Build 3.',
+                [{ text: 'This is the future!' }]
+              )}
+              activeOpacity={0.85}
+            >
+              <View style={styles.lockedFeatureInner}>
+                <View style={styles.lockedIconBox}>
+                  <Feather name="cpu" size={22} color="#8C7B6E" />
+                </View>
+                <View style={styles.lockedTextBlock}>
+                  <View style={styles.lockedTitleRow}>
+                    <Text style={styles.lockedTitle}>Style Match AI</Text>
+                    <View style={[styles.lockedBadge, { borderColor: '#8C7B6E' }]}>
+                      <Feather name="lock" size={9} color="#8C7B6E" />
+                      <Text style={[styles.lockedBadgeText, { color: '#8C7B6E' }]}>Build 3</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.lockedDesc}>
+                    Upload any photo — a lehenga, a decor setup, a cake — and AI finds the vendors who can recreate it. The Pinterest for wedding vendor matching.
+                  </Text>
+                  <Text style={styles.lockedCta}>Tap to learn more →</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={{ height: 120 }} />
       </ScrollView>
 
@@ -1890,6 +1982,68 @@ const styles = StyleSheet.create({
   },
 
   // Bottom nav
+  lockedFeatureCard: {
+    backgroundColor: '#FAFAF8',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    borderStyle: 'dashed',
+    marginHorizontal: 24,
+    marginBottom: 12,
+    opacity: 0.85,
+  },
+  lockedFeatureInner: {
+    flexDirection: 'row',
+    gap: 16,
+    padding: 18,
+    alignItems: 'flex-start',
+  },
+  lockedIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#FFF8EC',
+    borderWidth: 1,
+    borderColor: '#E8D9B5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  lockedTextBlock: { flex: 1, gap: 6 },
+  lockedTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  lockedTitle: {
+    fontSize: 15,
+    color: '#2C2420',
+    fontFamily: 'PlayfairDisplay_400Regular',
+  },
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderWidth: 1,
+    borderColor: '#C9A84C',
+    borderRadius: 50,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  lockedBadgeText: {
+    fontSize: 9,
+    color: '#C9A84C',
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.3,
+  },
+  lockedDesc: {
+    fontSize: 13,
+    color: '#8C7B6E',
+    fontFamily: 'DMSans_300Light',
+    lineHeight: 20,
+  },
+  lockedCta: {
+    fontSize: 11,
+    color: '#C9A84C',
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.3,
+  },
   bottomNav: {
     flexDirection: 'row',
     justifyContent: 'space-around',
