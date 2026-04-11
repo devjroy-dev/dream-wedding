@@ -24,8 +24,9 @@ import { uploadImage } from '../services/cloudinary';
 import { generateInvoiceNumber, generateInvoicePDF } from '../services/invoice';
 
 const { width } = Dimensions.get('window');
+const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
-const TABS = ['Overview', 'Inquiries', 'Calendar', 'Tools', 'Reviews', 'Clients'];
+const TABS = ['Overview', 'Inquiries', 'Calendar', 'Tools', 'Tax & Finance', 'Reviews', 'Clients'];
 
 const STAGE_COLORS: Record<string, string> = {
   'New Inquiry': '#C9A84C',
@@ -37,6 +38,24 @@ const STAGE_COLORS: Record<string, string> = {
 const PROMOS = [
   { id: '1', title: '15% Off December Bookings', expires: 'Nov 30, 2025', active: true, leads: 12 },
   { id: '2', title: 'Free Pre-Wedding Shoot', expires: 'Dec 15, 2025', active: false, leads: 0 },
+];
+
+const REPLY_TEMPLATES = [
+  {
+    id: '1',
+    label: 'Availability Check',
+    message: 'Hi! Thank you for reaching out. I would love to be part of your special day. Could you please confirm your wedding date and venue city so I can check my availability?',
+  },
+  {
+    id: '2',
+    label: 'Package Details',
+    message: 'Thank you for your interest! I have multiple packages starting from our base rate. I would love to set up a quick call to understand your vision and share a customised quote. When are you free this week?',
+  },
+  {
+    id: '3',
+    label: 'Booking Confirmation',
+    message: 'Wonderful news — I am available on your date and would love to work with you! To secure your booking, the next step is confirming through the app. This locks your date and gets us started. Looking forward to it!',
+  },
 ];
 
 // ── Locked Feature Card ───────────────────────────────────────────────────────
@@ -134,7 +153,11 @@ export default function VendorDashboardScreen() {
   // Tools state
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [invoiceClient, setInvoiceClient] = useState('');
+  const [invoicePhone, setInvoicePhone] = useState('');
   const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [invoiceDesc, setInvoiceDesc] = useState('');
+  const [invoiceTDSApplicable, setInvoiceTDSApplicable] = useState(false);
+  const [invoiceTDSDeductedByClient, setInvoiceTDSDeductedByClient] = useState(false);
   const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
 
@@ -164,6 +187,16 @@ export default function VendorDashboardScreen() {
   const [showDateInput, setShowDateInput] = useState(false);
   const [newBlockDate, setNewBlockDate] = useState('');
 
+  // TDS state
+  const [tdsLedger, setTdsLedger] = useState<any[]>([]);
+  const [tdsSummary, setTdsSummary] = useState<any>(null);
+  const [tdsLoading, setTdsLoading] = useState(false);
+  const [showTDSEntryForm, setShowTDSEntryForm] = useState(false);
+  const [tdsEntryAmount, setTdsEntryAmount] = useState('');
+  const [tdsEntryClient, setTdsEntryClient] = useState('');
+  const [tdsEntryDeductedBy, setTdsEntryDeductedBy] = useState<'client' | 'self'>('client');
+  const [tdsEntryChallan, setTdsEntryChallan] = useState('');
+
   useEffect(() => { loadSession(); }, []);
 
   useEffect(() => {
@@ -173,6 +206,7 @@ export default function VendorDashboardScreen() {
       if (activeTab === 'Inquiries') { loadLeads(); loadBookings(); }
       if (activeTab === 'Calendar') { loadBlockedDates(); }
       if (activeTab === 'Clients') { loadClients(); }
+      if (activeTab === 'Tax & Finance') { loadTDS(); }
     }
   }, [vendorSession, activeTab]);
 
@@ -221,11 +255,164 @@ export default function VendorDashboardScreen() {
     } catch (e) {} finally { setCalendarLoading(false); }
   };
 
+  const loadTDS = async () => {
+    try {
+      setTdsLoading(true);
+      const [ledgerRes, summaryRes] = await Promise.all([
+        fetch(`${API}/api/tds/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/tds/${vendorSession.vendorId}/summary`).then(r => r.json()),
+      ]);
+      if (ledgerRes.success) setTdsLedger(ledgerRes.data || []);
+      if (summaryRes.success) setTdsSummary(summaryRes.data);
+    } catch (e) {} finally { setTdsLoading(false); }
+  };
+
+  const handleAddTDSEntry = async () => {
+    if (!tdsEntryAmount || !tdsEntryClient) {
+      Alert.alert('Missing info', 'Please enter client name and amount.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/tds`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          transaction_type: 'client_invoice',
+          gross_amount: parseInt(tdsEntryAmount),
+          tds_deducted_by: tdsEntryDeductedBy,
+          challan_number: tdsEntryChallan,
+          notes: `Client: ${tdsEntryClient}`,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        Alert.alert('Entry Added', 'TDS entry recorded successfully.');
+        setTdsEntryAmount('');
+        setTdsEntryClient('');
+        setTdsEntryChallan('');
+        setShowTDSEntryForm(false);
+        loadTDS();
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save TDS entry.');
+    }
+  };
+
+  const handleExportTDSReport = async () => {
+    try {
+      if (!tdsSummary || tdsLedger.length === 0) {
+        Alert.alert('No data', 'No TDS entries found for this financial year.');
+        return;
+      }
+      const rows = tdsLedger.map((entry: any) => `
+        <tr>
+          <td>${new Date(entry.created_at).toLocaleDateString('en-IN')}</td>
+          <td>${entry.transaction_type === 'platform_booking' ? 'Platform Booking' : 'Client Invoice'}</td>
+          <td style="text-align:right">₹${(entry.gross_amount || 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">${entry.tds_rate || 10}%</td>
+          <td style="text-align:right">₹${(entry.tds_amount || 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${(entry.net_amount || 0).toLocaleString('en-IN')}</td>
+          <td>${entry.tds_deducted_by === 'platform' ? 'Platform' : entry.tds_deducted_by === 'client' ? 'Client' : 'Self'}</td>
+          <td>${entry.challan_number || '—'}</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Helvetica, sans-serif; padding: 40px; color: #2C2420; }
+            h1 { font-size: 28px; font-weight: 300; letter-spacing: 4px; margin-bottom: 4px; }
+            h2 { font-size: 12px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 32px; }
+            .summary { background: #2C2420; padding: 24px; border-radius: 8px; color: #F5F0E8; margin-bottom: 32px; display: flex; gap: 40px; }
+            .summary-item { display: flex; flex-direction: column; gap: 4px; }
+            .summary-label { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; }
+            .summary-value { font-size: 22px; color: #C9A84C; font-weight: 300; }
+            .summary-value.white { color: #F5F0E8; }
+            table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+            th { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; padding: 10px 8px; border-bottom: 1px solid #E8E0D5; text-align: left; }
+            td { padding: 12px 8px; border-bottom: 1px solid #F5F0E8; font-size: 12px; }
+            .footer { margin-top: 40px; font-size: 10px; color: #8C7B6E; text-align: center; border-top: 1px solid #E8E0D5; padding-top: 20px; }
+            .notice { background: #FFF8EC; border: 1px solid #E8D9B5; border-radius: 8px; padding: 16px; margin-top: 24px; font-size: 12px; color: #8C7B6E; line-height: 1.6; }
+          </style>
+        </head>
+        <body>
+          <h1>THE DREAM WEDDING</h1>
+          <h2>TDS Reconciliation Report · ${vendorSession?.vendorName || 'Vendor'} · ${tdsSummary?.financial_year || ''}</h2>
+          <div class="summary">
+            <div class="summary-item">
+              <span class="summary-label">Total Gross Income</span>
+              <span class="summary-value">₹${(tdsSummary?.total_gross_income || 0).toLocaleString('en-IN')}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total TDS Deducted</span>
+              <span class="summary-value">₹${(tdsSummary?.total_tds_deducted || 0).toLocaleString('en-IN')}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Net Received</span>
+              <span class="summary-value white">₹${(tdsSummary?.total_net_received || 0).toLocaleString('en-IN')}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Platform TDS</span>
+              <span class="summary-value">₹${(tdsSummary?.platform_tds || 0).toLocaleString('en-IN')}</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Client TDS</span>
+              <span class="summary-value">₹${(tdsSummary?.client_tds || 0).toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th style="text-align:right">Gross</th>
+                <th style="text-align:right">TDS Rate</th>
+                <th style="text-align:right">TDS Amount</th>
+                <th style="text-align:right">Net</th>
+                <th>Deducted By</th>
+                <th>Challan</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="notice">
+            <strong>Note for CA:</strong> TDS deducted by platform is at source on vendor payout (post 5% platform commission). 
+            Client-deducted TDS is as declared by vendor. Self-declared entries are vendor's own records. 
+            Please verify against Form 26AS before filing. Platform TDS will reflect in 26AS under The Dream Wedding's TAN.
+          </div>
+          <div class="footer">
+            Generated by The Dream Wedding · thedreamwedding.in · ${tdsLedger.length} entries · Report generated ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+        </body>
+        </html>
+      `;
+
+      const printModule = await import('expo-print');
+      const sharingModule = await import('expo-sharing');
+      const { uri } = await printModule.printToFileAsync({ html });
+      await sharingModule.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'TDS Reconciliation Report',
+        UTI: 'com.adobe.pdf',
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not generate TDS report.');
+    }
+  };
+
   const handleBlockDate = async () => {
     if (!newBlockDate.trim()) return;
     try {
       const res = await blockDate(vendorSession.vendorId, newBlockDate.trim());
-      if (res.success) { setBlockedDates(prev => [...prev, res.data]); setNewBlockDate(''); setShowDateInput(false); }
+      if (res.success) {
+        setBlockedDates(prev => [...prev, res.data]);
+        setNewBlockDate('');
+        setShowDateInput(false);
+      }
     } catch (e) { Alert.alert('Error', 'Could not block date.'); }
   };
 
@@ -239,32 +426,48 @@ export default function VendorDashboardScreen() {
   const loadClients = async () => {
     try {
       setClientsLoading(true);
-      const stored = await AsyncStorage.getItem(`vendor_clients_${vendorSession.vendorId}`);
-      if (stored) setClients(JSON.parse(stored));
-    } catch (e) {} finally { setClientsLoading(false); }
-  };
-
-  const saveClients = async (updatedClients: any[]) => {
-    try {
-      await AsyncStorage.setItem(`vendor_clients_${vendorSession.vendorId}`, JSON.stringify(updatedClients));
-    } catch (e) {}
+      // Try Supabase first
+      const res = await fetch(`${API}/api/vendor-clients/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success && data.data?.length > 0) {
+        setClients(data.data);
+      } else {
+        // Fallback to AsyncStorage for existing clients
+        const stored = await AsyncStorage.getItem(`vendor_clients_${vendorSession.vendorId}`);
+        if (stored) setClients(JSON.parse(stored));
+      }
+    } catch (e) {
+      try {
+        const stored = await AsyncStorage.getItem(`vendor_clients_${vendorSession.vendorId}`);
+        if (stored) setClients(JSON.parse(stored));
+      } catch {}
+    } finally { setClientsLoading(false); }
   };
 
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: async () => {
-        await AsyncStorage.removeItem('vendor_session');
-        await AsyncStorage.removeItem('user_session');
-        router.replace('/login');
-      }}
+      {
+        text: 'Log Out', style: 'destructive', onPress: async () => {
+          await AsyncStorage.removeItem('vendor_session');
+          await AsyncStorage.removeItem('user_session');
+          router.replace('/login');
+        }
+      }
     ]);
   };
 
   const handleImageUpload = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) { Alert.alert('Permission needed', 'Please allow access to your photo library.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.8 });
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
     if (!result.canceled) {
       try {
         setUploadingImage(true);
@@ -276,81 +479,176 @@ export default function VendorDashboardScreen() {
     }
   };
 
-  const handleSendWhatsAppInvite = (client: any) => {
+  const handleSendWhatsAppInvite = async (client: any) => {
     const message = `Hi ${client.name.split('&')[0].trim()}! 👋\n\nI've added you to The Dream Wedding — India's premium wedding planning app.\n\nYour booking history with me is already saved. You can also discover other vendors and plan your entire wedding in one place.\n\nDownload here: https://thedreamwedding.in\n\nSee you there! 🎉`;
     const url = `whatsapp://send?phone=91${client.phone}&text=${encodeURIComponent(message)}`;
-    Linking.canOpenURL(url).then(supported => {
+    Linking.canOpenURL(url).then(async supported => {
       if (supported) {
         Linking.openURL(url);
-        const updated = clients.map(c => c.id === client.id ? { ...c, invited: true } : c);
-        setClients(updated);
-        saveClients(updated);
-      } else { Alert.alert('WhatsApp not found', 'Please make sure WhatsApp is installed.'); }
+        // Mark as invited in Supabase
+        try {
+          await fetch(`${API}/api/vendor-clients/${client.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invited: true }),
+          });
+        } catch {}
+        setClients(prev => prev.map(c => c.id === client.id ? { ...c, invited: true } : c));
+      } else {
+        Alert.alert('WhatsApp not found', 'Please make sure WhatsApp is installed.');
+      }
     });
   };
 
   const handleAddClient = async () => {
-    if (!newClientName || !newClientPhone || !newClientDate) { Alert.alert('Missing info', 'Please fill in all fields.'); return; }
-    const newClient = { id: Date.now().toString(), name: newClientName, phone: newClientPhone, wedding_date: newClientDate, status: 'upcoming', invited: false };
-    const updated = [...clients, newClient];
-    setClients(updated);
-    await saveClients(updated);
-    setNewClientName(''); setNewClientPhone(''); setNewClientDate('');
-    setShowAddClient(false);
-    Alert.alert('Client Added!', `${newClientName} added. Tap Send Invite to invite them via WhatsApp.`);
+    if (!newClientName || !newClientPhone || !newClientDate) {
+      Alert.alert('Missing info', 'Please fill in all fields.');
+      return;
+    }
+    try {
+      // Save to Supabase
+      const res = await fetch(`${API}/api/vendor-clients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          name: newClientName,
+          phone: newClientPhone,
+          wedding_date: newClientDate,
+          status: 'upcoming',
+          invited: false,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setClients(prev => [data.data, ...prev]);
+        setNewClientName('');
+        setNewClientPhone('');
+        setNewClientDate('');
+        setShowAddClient(false);
+        Alert.alert('Client Added!', `${newClientName} added. Tap Send Invite to invite them via WhatsApp.`);
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save client.');
+    }
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
     Alert.alert('Confirm Booking', 'This will lock the date and release escrow payment to you.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm', onPress: async () => {
-        try {
-          const res = await fetch(`https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-          const data = await res.json();
-          if (data.success) { Alert.alert('Confirmed!', 'Payment released from escrow.'); loadBookings(); }
-          else Alert.alert('Error', data.error || 'Could not confirm.');
-        } catch (e) { Alert.alert('Error', 'Network error.'); }
-      }}
+      {
+        text: 'Confirm', onPress: async () => {
+          try {
+            const res = await fetch(`${API}/api/bookings/${bookingId}/confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await res.json();
+            if (data.success) {
+              Alert.alert('Confirmed!', 'Payment released from escrow. TDS entry recorded automatically.');
+              loadBookings();
+              if (activeTab === 'Tax & Finance') loadTDS();
+            } else Alert.alert('Error', data.error || 'Could not confirm.');
+          } catch (e) { Alert.alert('Error', 'Network error.'); }
+        }
+      }
     ]);
   };
 
   const handleDeclineBooking = async (bookingId: string) => {
     Alert.alert('Decline Booking', 'Token will be refunded. ₹999 platform fee is retained.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Decline', style: 'destructive', onPress: async () => {
-        try {
-          const res = await fetch(`https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/decline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Vendor unavailable' }) });
-          const data = await res.json();
-          if (data.success) { Alert.alert('Declined', 'Refund initiated.'); loadBookings(); }
-          else Alert.alert('Error', data.error || 'Could not decline.');
-        } catch (e) { Alert.alert('Error', 'Network error.'); }
-      }}
+      {
+        text: 'Decline', style: 'destructive', onPress: async () => {
+          try {
+            const res = await fetch(`${API}/api/bookings/${bookingId}/decline`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'Vendor unavailable' }),
+            });
+            const data = await res.json();
+            if (data.success) {
+              Alert.alert('Declined', 'Refund initiated.');
+              loadBookings();
+            } else Alert.alert('Error', data.error || 'Could not decline.');
+          } catch (e) { Alert.alert('Error', 'Network error.'); }
+        }
+      }
     ]);
   };
 
   const handleGenerateInvoice = async () => {
-    if (!invoiceClient || !invoiceAmount) { Alert.alert('Missing info', 'Please enter client name and amount.'); return; }
+    if (!invoiceClient || !invoiceAmount) {
+      Alert.alert('Missing info', 'Please enter client name and amount.');
+      return;
+    }
     try {
+      const invNumber = generateInvoiceNumber();
+
+      // Save to Supabase with TDS
+      await fetch(`${API}/api/invoices/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          client_name: invoiceClient,
+          client_phone: invoicePhone,
+          amount: parseInt(invoiceAmount),
+          description: invoiceDesc || 'Wedding Services',
+          invoice_number: invNumber,
+          tds_applicable: invoiceTDSApplicable,
+          tds_deducted_by_client: invoiceTDSDeductedByClient,
+          tds_rate: 10,
+        }),
+      });
+
+      // Generate PDF
       await generateInvoicePDF({
         vendorName: vendorSession?.vendorName || 'Your Business',
         vendorPhone: vendorSession?.phone || '',
         vendorCity: vendorSession?.city || '',
         clientName: invoiceClient,
         amount: parseInt(invoiceAmount),
-        description: 'Wedding Services',
-        invoiceNumber: generateInvoiceNumber(),
+        description: invoiceDesc || 'Wedding Services',
+        invoiceNumber: invNumber,
         date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }),
       });
+
+      // Refresh invoices and TDS
+      loadInvoices();
+      if (invoiceTDSApplicable) loadTDS();
+
+      // Reset form
+      setInvoiceClient('');
+      setInvoicePhone('');
+      setInvoiceAmount('');
+      setInvoiceDesc('');
+      setInvoiceTDSApplicable(false);
+      setInvoiceTDSDeductedByClient(false);
+      setShowInvoiceForm(false);
+
     } catch { Alert.alert('Error', 'Could not generate invoice.'); }
   };
 
   const handleDownloadGSTReport = async () => {
     try {
-      if (invoices.length === 0) { Alert.alert('No invoices', 'No invoices found for this financial year.'); return; }
+      if (invoices.length === 0) {
+        Alert.alert('No invoices', 'No invoices found for this financial year.');
+        return;
+      }
       const totalIncome = invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0);
       const totalGST = invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0);
       const totalWithGST = invoices.reduce((s: number, i: any) => s + (i.total_amount || 0), 0);
-      const rows = invoices.map((inv: any) => `<tr><td>${inv.invoice_number || '—'}</td><td>${inv.client_name || '—'}</td><td>${new Date(inv.created_at).toLocaleDateString('en-IN')}</td><td style="text-align:right">₹${(inv.amount || 0).toLocaleString('en-IN')}</td><td style="text-align:right">₹${(inv.gst_amount || 0).toLocaleString('en-IN')}</td><td style="text-align:right">₹${(inv.total_amount || 0).toLocaleString('en-IN')}</td></tr>`).join('');
+      const rows = invoices.map((inv: any) => `
+        <tr>
+          <td>${inv.invoice_number || '—'}</td>
+          <td>${inv.client_name || '—'}</td>
+          <td>${new Date(inv.created_at).toLocaleDateString('en-IN')}</td>
+          <td style="text-align:right">₹${(inv.amount || 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${(inv.gst_amount || 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${(inv.total_amount || 0).toLocaleString('en-IN')}</td>
+        </tr>
+      `).join('');
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Helvetica,sans-serif;padding:40px;color:#2C2420}h1{font-size:24px;font-weight:300;letter-spacing:4px}h2{font-size:12px;color:#8C7B6E;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin-top:24px}th{font-size:10px;color:#8C7B6E;letter-spacing:1px;text-transform:uppercase;padding:10px 8px;border-bottom:1px solid #E8E0D5;text-align:left}td{padding:12px 8px;border-bottom:1px solid #F5F0E8;font-size:13px}.totals{margin-top:24px;background:#2C2420;padding:20px;border-radius:8px;color:#F5F0E8}.totals-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}.gold{color:#C9A84C;font-size:18px;font-weight:600}.footer{margin-top:40px;font-size:11px;color:#8C7B6E;text-align:center}</style></head><body><h1>DREAMWEDDING</h1><h2>GST Report — ${vendorSession?.vendorName || 'Vendor'} · FY ${new Date().getFullYear()}</h2><table><thead><tr><th>Invoice #</th><th>Client</th><th>Date</th><th style="text-align:right">Amount</th><th style="text-align:right">GST (18%)</th><th style="text-align:right">Total</th></tr></thead><tbody>${rows}</tbody></table><div class="totals"><div class="totals-row"><span>Total Income</span><span>₹${totalIncome.toLocaleString('en-IN')}</span></div><div class="totals-row"><span>Total GST (18%)</span><span>₹${totalGST.toLocaleString('en-IN')}</span></div><div class="totals-row"><span>Total Billed</span><span class="gold">₹${totalWithGST.toLocaleString('en-IN')}</span></div></div><div class="footer">Generated by The Dream Wedding · thedreamwedding.in · ${invoices.length} invoices</div></body></html>`;
       const printModule = await import('expo-print');
       const sharingModule = await import('expo-sharing');
@@ -360,9 +658,19 @@ export default function VendorDashboardScreen() {
   };
 
   const handleCreatePromo = () => {
-    if (!newPromoTitle || !newPromoExpiry) { Alert.alert('Missing info', 'Please fill in all fields.'); return; }
-    setPromos(prev => [...prev, { id: Date.now().toString(), title: newPromoTitle, expires: newPromoExpiry, active: true, leads: 0 }]);
-    setNewPromoTitle(''); setNewPromoExpiry('');
+    if (!newPromoTitle || !newPromoExpiry) {
+      Alert.alert('Missing info', 'Please fill in all fields.');
+      return;
+    }
+    setPromos(prev => [...prev, {
+      id: Date.now().toString(),
+      title: newPromoTitle,
+      expires: newPromoExpiry,
+      active: true,
+      leads: 0,
+    }]);
+    setNewPromoTitle('');
+    setNewPromoExpiry('');
     setShowPromoForm(false);
     Alert.alert('Promo Live!', 'Couples in your city will be notified.');
   };
@@ -385,9 +693,9 @@ export default function VendorDashboardScreen() {
   ];
 
   const MOCK_INQUIRIES = [
-    { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi! We loved your portfolio, especially the candid shots. Getting married Dec 15 in Delhi — 2 day coverage needed. What are your packages?', status: 'new' },
-    { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Looking for something editorial and fun for our Sangeet — not too traditional. Budget around Rs 1.5L. Would that work?', status: 'replied' },
-    { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Can you share pricing for 3 functions — Reception, Sangeet and Wedding day? Flexible on January dates.', status: 'new' },
+    { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi! We loved your portfolio, especially the candid shots. Getting married Dec 15 in Delhi — 2 day coverage needed. What are your packages?', status: 'new', phone: '9999999999' },
+    { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Looking for something editorial and fun for our Sangeet — not too traditional. Budget around Rs 1.5L. Would that work?', status: 'replied', phone: '8888888888' },
+    { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Can you share pricing for 3 functions — Reception, Sangeet and Wedding day? Flexible on January dates.', status: 'new', phone: '7777777777' },
   ];
 
   return (
@@ -398,7 +706,7 @@ export default function VendorDashboardScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add Client</Text>
-            <Text style={styles.modalSubtitle}>They'll get a WhatsApp invite to join The Dream Wedding</Text>
+            <Text style={styles.modalSubtitle}>Saved securely to your account</Text>
             <TextInput style={styles.modalInput} placeholder="Couple names (e.g. Priya & Rahul)" placeholderTextColor="#8C7B6E" value={newClientName} onChangeText={setNewClientName} />
             <TextInput style={styles.modalInput} placeholder="Phone number (10 digits)" placeholderTextColor="#8C7B6E" value={newClientPhone} onChangeText={setNewClientPhone} keyboardType="phone-pad" maxLength={10} />
             <TextInput style={styles.modalInput} placeholder="Wedding date (e.g. March 15, 2026)" placeholderTextColor="#8C7B6E" value={newClientDate} onChangeText={setNewClientDate} />
@@ -434,9 +742,7 @@ export default function VendorDashboardScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.businessName}>{vendorName}</Text>
-          <Text style={styles.category}>
-            {vendorCategory}{vendorCity ? ` · ${vendorCity}` : ''}
-          </Text>
+          <Text style={styles.category}>{vendorCategory}{vendorCity ? ` · ${vendorCity}` : ''}</Text>
         </View>
         <TouchableOpacity
           style={[styles.liveToggle, isLive && styles.liveToggleActive]}
@@ -469,8 +775,6 @@ export default function VendorDashboardScreen() {
         ════════════════════════════════ */}
         {activeTab === 'Overview' && (
           <View style={styles.tabPane}>
-
-            {/* Stats row */}
             <View style={styles.statsRow}>
               {[
                 { num: '142', lbl: 'Profile Views' },
@@ -484,20 +788,23 @@ export default function VendorDashboardScreen() {
               ))}
             </View>
 
-            {/* Revenue card */}
             <View style={styles.revenueCard}>
               <Text style={styles.revenueEyebrow}>REVENUE OVERVIEW</Text>
               <View style={styles.revenueRow}>
                 <View style={styles.revenueItem}>
                   <Text style={styles.revenueAmount}>
-                    {invoices.length > 0 ? `₹${Math.round(invoices.reduce((s, i) => s + (i.amount || 0), 0) / 100000 * 10) / 10}L` : '₹0'}
+                    {invoices.length > 0
+                      ? `₹${Math.round(invoices.reduce((s, i) => s + (i.amount || 0), 0) / 100000 * 10) / 10}L`
+                      : '₹0'}
                   </Text>
                   <Text style={styles.revenueLabel}>Earned</Text>
                 </View>
                 <View style={styles.revenueDivider} />
                 <View style={styles.revenueItem}>
                   <Text style={styles.revenueAmount}>
-                    {bookings.length > 0 ? `₹${Math.round(pendingBookings.reduce((s, b) => s + (b.token_amount || 0), 0) / 100000 * 10) / 10}L` : '₹0'}
+                    {pendingBookings.length > 0
+                      ? `₹${Math.round(pendingBookings.reduce((s, b) => s + (b.token_amount || 0), 0) / 100000 * 10) / 10}L`
+                      : '₹0'}
                   </Text>
                   <Text style={styles.revenueLabel}>In Escrow</Text>
                 </View>
@@ -509,7 +816,6 @@ export default function VendorDashboardScreen() {
               </View>
             </View>
 
-            {/* Spotlight Score */}
             <View style={styles.spotlightCard}>
               <View style={styles.spotlightHeader}>
                 <Feather name="star" size={13} color="#C9A84C" />
@@ -538,7 +844,6 @@ export default function VendorDashboardScreen() {
               <Text style={styles.spotlightHint}>Refreshes 1st of every month. Earned, not bought.</Text>
             </View>
 
-            {/* Pending bookings alert */}
             {pendingBookings.length > 0 && (
               <View style={styles.alertCard}>
                 <View style={styles.alertRow}>
@@ -552,7 +857,6 @@ export default function VendorDashboardScreen() {
               </View>
             )}
 
-            {/* Plan card */}
             <View style={styles.planCard}>
               <View style={styles.planLeft}>
                 <Text style={styles.planName}>{vendorPlan === 'premium' ? 'Premium Plan' : 'Basic Plan'}</Text>
@@ -563,7 +867,6 @@ export default function VendorDashboardScreen() {
               </View>
             </View>
 
-            {/* Upgrade card */}
             {vendorPlan !== 'premium' && (
               <View style={styles.upgradeCard}>
                 <View style={styles.upgradeRow}>
@@ -577,7 +880,6 @@ export default function VendorDashboardScreen() {
               </View>
             )}
 
-            {/* Market benchmark */}
             <View style={styles.benchmarkCard}>
               <View style={styles.benchmarkHeader}>
                 <Feather name="bar-chart-2" size={13} color="#C9A84C" />
@@ -601,7 +903,6 @@ export default function VendorDashboardScreen() {
               )}
             </View>
 
-            {/* Quick actions */}
             <View style={styles.actionGrid}>
               {[
                 { num: String(pendingBookings.length || 3), lbl: 'Pending\nBookings', tab: 'Inquiries' },
@@ -616,35 +917,17 @@ export default function VendorDashboardScreen() {
               ))}
             </View>
 
-            {/* Preview button */}
             <TouchableOpacity style={styles.previewBtn} onPress={() => router.push('/vendor-preview')}>
               <Feather name="eye" size={13} color="#C9A84C" />
               <Text style={styles.previewBtnText}>Preview your profile as couples see it</Text>
             </TouchableOpacity>
 
-            {/* Coming in Build 2 — overview teasers */}
             <View style={styles.comingSoonSection}>
               <Text style={styles.comingSoonHeader}>Coming in Build 2</Text>
-              <LockedFeature
-                icon="check-square"
-                title="Team Task Board"
-                desc="Assign tasks to your team per event. No more WhatsApp coordination chaos."
-                build="Build 2"
-              />
-              <LockedFeature
-                icon="clock"
-                title="Day-of Runsheet"
-                desc="Digital running order shared with your full team in real time."
-                build="Build 2"
-              />
-              <LockedFeature
-                icon="activity"
-                title="Performance Analytics"
-                desc="Conversion rates, seasonal demand curves and pricing intelligence."
-                build="Build 3"
-              />
+              <LockedFeature icon="check-square" title="Team Task Board" desc="Assign tasks to your team per event. No more WhatsApp coordination chaos." build="Build 2" />
+              <LockedFeature icon="clock" title="Day-of Runsheet" desc="Digital running order shared with your full team in real time." build="Build 2" />
+              <LockedFeature icon="activity" title="Performance Analytics" desc="Conversion rates, seasonal demand curves and pricing intelligence." build="Build 3" />
             </View>
-
           </View>
         )}
 
@@ -654,7 +937,6 @@ export default function VendorDashboardScreen() {
         {activeTab === 'Inquiries' && (
           <View style={styles.tabPane}>
 
-            {/* Pending bookings */}
             {pendingBookings.length > 0 && (
               <>
                 <Text style={styles.sectionLabel}>Awaiting Confirmation</Text>
@@ -683,7 +965,41 @@ export default function VendorDashboardScreen() {
               </>
             )}
 
-            {/* Lead pipeline */}
+            {/* Reply Templates */}
+            <Text style={styles.sectionLabel}>Quick Reply Templates</Text>
+            <View style={styles.listCard}>
+              {REPLY_TEMPLATES.map((template, index) => (
+                <View key={template.id}>
+                  <View style={styles.templateRow}>
+                    <View style={styles.templateInfo}>
+                      <Text style={styles.templateLabel}>{template.label}</Text>
+                      <Text style={styles.templatePreview} numberOfLines={1}>{template.message}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.templateCopyBtn}
+                      onPress={() => {
+                        Alert.alert(
+                          template.label,
+                          template.message,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Send via WhatsApp', onPress: () => {
+                                Linking.openURL(`whatsapp://send?text=${encodeURIComponent(template.message)}`);
+                              }
+                            }
+                          ]
+                        );
+                      }}
+                    >
+                      <Feather name="send" size={13} color="#C9A84C" />
+                    </TouchableOpacity>
+                  </View>
+                  {index < REPLY_TEMPLATES.length - 1 && <View style={styles.listDivider} />}
+                </View>
+              ))}
+            </View>
+
             <Text style={styles.sectionLabel}>Lead Pipeline</Text>
             {leadsLoading ? (
               <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
@@ -701,15 +1017,6 @@ export default function VendorDashboardScreen() {
                         <View style={[styles.stageBadge, { backgroundColor: (STAGE_COLORS[lead.stage] || '#8C7B6E') + '20' }]}>
                           <Text style={[styles.stageBadgeText, { color: STAGE_COLORS[lead.stage] || '#8C7B6E' }]}>{lead.stage}</Text>
                         </View>
-                        <View style={[styles.scoreBadge, {
-                          backgroundColor: lead.stage === 'Token Received' ? '#4CAF5020' : lead.stage === 'Quoted' ? '#C9A84C20' : '#E8E0D5'
-                        }]}>
-                          <Text style={[styles.scoreText, {
-                            color: lead.stage === 'Token Received' ? '#4CAF50' : lead.stage === 'Quoted' ? '#C9A84C' : '#8C7B6E'
-                          }]}>
-                            {lead.stage === 'Token Received' ? '🔥 Hot' : lead.stage === 'Quoted' ? '⚡ Warm' : lead.stage === 'Completed' ? '✓ Won' : '○ New'}
-                          </Text>
-                        </View>
                       </View>
                     </View>
                     {index < displayLeads.length - 1 && <View style={styles.listDivider} />}
@@ -718,7 +1025,6 @@ export default function VendorDashboardScreen() {
               </View>
             )}
 
-            {/* Incoming inquiries */}
             <Text style={styles.sectionLabel}>Incoming Enquiries</Text>
             {MOCK_INQUIRIES.map(inquiry => (
               <View key={inquiry.id} style={styles.inquiryCard}>
@@ -742,21 +1048,9 @@ export default function VendorDashboardScreen() {
               </View>
             ))}
 
-            {/* Locked: Client Approval Workflows */}
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
-            <LockedFeature
-              icon="file-text"
-              title="Client Approval Workflows"
-              desc="Submit mood boards and design concepts for couple approval. Full audit trail — no more disputed agreements."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="message-square"
-              title="Vendor-to-Vendor Messaging"
-              desc="Message the photographer, decorator and caterer booked on the same wedding — without routing through the couple."
-              build="Build 2"
-            />
-
+            <LockedFeature icon="file-text" title="Client Approval Workflows" desc="Submit mood boards and design concepts for couple approval. Full audit trail." build="Build 2" />
+            <LockedFeature icon="message-square" title="Vendor-to-Vendor Messaging" desc="Message the photographer, decorator and caterer booked on the same wedding." build="Build 2" />
           </View>
         )}
 
@@ -766,7 +1060,33 @@ export default function VendorDashboardScreen() {
         {activeTab === 'Calendar' && (
           <View style={styles.tabPane}>
             <Text style={styles.sectionLabel}>Availability</Text>
-            <Text style={styles.calendarHint}>Block dates you're already booked so couples see accurate availability</Text>
+            <Text style={styles.calendarHint}>Block dates you're already booked. Confirmed bookings are shown automatically.</Text>
+
+            {/* Confirmed bookings on calendar */}
+            {confirmedBookings.length > 0 && (
+              <>
+                <Text style={styles.sectionLabel}>Confirmed Bookings</Text>
+                <View style={styles.listCard}>
+                  {confirmedBookings.map((booking: any, index: number) => (
+                    <View key={booking.id}>
+                      <View style={styles.blockedRow}>
+                        <View style={styles.blockedDateRow}>
+                          <Feather name="check-circle" size={13} color="#C9A84C" />
+                          <View>
+                            <Text style={styles.blockedDate}>{booking.users?.name || 'Couple'}</Text>
+                            <Text style={styles.confirmedMeta}>Confirmed · ₹{(booking.token_amount || 10000).toLocaleString('en-IN')} token</Text>
+                          </View>
+                        </View>
+                        <View style={styles.confirmedBadge}>
+                          <Text style={styles.confirmedBadgeText}>Locked</Text>
+                        </View>
+                      </View>
+                      {index < confirmedBookings.length - 1 && <View style={styles.listDivider} />}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
 
             {calendarLoading ? (
               <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
@@ -824,21 +1144,9 @@ export default function VendorDashboardScreen() {
               </TouchableOpacity>
             )}
 
-            {/* Locked: Day-of Runsheet */}
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
-            <LockedFeature
-              icon="clock"
-              title="Day-of Runsheet"
-              desc="Build a running order — Baraat 7pm, Pheras 8:30pm — shared with your full team in real time. Push notifications 30 mins before each function."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="list"
-              title="Checklist Templates"
-              desc="Category-specific pre-wedding checklists that auto-attach to every new booking. Equipment packed, shot list confirmed, venue recce done."
-              build="Build 2"
-            />
-
+            <LockedFeature icon="clock" title="Day-of Runsheet" desc="Build a running order shared with your full team in real time." build="Build 2" />
+            <LockedFeature icon="list" title="Checklist Templates" desc="Category-specific pre-wedding checklists that auto-attach to every new booking." build="Build 2" />
           </View>
         )}
 
@@ -847,9 +1155,9 @@ export default function VendorDashboardScreen() {
         ════════════════════════════════ */}
         {activeTab === 'Tools' && (
           <View style={styles.tabPane}>
-
-            {/* Promo Engine — LIVE */}
             <Text style={styles.sectionLabel}>Live Tools</Text>
+
+            {/* Promo Engine */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -881,7 +1189,7 @@ export default function VendorDashboardScreen() {
               ))}
             </View>
 
-            {/* Portfolio — LIVE */}
+            {/* Portfolio */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -907,7 +1215,7 @@ export default function VendorDashboardScreen() {
               )}
             </View>
 
-            {/* Invoice Generator — LIVE */}
+            {/* Invoice Generator — upgraded */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -920,25 +1228,66 @@ export default function VendorDashboardScreen() {
                   <Text style={styles.toolActionText}>{showInvoiceForm ? 'Cancel' : 'Create'}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Professional branded invoices with auto GST calculation.</Text>
+              <Text style={styles.toolDesc}>Professional invoices with auto GST calculation. Saved to your account and linked to TDS records.</Text>
               {showInvoiceForm && (
                 <View style={styles.invoiceForm}>
                   <TextInput style={styles.fieldInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={invoiceClient} onChangeText={setInvoiceClient} />
+                  <TextInput style={styles.fieldInput} placeholder="Client phone (optional)" placeholderTextColor="#8C7B6E" value={invoicePhone} onChangeText={setInvoicePhone} keyboardType="phone-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Description (e.g. Wedding Photography)" placeholderTextColor="#8C7B6E" value={invoiceDesc} onChangeText={setInvoiceDesc} />
                   <TextInput style={styles.fieldInput} placeholder="Amount (₹)" placeholderTextColor="#8C7B6E" value={invoiceAmount} onChangeText={setInvoiceAmount} keyboardType="number-pad" />
+
                   {invoiceAmount ? (
                     <View style={styles.gstPreview}>
                       <Text style={styles.gstPreviewText}>GST (18%): ₹{(parseInt(invoiceAmount) * 0.18).toLocaleString('en-IN')}</Text>
                       <Text style={styles.gstPreviewTotal}>Total: ₹{(parseInt(invoiceAmount) * 1.18).toLocaleString('en-IN')}</Text>
                     </View>
                   ) : null}
+
+                  {/* TDS Toggle */}
+                  <View style={styles.tdsToggleRow}>
+                    <View style={styles.tdsToggleInfo}>
+                      <Text style={styles.tdsToggleLabel}>TDS Applicable (10%)</Text>
+                      <Text style={styles.tdsToggleHint}>Is TDS deductible on this invoice?</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.toggle, invoiceTDSApplicable && styles.toggleActive]}
+                      onPress={() => setInvoiceTDSApplicable(!invoiceTDSApplicable)}
+                    >
+                      <View style={[styles.toggleKnob, invoiceTDSApplicable && styles.toggleKnobActive]} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {invoiceTDSApplicable && (
+                    <>
+                      {invoiceAmount ? (
+                        <View style={[styles.gstPreview, { backgroundColor: '#F0F7F0' }]}>
+                          <Text style={[styles.gstPreviewText, { color: '#2D6A4F' }]}>TDS (10%): ₹{(parseInt(invoiceAmount) * 0.10).toLocaleString('en-IN')}</Text>
+                          <Text style={[styles.gstPreviewTotal, { color: '#2D6A4F' }]}>You receive: ₹{(parseInt(invoiceAmount) * 0.90).toLocaleString('en-IN')}</Text>
+                        </View>
+                      ) : null}
+                      <View style={styles.tdsToggleRow}>
+                        <View style={styles.tdsToggleInfo}>
+                          <Text style={styles.tdsToggleLabel}>Client deducted TDS</Text>
+                          <Text style={styles.tdsToggleHint}>Did the client already deduct TDS?</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.toggle, invoiceTDSDeductedByClient && styles.toggleActive]}
+                          onPress={() => setInvoiceTDSDeductedByClient(!invoiceTDSDeductedByClient)}
+                        >
+                          <View style={[styles.toggleKnob, invoiceTDSDeductedByClient && styles.toggleKnobActive]} />
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+
                   <TouchableOpacity style={styles.goldBtn} onPress={handleGenerateInvoice}>
-                    <Text style={styles.goldBtnText}>GENERATE INVOICE PDF</Text>
+                    <Text style={styles.goldBtnText}>GENERATE & SAVE INVOICE</Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
 
-            {/* GST Report — LIVE */}
+            {/* GST Report */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -954,20 +1303,19 @@ export default function VendorDashboardScreen() {
               <Text style={styles.toolDesc}>CA-ready annual GST summary. One tap to generate and share.</Text>
               <View style={styles.gstRow}>
                 {[
-                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}` : '₹84L', lbl: 'Total Income' },
-                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0).toLocaleString('en-IN')}` : '₹15.1L', lbl: 'GST (18%)' },
+                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}` : '₹0', lbl: 'Total Income' },
+                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0).toLocaleString('en-IN')}` : '₹0', lbl: 'GST (18%)' },
                   { amt: `FY ${new Date().getFullYear()}`, lbl: 'Period' },
-                ].map((g, i, arr) => (
+                ].map((g) => (
                   <View key={g.lbl} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
                     <Text style={styles.gstAmount}>{g.amt}</Text>
                     <Text style={styles.gstLabel}>{g.lbl}</Text>
-                    {i < arr.length - 1 && <View style={styles.gstDivider} />}
                   </View>
                 ))}
               </View>
             </View>
 
-            {/* Payment Tracker — LIVE */}
+            {/* Payment Tracker */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -980,10 +1328,26 @@ export default function VendorDashboardScreen() {
               <Text style={styles.toolDesc}>Track all incoming payments and pending amounts.</Text>
               <View style={styles.gstRow}>
                 {[
-                  { amt: '₹9L', lbl: 'Received', color: '#2C2420' },
-                  { amt: '₹6L', lbl: 'Pending', color: '#C9A84C' },
-                  { amt: '₹60K', lbl: 'In Escrow', color: '#2C2420' },
-                ].map((p, i, arr) => (
+                  {
+                    amt: invoices.length > 0
+                      ? `₹${invoices.filter((i: any) => i.status === 'paid').reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}`
+                      : '₹0',
+                    lbl: 'Received',
+                    color: '#2C2420',
+                  },
+                  {
+                    amt: pendingBookings.length > 0
+                      ? `₹${pendingBookings.reduce((s: any, b: any) => s + (b.token_amount || 0), 0).toLocaleString('en-IN')}`
+                      : '₹0',
+                    lbl: 'In Escrow',
+                    color: '#C9A84C',
+                  },
+                  {
+                    amt: String(confirmedBookings.length),
+                    lbl: 'Confirmed',
+                    color: '#4CAF50',
+                  },
+                ].map((p) => (
                   <View key={p.lbl} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
                     <Text style={[styles.gstAmount, { color: p.color }]}>{p.amt}</Text>
                     <Text style={styles.gstLabel}>{p.lbl}</Text>
@@ -992,7 +1356,7 @@ export default function VendorDashboardScreen() {
               </View>
             </View>
 
-            {/* Refer a Vendor — LIVE */}
+            {/* Refer a Vendor */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
                 <View style={styles.toolTitleRow}>
@@ -1011,67 +1375,8 @@ export default function VendorDashboardScreen() {
               <Text style={styles.toolDesc}>Refer another vendor and get 1 month subscription free.</Text>
             </View>
 
-            {/* Portfolio Analytics — LIVE */}
-            <View style={styles.toolCard}>
-              <View style={styles.toolHeader}>
-                <View style={styles.toolTitleRow}>
-                  <View style={styles.toolIconBox}>
-                    <Feather name="trending-up" size={14} color="#C9A84C" />
-                  </View>
-                  <Text style={styles.toolTitle}>Portfolio Analytics</Text>
-                </View>
-              </View>
-              <Text style={styles.toolDesc}>See which photos get the most saves and views.</Text>
-              <View style={styles.analyticsTable}>
-                {[
-                  { photo: 'Top portfolio image', saves: 47, views: 312 },
-                  { photo: 'Second image', saves: 38, views: 289 },
-                  { photo: 'Third image', saves: 31, views: 198 },
-                ].map((item, index, arr) => (
-                  <View key={item.photo}>
-                    <View style={styles.analyticsRow}>
-                      <Text style={styles.analyticsPhoto}>{item.photo}</Text>
-                      <Text style={styles.analyticsStats}>{item.saves} saves · {item.views} views</Text>
-                    </View>
-                    {index < arr.length - 1 && <View style={styles.listDivider} />}
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Competitor Benchmarking — LIVE */}
-            <View style={styles.toolCard}>
-              <View style={styles.toolHeader}>
-                <View style={styles.toolTitleRow}>
-                  <View style={styles.toolIconBox}>
-                    <Feather name="bar-chart-2" size={14} color="#C9A84C" />
-                  </View>
-                  <Text style={styles.toolTitle}>Competitor Benchmarking</Text>
-                </View>
-              </View>
-              <Text style={styles.toolDesc}>See how your pricing and traction compares to similar vendors in your city.</Text>
-              {benchmark && (
-                <View style={styles.benchmarkMini}>
-                  <Text style={styles.benchmarkMiniText}>
-                    Avg. in your category: ₹{benchmark.avgStartingPrice?.toLocaleString('en-IN')} starting price
-                  </Text>
-                  <Text style={styles.benchmarkMiniSub}>
-                    {benchmark.vendorCount} vendors · Range ₹{benchmark.minStartingPrice?.toLocaleString('en-IN')} – ₹{benchmark.maxStartingPrice?.toLocaleString('en-IN')}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* ADDITIONAL LOCKED TOOLS */}
-            <TouchableOpacity
-              style={styles.toolCard}
-              onPress={() => Alert.alert(
-                'WhatsApp Broadcast Tool — Build 2',
-                'One tap sends a promotional message to all your past clients on WhatsApp simultaneously. Create the message in the app, select your audience, hit send. Every decorator and photographer wants this — it alone justifies the ₹2,999/month subscription. Coming in Build 2.',
-                [{ text: 'I need this!' }]
-              )}
-              activeOpacity={0.85}
-            >
+            {/* Locked tools */}
+            <TouchableOpacity style={styles.toolCard} onPress={() => Alert.alert('WhatsApp Broadcast — Build 2', 'One tap sends a promotional message to all your past clients on WhatsApp simultaneously. Coming in Build 2.')} activeOpacity={0.85}>
               <View style={[styles.toolHeader, { opacity: 0.6 }]}>
                 <View style={styles.toolTitleRow}>
                   <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
@@ -1084,18 +1389,10 @@ export default function VendorDashboardScreen() {
                   <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
                 </View>
               </View>
-              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>One tap sends a promo to all past clients on WhatsApp. The most requested vendor feature in India.</Text>
+              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>One tap sends a promo to all past clients on WhatsApp.</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.toolCard}
-              onPress={() => Alert.alert(
-                'Spotlight Auction — Build 2',
-                'The top 3 Spotlight positions are earned by algorithm — saves, enquiries and bookings. But positions 4-10 can be bid for at ₹999/month each. High perceived value, low price, scales automatically. You compete on quality for the top spots and on budget for the visibility spots. Coming in Build 2.',
-                [{ text: 'Smart!' }]
-              )}
-              activeOpacity={0.85}
-            >
+            <TouchableOpacity style={styles.toolCard} onPress={() => Alert.alert('Spotlight Auction — Build 2', 'Bid for Spotlight positions 4-10 at ₹999/month. Top 3 are always earned by algorithm — never sold. Coming in Build 2.')} activeOpacity={0.85}>
               <View style={[styles.toolHeader, { opacity: 0.6 }]}>
                 <View style={styles.toolTitleRow}>
                   <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
@@ -1108,81 +1405,193 @@ export default function VendorDashboardScreen() {
                   <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
                 </View>
               </View>
-              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>Bid for Spotlight positions 4-10 at ₹999/month. Top 3 are always earned by algorithm — never sold.</Text>
+              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>Bid for Spotlight positions 4-10 at ₹999/month.</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.toolCard}
-              onPress={() => Alert.alert(
-                'Free Starter Tier — Build 2',
-                'A ₹99/month or free tier below Basic — just a profile and one enquiry per month. No CRM, no GST, no portfolio uploads. The goal is width in Year 1: get as many vendors into the ecosystem as possible, then push them up the tier ladder. Coming in Build 2.',
-                [{ text: 'Good thinking' }]
-              )}
-              activeOpacity={0.85}
-            >
-              <View style={[styles.toolHeader, { opacity: 0.6 }]}>
-                <View style={styles.toolTitleRow}>
-                  <View style={[styles.toolIconBox, { borderStyle: 'dashed' }]}>
-                    <Feather name="gift" size={14} color="#8C7B6E" />
-                  </View>
-                  <Text style={[styles.toolTitle, { color: '#8C7B6E' }]}>Free Starter Tier</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
-                  <Feather name="lock" size={10} color="#C9A84C" />
-                  <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Build 2</Text>
-                </View>
-              </View>
-              <Text style={[styles.toolDesc, { opacity: 0.7 }]}>A free listing tier for new vendors. Basic profile, 1 enquiry/month. Lower barrier to join, natural upgrade path.</Text>
-            </TouchableOpacity>
-
-            {/* BUILD 2 LOCKED TOOLS */}
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
-            <LockedFeature
-              icon="check-square"
-              title="Team Task Board"
-              desc="Assign tasks to team members per event. Set deadlines, track completion, get photo confirmation. Replaces WhatsApp coordination entirely."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="thumbs-up"
-              title="Client Approval Workflows"
-              desc="Send mood boards and design proposals for couple approval. Full audit trail — 'Couple approved this design on March 15, 2026 at 2:34pm.'"
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="users"
-              title="Team Management"
-              desc="Add team members with their own logins. Assign roles, manage access and track their task completion across all active events."
-              build="Build 2"
-            />
-
-            {/* BUILD 3 LOCKED TOOLS */}
+            <LockedFeature icon="check-square" title="Team Task Board" desc="Assign tasks to team members per event. Set deadlines, track completion." build="Build 2" />
+            <LockedFeature icon="thumbs-up" title="Client Approval Workflows" desc="Send mood boards for couple approval. Full audit trail." build="Build 2" />
             <Text style={styles.sectionLabel}>Coming in Build 3</Text>
-            <LockedFeature
-              icon="cpu"
-              title="AI Brief Generation"
-              desc="At the moment of booking, AI auto-generates a structured brief from the couple's onboarding data and sends it to you. No briefing calls needed."
-              build="Build 3"
-            />
-            <LockedFeature
-              icon="trending-up"
-              title="AI Pricing Intelligence"
-              desc="Dynamic pricing recommendations based on demand patterns, competitor rates and booking velocity. Know exactly when to raise or lower your price."
-              build="Build 3"
-            />
-            <LockedFeature
-              icon="bar-chart"
-              title="Full Performance Analytics"
-              desc="Enquiry-to-booking conversion rates, seasonal demand curves, revenue forecasting and competitor ranking history."
-              build="Build 3"
-            />
-            <LockedFeature
-              icon="map-pin"
-              title="Real-time Team Location"
-              desc="Opt-in location sharing for your team during active events. For event managers coordinating 50-person teams across multiple locations."
-              build="Build 3"
-            />
+            <LockedFeature icon="cpu" title="AI Brief Generation" desc="Auto-generates a structured brief from couple's onboarding data at booking moment." build="Build 3" />
+            <LockedFeature icon="bar-chart" title="Full Performance Analytics" desc="Conversion rates, seasonal demand curves, revenue forecasting." build="Build 3" />
+          </View>
+        )}
 
+        {/* ════════════════════════════════
+            TAX & FINANCE TAB
+        ════════════════════════════════ */}
+        {activeTab === 'Tax & Finance' && (
+          <View style={styles.tabPane}>
+
+            {tdsLoading ? (
+              <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 40 }} />
+            ) : (
+              <>
+                {/* TDS Summary Card */}
+                <View style={styles.revenueCard}>
+                  <Text style={styles.revenueEyebrow}>TDS RECONCILIATION · {tdsSummary?.financial_year || `FY ${new Date().getFullYear()}`}</Text>
+                  <View style={styles.revenueRow}>
+                    <View style={styles.revenueItem}>
+                      <Text style={styles.revenueAmount}>
+                        ₹{(tdsSummary?.total_gross_income || 0).toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.revenueLabel}>Gross Income</Text>
+                    </View>
+                    <View style={styles.revenueDivider} />
+                    <View style={styles.revenueItem}>
+                      <Text style={styles.revenueAmount}>
+                        ₹{(tdsSummary?.total_tds_deducted || 0).toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.revenueLabel}>TDS Deducted</Text>
+                    </View>
+                    <View style={styles.revenueDivider} />
+                    <View style={styles.revenueItem}>
+                      <Text style={styles.revenueAmount}>
+                        ₹{(tdsSummary?.total_net_received || 0).toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.revenueLabel}>Net Received</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* TDS Breakdown */}
+                <View style={styles.listCard}>
+                  <View style={{ padding: 16, gap: 12 }}>
+                    <Text style={styles.sectionLabel}>TDS Breakdown</Text>
+                    {[
+                      { label: 'Platform TDS (auto)', amount: tdsSummary?.platform_tds || 0, color: '#C9A84C', note: 'Deducted at source by The Dream Wedding' },
+                      { label: 'Client TDS (declared)', amount: tdsSummary?.client_tds || 0, color: '#4CAF50', note: 'Declared by you as deducted by client' },
+                      { label: 'Self-declared TDS', amount: tdsSummary?.self_declared_tds || 0, color: '#8C7B6E', note: 'Manually added entries' },
+                    ].map((item, index, arr) => (
+                      <View key={item.label}>
+                        <View style={styles.tdsBreakdownRow}>
+                          <View style={[styles.tdsBreakdownDot, { backgroundColor: item.color }]} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.tdsBreakdownLabel}>{item.label}</Text>
+                            <Text style={styles.tdsBreakdownNote}>{item.note}</Text>
+                          </View>
+                          <Text style={[styles.tdsBreakdownAmount, { color: item.color }]}>
+                            ₹{item.amount.toLocaleString('en-IN')}
+                          </Text>
+                        </View>
+                        {index < arr.length - 1 && <View style={[styles.listDivider, { marginTop: 8 }]} />}
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* CA Export button */}
+                <TouchableOpacity style={styles.goldBtn} onPress={handleExportTDSReport}>
+                  <Feather name="download" size={14} color="#2C2420" />
+                  <Text style={styles.goldBtnText}>EXPORT FOR CA — PDF</Text>
+                </TouchableOpacity>
+
+                {/* Add manual TDS entry */}
+                <View style={styles.toolCard}>
+                  <View style={styles.toolHeader}>
+                    <View style={styles.toolTitleRow}>
+                      <View style={styles.toolIconBox}>
+                        <Feather name="plus-circle" size={14} color="#C9A84C" />
+                      </View>
+                      <Text style={styles.toolTitle}>Add TDS Entry</Text>
+                    </View>
+                    <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowTDSEntryForm(!showTDSEntryForm)}>
+                      <Text style={styles.toolActionText}>{showTDSEntryForm ? 'Cancel' : 'Add'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.toolDesc}>Add client payments where TDS was deducted but not through the platform.</Text>
+
+                  {showTDSEntryForm && (
+                    <View style={styles.invoiceForm}>
+                      <TextInput style={styles.fieldInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={tdsEntryClient} onChangeText={setTdsEntryClient} />
+                      <TextInput style={styles.fieldInput} placeholder="Gross amount received (₹)" placeholderTextColor="#8C7B6E" value={tdsEntryAmount} onChangeText={setTdsEntryAmount} keyboardType="number-pad" />
+
+                      {tdsEntryAmount ? (
+                        <View style={styles.gstPreview}>
+                          <Text style={styles.gstPreviewText}>TDS (10%): ₹{(parseInt(tdsEntryAmount) * 0.10).toLocaleString('en-IN')}</Text>
+                          <Text style={styles.gstPreviewTotal}>Net after TDS: ₹{(parseInt(tdsEntryAmount) * 0.90).toLocaleString('en-IN')}</Text>
+                        </View>
+                      ) : null}
+
+                      <View style={styles.tdsToggleRow}>
+                        <Text style={styles.tdsToggleLabel}>Deducted by:</Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          {(['client', 'self'] as const).map(opt => (
+                            <TouchableOpacity
+                              key={opt}
+                              style={[styles.segmentBtn, tdsEntryDeductedBy === opt && styles.segmentBtnActive]}
+                              onPress={() => setTdsEntryDeductedBy(opt)}
+                            >
+                              <Text style={[styles.segmentBtnText, tdsEntryDeductedBy === opt && styles.segmentBtnTextActive]}>
+                                {opt === 'client' ? 'Client' : 'Self'}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+
+                      <TextInput style={styles.fieldInput} placeholder="Challan number (optional)" placeholderTextColor="#8C7B6E" value={tdsEntryChallan} onChangeText={setTdsEntryChallan} />
+
+                      <TouchableOpacity style={styles.goldBtn} onPress={handleAddTDSEntry}>
+                        <Text style={styles.goldBtnText}>SAVE TDS ENTRY</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+
+                {/* TDS Ledger */}
+                <Text style={styles.sectionLabel}>TDS Ledger ({tdsLedger.length} entries)</Text>
+                {tdsLedger.length === 0 ? (
+                  <View style={styles.emptyCard}>
+                    <Feather name="file-text" size={28} color="#C4B8AC" />
+                    <Text style={styles.emptyTitle}>No entries yet</Text>
+                    <Text style={styles.emptySub}>TDS entries are created automatically when bookings are confirmed. Add manual entries above for offline transactions.</Text>
+                  </View>
+                ) : (
+                  <View style={styles.listCard}>
+                    {tdsLedger.map((entry: any, index: number) => (
+                      <View key={entry.id}>
+                        <View style={styles.tdsLedgerRow}>
+                          <View style={{ flex: 1, gap: 3 }}>
+                            <Text style={styles.tdsLedgerType}>
+                              {entry.transaction_type === 'platform_booking' ? '🔒 Platform Booking' : '📄 Client Invoice'}
+                            </Text>
+                            <Text style={styles.tdsLedgerDate}>{new Date(entry.created_at).toLocaleDateString('en-IN')}</Text>
+                            {entry.notes ? <Text style={styles.tdsLedgerNote} numberOfLines={1}>{entry.notes}</Text> : null}
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                            <Text style={styles.tdsLedgerGross}>₹{(entry.gross_amount || 0).toLocaleString('en-IN')}</Text>
+                            <Text style={styles.tdsLedgerTDS}>TDS: ₹{(entry.tds_amount || 0).toLocaleString('en-IN')}</Text>
+                            <View style={[styles.tdsSourceBadge, {
+                              backgroundColor: entry.tds_deducted_by === 'platform' ? '#C9A84C20' : entry.tds_deducted_by === 'client' ? '#4CAF5020' : '#E8E0D5'
+                            }]}>
+                              <Text style={[styles.tdsSourceText, {
+                                color: entry.tds_deducted_by === 'platform' ? '#C9A84C' : entry.tds_deducted_by === 'client' ? '#4CAF50' : '#8C7B6E'
+                              }]}>
+                                {entry.tds_deducted_by === 'platform' ? 'Platform' : entry.tds_deducted_by === 'client' ? 'Client' : 'Self'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                        {index < tdsLedger.length - 1 && <View style={styles.listDivider} />}
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* 26AS notice */}
+                <View style={styles.noticeBox}>
+                  <Feather name="info" size={14} color="#C9A84C" />
+                  <Text style={styles.noticeBoxText}>
+                    Platform TDS will appear in your Form 26AS under The Dream Wedding's TAN. Share this report with your CA before quarterly advance tax payment and annual ITR filing.
+                  </Text>
+                </View>
+
+                <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+                <LockedFeature icon="refresh-cw" title="26AS Auto-Sync" desc="Connect your TRACES account and reconcile automatically. No manual input needed." build="Build 2" />
+                <LockedFeature icon="calculator" title="Advance Tax Calculator" desc="Based on your income pattern, calculates exact advance tax instalments due in June, September, December and March." build="Build 2" />
+              </>
+            )}
           </View>
         )}
 
@@ -1222,18 +1631,8 @@ export default function VendorDashboardScreen() {
             ))}
 
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
-            <LockedFeature
-              icon="star"
-              title="Review Response System"
-              desc="Respond publicly to couple reviews. Your response is shown below their review on your profile — manage your reputation professionally."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="award"
-              title="Verified Elite Badge"
-              desc="Earn the Verified Elite badge after 5 confirmed app bookings with 4.8+ average rating. Displayed on your profile and in swipe cards."
-              build="Build 2"
-            />
+            <LockedFeature icon="star" title="Review Response System" desc="Respond publicly to couple reviews." build="Build 2" />
+            <LockedFeature icon="award" title="Verified Elite Badge" desc="Earn the badge after 5 confirmed app bookings with 4.8+ average rating." build="Build 2" />
           </View>
         )}
 
@@ -1293,25 +1692,9 @@ export default function VendorDashboardScreen() {
             )}
 
             <Text style={styles.sectionLabel}>Coming in Build 2</Text>
-            <LockedFeature
-              icon="database"
-              title="Bulk Client Import"
-              desc="Import your entire client database via CSV upload. All past couples onboard in one go and find their booking history waiting."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="gift"
-              title="Client Anniversary Reminders"
-              desc="Get reminded on each couple's wedding anniversary. One tap to send a personalised message — stay top of mind for referrals."
-              build="Build 2"
-            />
-            <LockedFeature
-              icon="repeat"
-              title="Repeat Booking Tracker"
-              desc="Track which clients have hired you more than once. Your most loyal clients are your best referral source — identify and nurture them."
-              build="Build 3"
-            />
-
+            <LockedFeature icon="database" title="Bulk Client Import" desc="Import your entire client database via CSV upload." build="Build 2" />
+            <LockedFeature icon="gift" title="Client Anniversary Reminders" desc="Get reminded on each couple's wedding anniversary. One tap to send a personalised message." build="Build 2" />
+            <LockedFeature icon="repeat" title="Repeat Booking Tracker" desc="Track which clients have hired you more than once." build="Build 3" />
           </View>
         )}
 
@@ -1339,8 +1722,6 @@ export default function VendorDashboardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
-
-  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 16 },
   headerLeft: { gap: 3 },
   businessName: { fontSize: 20, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
@@ -1351,27 +1732,20 @@ const styles = StyleSheet.create({
   liveDotActive: { backgroundColor: '#4CAF50' },
   liveToggleText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_500Medium' },
   liveToggleTextActive: { color: '#4CAF50' },
-
-  // Tabs
   tabScroll: { maxHeight: 44, marginBottom: 16 },
   tabContent: { paddingHorizontal: 24, gap: 8, alignItems: 'center' },
   tab: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 50, borderWidth: 1, borderColor: '#E8E0D5', backgroundColor: '#FFFFFF' },
   tabActive: { backgroundColor: '#2C2420', borderColor: '#2C2420' },
   tabText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   tabTextActive: { color: '#F5F0E8', fontFamily: 'DMSans_500Medium' },
-
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 24 },
   tabPane: { gap: 14 },
   sectionLabel: { fontSize: 11, color: '#8C7B6E', letterSpacing: 1.5, textTransform: 'uppercase', fontFamily: 'DMSans_500Medium' },
-
-  // Stats
   statsRow: { flexDirection: 'row', gap: 10 },
   statCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: '#E8E0D5' },
   statNumber: { fontSize: 26, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
   statLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', textAlign: 'center', letterSpacing: 0.3 },
-
-  // Revenue card
   revenueCard: { backgroundColor: '#2C2420', borderRadius: 16, padding: 20, gap: 14 },
   revenueEyebrow: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 },
   revenueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -1379,15 +1753,11 @@ const styles = StyleSheet.create({
   revenueDivider: { width: 1, height: 36, backgroundColor: '#3C3430' },
   revenueAmount: { fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_300Light' },
   revenueLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
-
-  // Alert card
   alertCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#C9A84C', gap: 6 },
   alertRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   alertTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
   alertText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   alertLink: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
-
-  // Plan card
   planCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#E8E0D5' },
   planLeft: { gap: 3 },
   planName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
@@ -1395,16 +1765,12 @@ const styles = StyleSheet.create({
   planBadge: { backgroundColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
   planBadgeElite: { backgroundColor: '#2C2420', borderWidth: 1, borderColor: '#C9A84C' },
   planBadgeText: { fontSize: 12, color: '#FFFFFF', fontFamily: 'DMSans_500Medium' },
-
-  // Upgrade card
   upgradeCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, gap: 10, borderWidth: 1, borderColor: '#E8D9B5' },
   upgradeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   upgradeTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
   upgradeText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
   upgradeBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
   upgradeBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium', letterSpacing: 1 },
-
-  // Benchmark
   benchmarkCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8D9B5', gap: 8 },
   benchmarkHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   benchmarkTitle: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium', flex: 1 },
@@ -1416,22 +1782,14 @@ const styles = StyleSheet.create({
   liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   liveDotSmall: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#4CAF50' },
   liveBadgeText: { fontSize: 10, color: '#4CAF50', fontFamily: 'DMSans_500Medium' },
-
-  // Action grid
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionCard: { width: (width - 58) / 2, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
   actionNumber: { fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_300Light' },
   actionLabel: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 16 },
-
-  // Preview btn
   previewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 14, backgroundColor: '#FFFFFF' },
   previewBtnText: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_300Light' },
-
-  // Coming soon section
   comingSoonSection: { gap: 10 },
   comingSoonHeader: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5, textTransform: 'uppercase' },
-
-  // Booking cards
   bookingCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#C9A84C', gap: 14 },
   bookingTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   bookingName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
@@ -1443,8 +1801,6 @@ const styles = StyleSheet.create({
   declineBtnText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_400Regular' },
   confirmBtn: { flex: 2, backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
   confirmBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium', letterSpacing: 0.8 },
-
-  // List cards
   listCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E8E0D5', overflow: 'hidden' },
   listDivider: { height: 1, backgroundColor: '#E8E0D5', marginHorizontal: 16 },
   leadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16 },
@@ -1455,10 +1811,6 @@ const styles = StyleSheet.create({
   leadValue: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
   stageBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 },
   stageBadgeText: { fontSize: 10, fontFamily: 'DMSans_500Medium' },
-  scoreBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 },
-  scoreText: { fontSize: 10, fontFamily: 'DMSans_500Medium' },
-
-  // Inquiries
   inquiryCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', gap: 10 },
   inquiryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   inquiryName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
@@ -1468,9 +1820,15 @@ const styles = StyleSheet.create({
   inquiryMessage: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20, fontStyle: 'italic' },
   replyBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   replyBtnText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
-
-  // Calendar
+  templateRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+  templateInfo: { flex: 1, gap: 3 },
+  templateLabel: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  templatePreview: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  templateCopyBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5', justifyContent: 'center', alignItems: 'center' },
   calendarHint: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
+  confirmedMeta: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: 2 },
+  confirmedBadge: { backgroundColor: '#C9A84C20', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  confirmedBadgeText: { fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
   blockedHeader: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E8E0D5' },
   blockedTitle: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_500Medium' },
   blockedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
@@ -1479,8 +1837,6 @@ const styles = StyleSheet.create({
   unblockBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
   unblockBtnText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_400Regular' },
   emptyText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
-
-  // Tool cards
   toolCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
   toolHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   toolTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1489,35 +1845,47 @@ const styles = StyleSheet.create({
   toolActionBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   toolActionText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
   toolDesc: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
-
-  // Promo
   promoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
   promoInfo: { flex: 1, gap: 3 },
   promoTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   promoMeta: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   promoBadge: { borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
   promoBadgeText: { fontSize: 11, fontFamily: 'DMSans_500Medium' },
-
-  // Invoice
   invoiceForm: { gap: 10, borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
   fieldInput: { backgroundColor: '#F5F0E8', borderRadius: 8, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 12, paddingHorizontal: 14, fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   gstPreview: { backgroundColor: '#F5F0E8', borderRadius: 8, padding: 12, gap: 4 },
   gstPreviewText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   gstPreviewTotal: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
-
-  // GST row
   gstRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
   gstAmount: { fontSize: 16, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
   gstLabel: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
-  gstDivider: { position: 'absolute', right: 0, top: 4, width: 1, height: 28, backgroundColor: '#E8E0D5' },
-
-  // Analytics
-  analyticsTable: { borderTopWidth: 1, borderTopColor: '#E8E0D5' },
-  analyticsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  analyticsPhoto: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
-  analyticsStats: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
-
-  // Reviews
+  tdsToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  tdsToggleInfo: { flex: 1, gap: 2 },
+  tdsToggleLabel: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  tdsToggleHint: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  toggle: { width: 44, height: 24, borderRadius: 12, backgroundColor: '#E8E0D5', justifyContent: 'center', paddingHorizontal: 2 },
+  toggleActive: { backgroundColor: '#C9A84C' },
+  toggleKnob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  toggleKnobActive: { transform: [{ translateX: 20 }] },
+  tdsBreakdownRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  tdsBreakdownDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4, flexShrink: 0 },
+  tdsBreakdownLabel: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  tdsBreakdownNote: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: 2 },
+  tdsBreakdownAmount: { fontSize: 15, fontFamily: 'PlayfairDisplay_300Light' },
+  tdsLedgerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14 },
+  tdsLedgerType: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  tdsLedgerDate: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  tdsLedgerNote: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', fontStyle: 'italic' },
+  tdsLedgerGross: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  tdsLedgerTDS: { fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_300Light' },
+  tdsSourceBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-end' },
+  tdsSourceText: { fontSize: 10, fontFamily: 'DMSans_500Medium' },
+  segmentBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#FFFFFF' },
+  segmentBtnActive: { backgroundColor: '#2C2420', borderColor: '#2C2420' },
+  segmentBtnText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_400Regular' },
+  segmentBtnTextActive: { color: '#F5F0E8', fontFamily: 'DMSans_500Medium' },
+  noticeBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFF8EC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E8D9B5' },
+  noticeBoxText: { flex: 1, fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 18 },
   ratingOverview: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
   ratingBig: { fontSize: 52, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
   ratingStars: { fontSize: 20, color: '#C9A84C' },
@@ -1533,8 +1901,6 @@ const styles = StyleSheet.create({
   reviewRating: { fontSize: 13, color: '#C9A84C' },
   videoThumb: { backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   videoThumbText: { fontSize: 14, color: '#F5F0E8', fontFamily: 'DMSans_300Light', letterSpacing: 0.5 },
-
-  // Clients
   clientsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   addClientBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#2C2420', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   addClientBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
@@ -1554,14 +1920,10 @@ const styles = StyleSheet.create({
   whatsappBtnDone: { backgroundColor: '#E8E0D5' },
   whatsappBtnText: { fontSize: 12, color: '#FFFFFF', fontFamily: 'DMSans_500Medium' },
   whatsappBtnTextDone: { color: '#8C7B6E' },
-
-  // Shared buttons
   goldBtn: { backgroundColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   goldBtnText: { fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_500Medium', letterSpacing: 1 },
   goldOutlineBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: '#FFFFFF' },
   goldOutlineBtnText: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_400Regular' },
-
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#F5F0E8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 28, gap: 14 },
   modalTitle: { fontSize: 24, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light', letterSpacing: 0.3 },
@@ -1571,8 +1933,6 @@ const styles = StyleSheet.create({
   modalBtnText: { fontSize: 13, color: '#F5F0E8', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 },
   modalCancel: { alignItems: 'center', paddingVertical: 8 },
   modalCancelText: { fontSize: 14, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
-
-  // Bottom nav
   bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8' },
   navItem: { alignItems: 'center', gap: 4 },
   navLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
@@ -1590,9 +1950,6 @@ const styles = StyleSheet.create({
   spotlightItemLbl: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
   spotlightDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.07)' },
   spotlightHint: { fontSize: 10, color: 'rgba(140,123,110,0.55)', fontFamily: 'DMSans_300Light' },
-  viralFlow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-  viralStep: { alignItems: 'center', gap: 6, flex: 1 },
-  viralStepNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)', justifyContent: 'center', alignItems: 'center' },
-  viralStepNumTxt: { fontSize: 13, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' },
-  viralStepTxt: { fontSize: 10, color: 'rgba(245,240,232,0.6)', fontFamily: 'DMSans_300Light', textAlign: 'center', lineHeight: 14 },
+  noticeCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFF8EC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E8D9B5' },
+  noticeCardText: { flex: 1, fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
 });
