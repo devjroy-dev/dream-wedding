@@ -6,15 +6,26 @@ import {
   ActivityIndicator, Alert, Dimensions, Image, Linking, Modal,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { getBenchmark, getInvoices, getLeads, getVendorBookings, getBlockedDates, blockDate, unblockDate } from '../services/api';
 import { uploadImage } from '../services/cloudinary';
 import { generateInvoiceNumber, generateInvoicePDF } from '../services/invoice';
+import {
+  useFonts,
+  PlayfairDisplay_300Light,
+  PlayfairDisplay_400Regular,
+  PlayfairDisplay_400Regular_Italic,
+  PlayfairDisplay_600SemiBold,
+} from '@expo-google-fonts/playfair-display';
+import {
+  DMSans_300Light,
+  DMSans_400Regular,
+  DMSans_500Medium,
+} from '@expo-google-fonts/dm-sans';
 
 const { width } = Dimensions.get('window');
 
 const TABS = ['Overview', 'Inquiries', 'Calendar', 'Tools', 'Reviews', 'Clients'];
-
-
 
 const STAGE_COLORS: Record<string, string> = {
   'New Inquiry': '#C9A84C',
@@ -28,11 +39,97 @@ const PROMOS = [
   { id: '2', title: 'Free Pre-Wedding Shoot', expires: 'Dec 15, 2025', active: false, leads: 0 },
 ];
 
+// ── Locked Feature Card ───────────────────────────────────────────────────────
+function LockedFeature({ icon, title, desc, build }: { icon: string; title: string; desc: string; build: string }) {
+  const buildColor = build === 'Build 2' ? '#C9A84C' : '#8C7B6E';
+  return (
+    <View style={lockedStyles.card}>
+      <View style={lockedStyles.inner}>
+        <View style={lockedStyles.iconBox}>
+          <Feather name={icon as any} size={16} color="#8C7B6E" />
+        </View>
+        <View style={lockedStyles.text}>
+          <Text style={lockedStyles.title}>{title}</Text>
+          <Text style={lockedStyles.desc}>{desc}</Text>
+        </View>
+        <View style={[lockedStyles.badge, { borderColor: buildColor }]}>
+          <Feather name="lock" size={9} color={buildColor} />
+          <Text style={[lockedStyles.badgeText, { color: buildColor }]}>{build}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const lockedStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#FAFAFA',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    borderStyle: 'dashed',
+    opacity: 0.7,
+  },
+  inner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+  },
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#F0EDE8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  text: { flex: 1, gap: 2 },
+  title: {
+    fontSize: 13,
+    color: '#8C7B6E',
+    fontFamily: 'PlayfairDisplay_400Regular',
+  },
+  desc: {
+    fontSize: 11,
+    color: '#B8ADA4',
+    fontFamily: 'DMSans_300Light',
+    lineHeight: 16,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderWidth: 1,
+    borderRadius: 50,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexShrink: 0,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.3,
+  },
+});
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function VendorDashboardScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Overview');
   const [isLive, setIsLive] = useState(true);
   const [vendorSession, setVendorSession] = useState<any>(null);
+
+  useFonts({
+    PlayfairDisplay_300Light,
+    PlayfairDisplay_400Regular,
+    PlayfairDisplay_400Regular_Italic,
+    PlayfairDisplay_600SemiBold,
+    DMSans_300Light,
+    DMSans_400Regular,
+    DMSans_500Medium,
+  });
 
   // Tools state
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
@@ -67,22 +164,15 @@ export default function VendorDashboardScreen() {
   const [showDateInput, setShowDateInput] = useState(false);
   const [newBlockDate, setNewBlockDate] = useState('');
 
-  useEffect(() => {
-    loadSession();
-  }, []);
+  useEffect(() => { loadSession(); }, []);
 
   useEffect(() => {
     if (vendorSession?.vendorId) {
       loadBenchmark();
       loadInvoices();
-      if (activeTab === 'Inquiries') {
-        loadLeads();
-        loadBookings();
-      }
+      if (activeTab === 'Inquiries') { loadLeads(); loadBookings(); }
       if (activeTab === 'Calendar') { loadBlockedDates(); }
-      if (activeTab === 'Clients') {
-        loadClients();
-      }
+      if (activeTab === 'Clients') { loadClients(); }
     }
   }, [vendorSession, activeTab]);
 
@@ -95,9 +185,7 @@ export default function VendorDashboardScreen() {
 
   const loadBenchmark = async () => {
     try {
-      const category = vendorSession?.category || 'photographers';
-      const city = vendorSession?.city || 'Delhi NCR';
-      const res = await getBenchmark(category, city);
+      const res = await getBenchmark(vendorSession?.category || 'photographers', vendorSession?.city || 'Delhi NCR');
       if (res.success) setBenchmark(res.data);
     } catch (e) {}
   };
@@ -107,8 +195,7 @@ export default function VendorDashboardScreen() {
       setLeadsLoading(true);
       const res = await getLeads(vendorSession.vendorId);
       if (res.success && res.data?.length > 0) setLeads(res.data);
-    } catch (e) {}
-    finally { setLeadsLoading(false); }
+    } catch (e) {} finally { setLeadsLoading(false); }
   };
 
   const loadBookings = async () => {
@@ -116,8 +203,7 @@ export default function VendorDashboardScreen() {
       setBookingsLoading(true);
       const res = await getVendorBookings(vendorSession.vendorId);
       if (res.success) setBookings(res.data || []);
-    } catch (e) {}
-    finally { setBookingsLoading(false); }
+    } catch (e) {} finally { setBookingsLoading(false); }
   };
 
   const loadInvoices = async () => {
@@ -132,19 +218,14 @@ export default function VendorDashboardScreen() {
       setCalendarLoading(true);
       const res = await getBlockedDates(vendorSession.vendorId);
       if (res.success) setBlockedDates(res.data || []);
-    } catch (e) {}
-    finally { setCalendarLoading(false); }
+    } catch (e) {} finally { setCalendarLoading(false); }
   };
 
   const handleBlockDate = async () => {
     if (!newBlockDate.trim()) return;
     try {
       const res = await blockDate(vendorSession.vendorId, newBlockDate.trim());
-      if (res.success) {
-        setBlockedDates(prev => [...prev, res.data]);
-        setNewBlockDate('');
-        setShowDateInput(false);
-      }
+      if (res.success) { setBlockedDates(prev => [...prev, res.data]); setNewBlockDate(''); setShowDateInput(false); }
     } catch (e) { Alert.alert('Error', 'Could not block date.'); }
   };
 
@@ -160,173 +241,95 @@ export default function VendorDashboardScreen() {
       setClientsLoading(true);
       const stored = await AsyncStorage.getItem(`vendor_clients_${vendorSession.vendorId}`);
       if (stored) setClients(JSON.parse(stored));
-    } catch (e) {}
-    finally { setClientsLoading(false); }
+    } catch (e) {} finally { setClientsLoading(false); }
   };
 
   const saveClients = async (updatedClients: any[]) => {
     try {
-      await AsyncStorage.setItem(
-        `vendor_clients_${vendorSession.vendorId}`,
-        JSON.stringify(updatedClients)
-      );
+      await AsyncStorage.setItem(`vendor_clients_${vendorSession.vendorId}`, JSON.stringify(updatedClients));
     } catch (e) {}
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Log Out',
-      'Are you sure you want to log out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log Out',
-          style: 'destructive',
-          onPress: async () => {
-            await AsyncStorage.removeItem('vendor_session');
-            await AsyncStorage.removeItem('user_session');
-            router.replace('/login');
-          }
-        }
-      ]
-    );
+    Alert.alert('Log Out', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: async () => {
+        await AsyncStorage.removeItem('vendor_session');
+        await AsyncStorage.removeItem('user_session');
+        router.replace('/login');
+      }}
+    ]);
   };
 
   const handleImageUpload = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow access to your photo library.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-    });
+    if (!permission.granted) { Alert.alert('Permission needed', 'Please allow access to your photo library.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.8 });
     if (!result.canceled) {
       try {
         setUploadingImage(true);
         const url = await uploadImage(result.assets[0].uri);
         setPortfolioImages(prev => [...prev, url]);
         Alert.alert('Uploaded!', 'Photo added to your portfolio.');
-      } catch {
-        Alert.alert('Upload failed', 'Please try again.');
-      } finally {
-        setUploadingImage(false);
-      }
+      } catch { Alert.alert('Upload failed', 'Please try again.'); }
+      finally { setUploadingImage(false); }
     }
   };
 
   const handleSendWhatsAppInvite = (client: any) => {
     const message = `Hi ${client.name.split('&')[0].trim()}! 👋\n\nI've added you to The Dream Wedding — India's premium wedding planning app.\n\nYour booking history with me is already saved. You can also discover other vendors and plan your entire wedding in one place.\n\nDownload here: https://thedreamwedding.in\n\nSee you there! 🎉`;
-    const phone = `91${client.phone}`;
-    const url = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
-
+    const url = `whatsapp://send?phone=91${client.phone}&text=${encodeURIComponent(message)}`;
     Linking.canOpenURL(url).then(supported => {
       if (supported) {
         Linking.openURL(url);
         const updated = clients.map(c => c.id === client.id ? { ...c, invited: true } : c);
         setClients(updated);
         saveClients(updated);
-      } else {
-        Alert.alert('WhatsApp not found', 'Please make sure WhatsApp is installed on your device.');
-      }
+      } else { Alert.alert('WhatsApp not found', 'Please make sure WhatsApp is installed.'); }
     });
   };
 
   const handleAddClient = async () => {
-    if (!newClientName || !newClientPhone || !newClientDate) {
-      Alert.alert('Missing info', 'Please fill in all fields.');
-      return;
-    }
-    const newClient = {
-      id: Date.now().toString(),
-      name: newClientName,
-      phone: newClientPhone,
-      wedding_date: newClientDate,
-      status: 'upcoming',
-      invited: false,
-    };
+    if (!newClientName || !newClientPhone || !newClientDate) { Alert.alert('Missing info', 'Please fill in all fields.'); return; }
+    const newClient = { id: Date.now().toString(), name: newClientName, phone: newClientPhone, wedding_date: newClientDate, status: 'upcoming', invited: false };
     const updated = [...clients, newClient];
     setClients(updated);
     await saveClients(updated);
-    setNewClientName('');
-    setNewClientPhone('');
-    setNewClientDate('');
+    setNewClientName(''); setNewClientPhone(''); setNewClientDate('');
     setShowAddClient(false);
-    Alert.alert('Client Added!', `${newClientName} added. Tap "Send Invite" to invite them via WhatsApp.`);
+    Alert.alert('Client Added!', `${newClientName} added. Tap Send Invite to invite them via WhatsApp.`);
   };
 
-  const handleConfirmBooking = async (bookingId: string, vendorName: string) => {
-    Alert.alert(
-      'Confirm Booking',
-      `Confirming this booking will lock the date and release the escrow payment to you.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            try {
-              const res = await fetch(
-                `https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/confirm`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-              );
-              const data = await res.json();
-              if (data.success) {
-                Alert.alert('Confirmed!', 'Booking confirmed. Payment released from escrow.');
-                loadBookings();
-              } else {
-                Alert.alert('Error', data.error || 'Could not confirm booking.');
-              }
-            } catch (e) {
-              Alert.alert('Error', 'Network error. Please try again.');
-            }
-          }
-        }
-      ]
-    );
+  const handleConfirmBooking = async (bookingId: string) => {
+    Alert.alert('Confirm Booking', 'This will lock the date and release escrow payment to you.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: async () => {
+        try {
+          const res = await fetch(`https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+          const data = await res.json();
+          if (data.success) { Alert.alert('Confirmed!', 'Payment released from escrow.'); loadBookings(); }
+          else Alert.alert('Error', data.error || 'Could not confirm.');
+        } catch (e) { Alert.alert('Error', 'Network error.'); }
+      }}
+    ]);
   };
 
   const handleDeclineBooking = async (bookingId: string) => {
-    Alert.alert(
-      'Decline Booking',
-      'The token will be refunded to the couple. The ₹999 platform fee is retained.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Decline',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const res = await fetch(
-                `https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/decline`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ reason: 'Vendor unavailable' }),
-                }
-              );
-              const data = await res.json();
-              if (data.success) {
-                Alert.alert('Declined', 'Booking declined. Token refund initiated for couple.');
-                loadBookings();
-              } else {
-                Alert.alert('Error', data.error || 'Could not decline booking.');
-              }
-            } catch (e) {
-              Alert.alert('Error', 'Network error. Please try again.');
-            }
-          }
-        }
-      ]
-    );
+    Alert.alert('Decline Booking', 'Token will be refunded. ₹999 platform fee is retained.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Decline', style: 'destructive', onPress: async () => {
+        try {
+          const res = await fetch(`https://dream-wedding-production-89ae.up.railway.app/api/bookings/${bookingId}/decline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Vendor unavailable' }) });
+          const data = await res.json();
+          if (data.success) { Alert.alert('Declined', 'Refund initiated.'); loadBookings(); }
+          else Alert.alert('Error', data.error || 'Could not decline.');
+        } catch (e) { Alert.alert('Error', 'Network error.'); }
+      }}
+    ]);
   };
 
   const handleGenerateInvoice = async () => {
-    if (!invoiceClient || !invoiceAmount) {
-      Alert.alert('Missing info', 'Please enter client name and amount.');
-      return;
-    }
+    if (!invoiceClient || !invoiceAmount) { Alert.alert('Missing info', 'Please enter client name and amount.'); return; }
     try {
       await generateInvoicePDF({
         vendorName: vendorSession?.vendorName || 'Your Business',
@@ -338,106 +341,30 @@ export default function VendorDashboardScreen() {
         invoiceNumber: generateInvoiceNumber(),
         date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }),
       });
-    } catch {
-      Alert.alert('Error', 'Could not generate invoice. Please try again.');
-    }
+    } catch { Alert.alert('Error', 'Could not generate invoice.'); }
   };
 
   const handleDownloadGSTReport = async () => {
     try {
-      if (invoices.length === 0) {
-        Alert.alert('No invoices', 'No invoices found for this financial year.');
-        return;
-      }
-      const totalIncome = invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
-      const totalGST = invoices.reduce((sum: number, inv: any) => sum + (inv.gst_amount || 0), 0);
-      const totalWithGST = invoices.reduce((sum: number, inv: any) => sum + (inv.total_amount || 0), 0);
-
-      const rows = invoices.map((inv: any) => `
-        <tr>
-          <td>${inv.invoice_number || '—'}</td>
-          <td>${inv.client_name || '—'}</td>
-          <td>${new Date(inv.created_at).toLocaleDateString('en-IN')}</td>
-          <td style="text-align:right">₹${(inv.amount || 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${(inv.gst_amount || 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${(inv.total_amount || 0).toLocaleString('en-IN')}</td>
-        </tr>
-      `).join('');
-
-      const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { font-family: Helvetica, sans-serif; padding: 40px; color: #2C2420; }
-            h1 { font-size: 24px; font-weight: 300; letter-spacing: 4px; color: #2C2420; }
-            h2 { font-size: 12px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 24px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 24px; }
-            th { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; padding: 10px 8px; border-bottom: 1px solid #E8E0D5; text-align: left; }
-            td { padding: 12px 8px; border-bottom: 1px solid #F5F0E8; font-size: 13px; }
-            .totals { margin-top: 24px; background: #2C2420; padding: 20px; border-radius: 8px; color: #F5F0E8; }
-            .totals-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
-            .gold { color: #C9A84C; font-size: 18px; font-weight: 600; }
-            .footer { margin-top: 40px; font-size: 11px; color: #8C7B6E; text-align: center; }
-          </style>
-        </head>
-        <body>
-          <h1>DREAMWEDDING</h1>
-          <h2>GST & Tax Report — ${vendorSession?.vendorName || 'Vendor'} · FY ${new Date().getFullYear()}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Invoice #</th>
-                <th>Client</th>
-                <th>Date</th>
-                <th style="text-align:right">Amount</th>
-                <th style="text-align:right">GST (18%)</th>
-                <th style="text-align:right">Total</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <div class="totals">
-            <div class="totals-row"><span>Total Income (excl. GST)</span><span>₹${totalIncome.toLocaleString('en-IN')}</span></div>
-            <div class="totals-row"><span>Total GST Collected (18%)</span><span>₹${totalGST.toLocaleString('en-IN')}</span></div>
-            <div class="totals-row"><span>Total Billed</span><span class="gold">₹${totalWithGST.toLocaleString('en-IN')}</span></div>
-          </div>
-          <div class="footer">Generated by The Dream Wedding · thedreamwedding.in · ${invoices.length} invoices · ${new Date().toLocaleDateString('en-IN')}</div>
-        </body>
-        </html>
-      `;
-
-      const { Print, Sharing } = await import('expo-print').then(p => ({ Print: p, Sharing: null })).catch(() => ({ Print: null, Sharing: null }));
+      if (invoices.length === 0) { Alert.alert('No invoices', 'No invoices found for this financial year.'); return; }
+      const totalIncome = invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+      const totalGST = invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0);
+      const totalWithGST = invoices.reduce((s: number, i: any) => s + (i.total_amount || 0), 0);
+      const rows = invoices.map((inv: any) => `<tr><td>${inv.invoice_number || '—'}</td><td>${inv.client_name || '—'}</td><td>${new Date(inv.created_at).toLocaleDateString('en-IN')}</td><td style="text-align:right">₹${(inv.amount || 0).toLocaleString('en-IN')}</td><td style="text-align:right">₹${(inv.gst_amount || 0).toLocaleString('en-IN')}</td><td style="text-align:right">₹${(inv.total_amount || 0).toLocaleString('en-IN')}</td></tr>`).join('');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Helvetica,sans-serif;padding:40px;color:#2C2420}h1{font-size:24px;font-weight:300;letter-spacing:4px}h2{font-size:12px;color:#8C7B6E;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px}table{width:100%;border-collapse:collapse;margin-top:24px}th{font-size:10px;color:#8C7B6E;letter-spacing:1px;text-transform:uppercase;padding:10px 8px;border-bottom:1px solid #E8E0D5;text-align:left}td{padding:12px 8px;border-bottom:1px solid #F5F0E8;font-size:13px}.totals{margin-top:24px;background:#2C2420;padding:20px;border-radius:8px;color:#F5F0E8}.totals-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}.gold{color:#C9A84C;font-size:18px;font-weight:600}.footer{margin-top:40px;font-size:11px;color:#8C7B6E;text-align:center}</style></head><body><h1>DREAMWEDDING</h1><h2>GST Report — ${vendorSession?.vendorName || 'Vendor'} · FY ${new Date().getFullYear()}</h2><table><thead><tr><th>Invoice #</th><th>Client</th><th>Date</th><th style="text-align:right">Amount</th><th style="text-align:right">GST (18%)</th><th style="text-align:right">Total</th></tr></thead><tbody>${rows}</tbody></table><div class="totals"><div class="totals-row"><span>Total Income</span><span>₹${totalIncome.toLocaleString('en-IN')}</span></div><div class="totals-row"><span>Total GST (18%)</span><span>₹${totalGST.toLocaleString('en-IN')}</span></div><div class="totals-row"><span>Total Billed</span><span class="gold">₹${totalWithGST.toLocaleString('en-IN')}</span></div></div><div class="footer">Generated by The Dream Wedding · thedreamwedding.in · ${invoices.length} invoices</div></body></html>`;
       const printModule = await import('expo-print');
       const sharingModule = await import('expo-sharing');
       const { uri } = await printModule.printToFileAsync({ html });
-      await sharingModule.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'GST Report',
-        UTI: 'com.adobe.pdf',
-      });
-    } catch (e) {
-      Alert.alert('Error', 'Could not generate GST report. Please try again.');
-    }
+      await sharingModule.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'GST Report', UTI: 'com.adobe.pdf' });
+    } catch (e) { Alert.alert('Error', 'Could not generate GST report.'); }
   };
 
   const handleCreatePromo = () => {
-    if (!newPromoTitle || !newPromoExpiry) {
-      Alert.alert('Missing info', 'Please fill in all fields.');
-      return;
-    }
-    setPromos(prev => [...prev, {
-      id: Date.now().toString(),
-      title: newPromoTitle,
-      expires: newPromoExpiry,
-      active: true,
-      leads: 0,
-    }]);
-    setNewPromoTitle('');
-    setNewPromoExpiry('');
+    if (!newPromoTitle || !newPromoExpiry) { Alert.alert('Missing info', 'Please fill in all fields.'); return; }
+    setPromos(prev => [...prev, { id: Date.now().toString(), title: newPromoTitle, expires: newPromoExpiry, active: true, leads: 0 }]);
+    setNewPromoTitle(''); setNewPromoExpiry('');
     setShowPromoForm(false);
-    Alert.alert('Promo Live!', 'Couples in your city will be notified of your offer.');
+    Alert.alert('Promo Live!', 'Couples in your city will be notified.');
   };
 
   const vendorName = vendorSession?.vendorName || 'Your Business';
@@ -446,7 +373,6 @@ export default function VendorDashboardScreen() {
     : 'Vendor';
   const vendorCity = vendorSession?.city || '';
   const vendorPlan = vendorSession?.plan || 'basic';
-
   const pendingBookings = bookings.filter((b: any) => b.status === 'pending_confirmation');
   const confirmedBookings = bookings.filter((b: any) => b.status === 'confirmed');
 
@@ -467,7 +393,7 @@ export default function VendorDashboardScreen() {
   return (
     <View style={styles.container}>
 
-      {/* Add Client Modal */}
+      {/* ── Add Client Modal ── */}
       <Modal visible={showAddClient} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -477,7 +403,7 @@ export default function VendorDashboardScreen() {
             <TextInput style={styles.modalInput} placeholder="Phone number (10 digits)" placeholderTextColor="#8C7B6E" value={newClientPhone} onChangeText={setNewClientPhone} keyboardType="phone-pad" maxLength={10} />
             <TextInput style={styles.modalInput} placeholder="Wedding date (e.g. March 15, 2026)" placeholderTextColor="#8C7B6E" value={newClientDate} onChangeText={setNewClientDate} />
             <TouchableOpacity style={styles.modalBtn} onPress={handleAddClient}>
-              <Text style={styles.modalBtnText}>Add Client</Text>
+              <Text style={styles.modalBtnText}>ADD CLIENT</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalCancel} onPress={() => setShowAddClient(false)}>
               <Text style={styles.modalCancelText}>Cancel</Text>
@@ -486,7 +412,7 @@ export default function VendorDashboardScreen() {
         </View>
       </Modal>
 
-      {/* Create Promo Modal */}
+      {/* ── Create Promo Modal ── */}
       <Modal visible={showPromoForm} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -495,7 +421,7 @@ export default function VendorDashboardScreen() {
             <TextInput style={styles.modalInput} placeholder="Promo title (e.g. 15% Off December Bookings)" placeholderTextColor="#8C7B6E" value={newPromoTitle} onChangeText={setNewPromoTitle} />
             <TextInput style={styles.modalInput} placeholder="Expires on (e.g. Dec 31, 2025)" placeholderTextColor="#8C7B6E" value={newPromoExpiry} onChangeText={setNewPromoExpiry} />
             <TouchableOpacity style={styles.modalBtn} onPress={handleCreatePromo}>
-              <Text style={styles.modalBtnText}>Go Live</Text>
+              <Text style={styles.modalBtnText}>GO LIVE</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalCancel} onPress={() => setShowPromoForm(false)}>
               <Text style={styles.modalCancelText}>Cancel</Text>
@@ -504,11 +430,13 @@ export default function VendorDashboardScreen() {
         </View>
       </Modal>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.businessName}>{vendorName}</Text>
-          <Text style={styles.category}>{vendorCategory}{vendorCity ? ` · ${vendorCity}` : ''}</Text>
+          <Text style={styles.category}>
+            {vendorCategory}{vendorCity ? ` · ${vendorCity}` : ''}
+          </Text>
         </View>
         <TouchableOpacity
           style={[styles.liveToggle, isLive && styles.liveToggleActive]}
@@ -521,10 +449,14 @@ export default function VendorDashboardScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Tabs */}
+      {/* ── Tabs ── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll} contentContainerStyle={styles.tabContent}>
         {TABS.map(tab => (
-          <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => setActiveTab(tab)}>
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => setActiveTab(tab)}
+          >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
           </TouchableOpacity>
         ))}
@@ -532,36 +464,40 @@ export default function VendorDashboardScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 
-        {/* OVERVIEW */}
+        {/* ════════════════════════════════
+            OVERVIEW TAB
+        ════════════════════════════════ */}
         {activeTab === 'Overview' && (
           <View style={styles.tabPane}>
+
+            {/* Stats row */}
             <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>142</Text>
-                <Text style={styles.statLabel}>Profile Views</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>38</Text>
-                <Text style={styles.statLabel}>Hearts</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>12</Text>
-                <Text style={styles.statLabel}>Inquiries</Text>
-              </View>
+              {[
+                { num: '142', lbl: 'Profile Views' },
+                { num: '38', lbl: 'Hearts' },
+                { num: '12', lbl: 'Enquiries' },
+              ].map(s => (
+                <View key={s.lbl} style={styles.statCard}>
+                  <Text style={styles.statNumber}>{s.num}</Text>
+                  <Text style={styles.statLabel}>{s.lbl}</Text>
+                </View>
+              ))}
             </View>
 
+            {/* Revenue card */}
             <View style={styles.revenueCard}>
+              <Text style={styles.revenueEyebrow}>REVENUE OVERVIEW</Text>
               <View style={styles.revenueRow}>
                 <View style={styles.revenueItem}>
                   <Text style={styles.revenueAmount}>
-                    {invoices.length > 0 ? `₹${Math.round(invoices.reduce((s,i) => s + (i.amount||0), 0) / 100000 * 10) / 10}L` : '₹0'}
+                    {invoices.length > 0 ? `₹${Math.round(invoices.reduce((s, i) => s + (i.amount || 0), 0) / 100000 * 10) / 10}L` : '₹0'}
                   </Text>
                   <Text style={styles.revenueLabel}>Earned</Text>
                 </View>
                 <View style={styles.revenueDivider} />
                 <View style={styles.revenueItem}>
                   <Text style={styles.revenueAmount}>
-                    {bookings.length > 0 ? `₹${Math.round(bookings.filter(b => b.status === 'pending_confirmation').reduce((s,b) => s + (b.token_amount||0), 0) / 100000 * 10) / 10}L` : '₹0'}
+                    {bookings.length > 0 ? `₹${Math.round(pendingBookings.reduce((s, b) => s + (b.token_amount || 0), 0) / 100000 * 10) / 10}L` : '₹0'}
                   </Text>
                   <Text style={styles.revenueLabel}>In Escrow</Text>
                 </View>
@@ -571,66 +507,63 @@ export default function VendorDashboardScreen() {
                   <Text style={styles.revenueLabel}>Confirmed</Text>
                 </View>
               </View>
-              {invoices.length > 0 && (
-                <View style={styles.forecastRow}>
-                  <Text style={styles.forecastText}>
-                    📈 Projected this year: ₹{Math.round(invoices.reduce((s,i) => s + (i.amount||0), 0) / new Date().getMonth() * 12 / 100000 * 10) / 10}L based on current pace
-                  </Text>
-                </View>
-              )}
             </View>
 
+            {/* Pending bookings alert */}
             {pendingBookings.length > 0 && (
               <View style={styles.alertCard}>
-                <Text style={styles.alertTitle}>⚡ {pendingBookings.length} booking{pendingBookings.length > 1 ? 's' : ''} waiting for your confirmation</Text>
-                <Text style={styles.alertText}>Confirm within 48 hours or the token is auto-refunded</Text>
+                <View style={styles.alertRow}>
+                  <Feather name="zap" size={14} color="#C9A84C" />
+                  <Text style={styles.alertTitle}>{pendingBookings.length} booking{pendingBookings.length > 1 ? 's' : ''} waiting</Text>
+                </View>
+                <Text style={styles.alertText}>Confirm within 48 hours or token is auto-refunded</Text>
                 <TouchableOpacity onPress={() => setActiveTab('Inquiries')}>
                   <Text style={styles.alertLink}>Review now →</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            <View style={styles.subscriptionCard}>
-              <View>
-                <Text style={styles.subscriptionPlan}>
-                  {vendorPlan === 'premium' ? 'Premium Plan' : 'Basic Plan'}
-                </Text>
-                <Text style={styles.subscriptionDetail}>
-                  {vendorPlan === 'premium' ? 'Priority placement · Verified Elite eligible' : 'Upgrade for priority placement'}
-                </Text>
+            {/* Plan card */}
+            <View style={styles.planCard}>
+              <View style={styles.planLeft}>
+                <Text style={styles.planName}>{vendorPlan === 'premium' ? 'Premium Plan' : 'Basic Plan'}</Text>
+                <Text style={styles.planDetail}>{vendorPlan === 'premium' ? 'Priority placement · Verified Elite eligible' : 'Upgrade for priority placement'}</Text>
               </View>
-              <View style={[styles.verifiedBadge, vendorPlan === 'premium' && styles.eliteBadge]}>
-                <Text style={styles.verifiedBadgeText}>
-                  {vendorPlan === 'premium' ? '★ Elite' : '✓ Active'}
-                </Text>
+              <View style={[styles.planBadge, vendorPlan === 'premium' && styles.planBadgeElite]}>
+                <Text style={styles.planBadgeText}>{vendorPlan === 'premium' ? '★ Elite' : '✓ Active'}</Text>
               </View>
             </View>
-            {vendorPlan === 'premium' && confirmedBookings.length >= 3 && (
-              <View style={styles.eliteCard}>
-                <Text style={styles.eliteCardTitle}>★ Verified Elite Status</Text>
-                <Text style={styles.eliteCardText}>
-                  You qualify for Verified Elite badge — {confirmedBookings.length} confirmed bookings via the platform. Your profile gets priority placement in swipe decks.
-                </Text>
-              </View>
-            )}
+
+            {/* Upgrade card */}
             {vendorPlan !== 'premium' && (
               <View style={styles.upgradeCard}>
-                <Text style={styles.upgradeCardTitle}>Unlock Verified Elite</Text>
-                <Text style={styles.upgradeCardText}>Upgrade to Premium to get priority placement, Elite badge and competitor benchmarking.</Text>
+                <View style={styles.upgradeRow}>
+                  <Feather name="trending-up" size={16} color="#C9A84C" />
+                  <Text style={styles.upgradeTitle}>Unlock Verified Elite</Text>
+                </View>
+                <Text style={styles.upgradeText}>Priority placement in swipe deck, Elite badge and competitor benchmarking.</Text>
                 <TouchableOpacity style={styles.upgradeBtn}>
-                  <Text style={styles.upgradeBtnText}>Upgrade to Premium →</Text>
+                  <Text style={styles.upgradeBtnText}>UPGRADE TO PREMIUM</Text>
                 </TouchableOpacity>
               </View>
             )}
 
+            {/* Market benchmark */}
             <View style={styles.benchmarkCard}>
-              <Text style={styles.benchmarkTitle}>Market Benchmark · Live</Text>
+              <View style={styles.benchmarkHeader}>
+                <Feather name="bar-chart-2" size={13} color="#C9A84C" />
+                <Text style={styles.benchmarkTitle}>Market Benchmark</Text>
+                <View style={styles.liveBadge}>
+                  <View style={styles.liveDotSmall} />
+                  <Text style={styles.liveBadgeText}>Live</Text>
+                </View>
+              </View>
               {benchmark ? (
                 <>
                   <Text style={styles.benchmarkText}>
                     Average starting price for {vendorCategory} in {vendorCity} is ₹{benchmark.avgStartingPrice?.toLocaleString('en-IN')} across {benchmark.vendorCount} vendors.
                   </Text>
-                  <Text style={[styles.benchmarkText, { color: '#C9A84C', marginTop: 4 }]}>
+                  <Text style={styles.benchmarkRange}>
                     Range: ₹{benchmark.minStartingPrice?.toLocaleString('en-IN')} – ₹{benchmark.maxStartingPrice?.toLocaleString('en-IN')}
                   </Text>
                 </>
@@ -639,67 +572,81 @@ export default function VendorDashboardScreen() {
               )}
             </View>
 
+            {/* Quick actions */}
             <View style={styles.actionGrid}>
-              <TouchableOpacity style={styles.actionCard} onPress={() => setActiveTab('Inquiries')}>
-                <Text style={styles.actionNumber}>{pendingBookings.length || 3}</Text>
-                <Text style={styles.actionLabel}>Pending Bookings</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => setActiveTab('Calendar')}>
-                <Text style={styles.actionNumber}>4</Text>
-                <Text style={styles.actionLabel}>Blocked Dates</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => setActiveTab('Reviews')}>
-                <Text style={styles.actionNumber}>★ 4.9</Text>
-                <Text style={styles.actionLabel}>Your Rating</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => setActiveTab('Clients')}>
-                <Text style={styles.actionNumber}>{clients.length}</Text>
-                <Text style={styles.actionLabel}>My Clients</Text>
-              </TouchableOpacity>
+              {[
+                { num: String(pendingBookings.length || 3), lbl: 'Pending\nBookings', tab: 'Inquiries' },
+                { num: String(blockedDates.length || 4), lbl: 'Blocked\nDates', tab: 'Calendar' },
+                { num: '★ 4.9', lbl: 'Your\nRating', tab: 'Reviews' },
+                { num: String(clients.length), lbl: 'My\nClients', tab: 'Clients' },
+              ].map(a => (
+                <TouchableOpacity key={a.lbl} style={styles.actionCard} onPress={() => setActiveTab(a.tab)}>
+                  <Text style={styles.actionNumber}>{a.num}</Text>
+                  <Text style={styles.actionLabel}>{a.lbl}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
+            {/* Preview button */}
             <TouchableOpacity style={styles.previewBtn} onPress={() => router.push('/vendor-preview')}>
-              <Text style={styles.previewBtnText}>Preview your profile as couples see it →</Text>
+              <Feather name="eye" size={13} color="#C9A84C" />
+              <Text style={styles.previewBtnText}>Preview your profile as couples see it</Text>
             </TouchableOpacity>
+
+            {/* Coming in Build 2 — overview teasers */}
+            <View style={styles.comingSoonSection}>
+              <Text style={styles.comingSoonHeader}>Coming in Build 2</Text>
+              <LockedFeature
+                icon="check-square"
+                title="Team Task Board"
+                desc="Assign tasks to your team per event. No more WhatsApp coordination chaos."
+                build="Build 2"
+              />
+              <LockedFeature
+                icon="clock"
+                title="Day-of Runsheet"
+                desc="Digital running order shared with your full team in real time."
+                build="Build 2"
+              />
+              <LockedFeature
+                icon="activity"
+                title="Performance Analytics"
+                desc="Conversion rates, seasonal demand curves and pricing intelligence."
+                build="Build 3"
+              />
+            </View>
+
           </View>
         )}
 
-        {/* INQUIRIES */}
+        {/* ════════════════════════════════
+            INQUIRIES TAB
+        ════════════════════════════════ */}
         {activeTab === 'Inquiries' && (
           <View style={styles.tabPane}>
 
-            {/* Pending Bookings — Confirm/Decline */}
+            {/* Pending bookings */}
             {pendingBookings.length > 0 && (
               <>
-                <Text style={styles.sectionLabel}>Bookings Awaiting Confirmation</Text>
+                <Text style={styles.sectionLabel}>Awaiting Confirmation</Text>
                 {pendingBookings.map((booking: any) => (
                   <View key={booking.id} style={styles.bookingCard}>
                     <View style={styles.bookingTop}>
                       <View>
                         <Text style={styles.bookingName}>{booking.users?.name || 'Couple'}</Text>
-                        <Text style={styles.bookingMeta}>
-                          Token: ₹{booking.token_amount?.toLocaleString('en-IN')} · Protection: ₹999
-                        </Text>
-                        <Text style={styles.bookingMeta}>
-                          Booked: {new Date(booking.created_at).toLocaleDateString('en-IN')}
-                        </Text>
+                        <Text style={styles.bookingMeta}>Token: ₹{booking.token_amount?.toLocaleString('en-IN')} · Protection: ₹999</Text>
+                        <Text style={styles.bookingMeta}>Booked: {new Date(booking.created_at).toLocaleDateString('en-IN')}</Text>
                       </View>
                       <View style={styles.escrowBadge}>
                         <Text style={styles.escrowBadgeText}>In Escrow</Text>
                       </View>
                     </View>
                     <View style={styles.bookingActions}>
-                      <TouchableOpacity
-                        style={styles.declineBtn}
-                        onPress={() => handleDeclineBooking(booking.id)}
-                      >
+                      <TouchableOpacity style={styles.declineBtn} onPress={() => handleDeclineBooking(booking.id)}>
                         <Text style={styles.declineBtnText}>Decline</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.confirmBookingBtn}
-                        onPress={() => handleConfirmBooking(booking.id, booking.vendor_name)}
-                      >
-                        <Text style={styles.confirmBookingBtnText}>Confirm & Lock Date</Text>
+                      <TouchableOpacity style={styles.confirmBtn} onPress={() => handleConfirmBooking(booking.id)}>
+                        <Text style={styles.confirmBtnText}>CONFIRM & LOCK DATE</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -707,6 +654,7 @@ export default function VendorDashboardScreen() {
               </>
             )}
 
+            {/* Lead pipeline */}
             <Text style={styles.sectionLabel}>Lead Pipeline</Text>
             {leadsLoading ? (
               <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
@@ -722,12 +670,14 @@ export default function VendorDashboardScreen() {
                       <View style={styles.leadRight}>
                         <Text style={styles.leadValue}>{lead.value}</Text>
                         <View style={[styles.stageBadge, { backgroundColor: (STAGE_COLORS[lead.stage] || '#8C7B6E') + '20' }]}>
-                          <Text style={[styles.stageBadgeText, { color: STAGE_COLORS[lead.stage] || '#8C7B6E' }]}>
-                            {lead.stage}
-                          </Text>
+                          <Text style={[styles.stageBadgeText, { color: STAGE_COLORS[lead.stage] || '#8C7B6E' }]}>{lead.stage}</Text>
                         </View>
-                        <View style={[styles.scoreBadge, { backgroundColor: lead.stage === 'Token Received' ? '#4CAF5020' : lead.stage === 'Quoted' ? '#C9A84C20' : lead.stage === 'Completed' ? '#2C242020' : '#E8E0D5' }]}>
-                          <Text style={[styles.scoreText, { color: lead.stage === 'Token Received' ? '#4CAF50' : lead.stage === 'Quoted' ? '#C9A84C' : lead.stage === 'Completed' ? '#2C2420' : '#8C7B6E' }]}>
+                        <View style={[styles.scoreBadge, {
+                          backgroundColor: lead.stage === 'Token Received' ? '#4CAF5020' : lead.stage === 'Quoted' ? '#C9A84C20' : '#E8E0D5'
+                        }]}>
+                          <Text style={[styles.scoreText, {
+                            color: lead.stage === 'Token Received' ? '#4CAF50' : lead.stage === 'Quoted' ? '#C9A84C' : '#8C7B6E'
+                          }]}>
                             {lead.stage === 'Token Received' ? '🔥 Hot' : lead.stage === 'Quoted' ? '⚡ Warm' : lead.stage === 'Completed' ? '✓ Won' : '○ New'}
                           </Text>
                         </View>
@@ -739,7 +689,8 @@ export default function VendorDashboardScreen() {
               </View>
             )}
 
-            <Text style={styles.sectionLabel}>Incoming Inquiries</Text>
+            {/* Incoming inquiries */}
+            <Text style={styles.sectionLabel}>Incoming Enquiries</Text>
             {MOCK_INQUIRIES.map(inquiry => (
               <View key={inquiry.id} style={styles.inquiryCard}>
                 <View style={styles.inquiryTop}>
@@ -755,22 +706,39 @@ export default function VendorDashboardScreen() {
                 </View>
                 <Text style={styles.inquiryMessage} numberOfLines={2}>"{inquiry.message}"</Text>
                 {inquiry.status === 'new' && (
-                  <View style={styles.inquiryActions}>
-                    <TouchableOpacity style={styles.replyBtn} onPress={() => router.push('/messaging')}>
-                      <Text style={styles.replyBtnText}>Reply</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity style={styles.replyBtn} onPress={() => router.push('/messaging')}>
+                    <Text style={styles.replyBtnText}>Reply</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             ))}
+
+            {/* Locked: Client Approval Workflows */}
+            <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+            <LockedFeature
+              icon="file-text"
+              title="Client Approval Workflows"
+              desc="Submit mood boards and design concepts for couple approval. Full audit trail — no more disputed agreements."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="message-square"
+              title="Vendor-to-Vendor Messaging"
+              desc="Message the photographer, decorator and caterer booked on the same wedding — without routing through the couple."
+              build="Build 2"
+            />
+
           </View>
         )}
 
-        {/* CALENDAR */}
+        {/* ════════════════════════════════
+            CALENDAR TAB
+        ════════════════════════════════ */}
         {activeTab === 'Calendar' && (
           <View style={styles.tabPane}>
             <Text style={styles.sectionLabel}>Availability</Text>
             <Text style={styles.calendarHint}>Block dates you're already booked so couples see accurate availability</Text>
+
             {calendarLoading ? (
               <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
             ) : (
@@ -780,17 +748,17 @@ export default function VendorDashboardScreen() {
                 </View>
                 {blockedDates.length === 0 && (
                   <View style={{ padding: 16 }}>
-                    <Text style={{ fontSize: 13, color: '#8C7B6E' }}>No dates blocked yet</Text>
+                    <Text style={styles.emptyText}>No dates blocked yet</Text>
                   </View>
                 )}
                 {blockedDates.map((item, index) => (
                   <View key={item.id}>
                     <View style={styles.blockedRow}>
-                      <Text style={styles.blockedDate}>{item.blocked_date}</Text>
-                      <TouchableOpacity
-                        style={styles.unblockBtn}
-                        onPress={() => handleUnblockDate(item.id)}
-                      >
+                      <View style={styles.blockedDateRow}>
+                        <Feather name="calendar" size={13} color="#8C7B6E" />
+                        <Text style={styles.blockedDate}>{item.blocked_date}</Text>
+                      </View>
+                      <TouchableOpacity style={styles.unblockBtn} onPress={() => handleUnblockDate(item.id)}>
                         <Text style={styles.unblockBtnText}>Unblock</Text>
                       </TouchableOpacity>
                     </View>
@@ -799,53 +767,70 @@ export default function VendorDashboardScreen() {
                 ))}
               </View>
             )}
+
             {showDateInput ? (
               <View style={styles.listCard}>
                 <View style={{ padding: 16, gap: 10 }}>
                   <TextInput
-                    style={styles.invoiceInput}
+                    style={styles.fieldInput}
                     placeholder="Date (e.g. March 15, 2026)"
                     placeholderTextColor="#8C7B6E"
                     value={newBlockDate}
                     onChangeText={setNewBlockDate}
                   />
                   <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity
-                      style={[styles.unblockBtn, { flex: 1, alignItems: 'center' }]}
-                      onPress={() => setShowDateInput(false)}
-                    >
+                    <TouchableOpacity style={[styles.unblockBtn, { flex: 1, alignItems: 'center' }]} onPress={() => setShowDateInput(false)}>
                       <Text style={styles.unblockBtnText}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.blockDateBtn, { flex: 2 }]}
-                      onPress={handleBlockDate}
-                    >
-                      <Text style={styles.blockDateBtnText}>Block Date</Text>
+                    <TouchableOpacity style={[styles.goldBtn, { flex: 2 }]} onPress={handleBlockDate}>
+                      <Text style={styles.goldBtnText}>BLOCK DATE</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.blockDateBtn}
-                onPress={() => setShowDateInput(true)}
-              >
-                <Text style={styles.blockDateBtnText}>+ Block a Date</Text>
+              <TouchableOpacity style={styles.goldOutlineBtn} onPress={() => setShowDateInput(true)}>
+                <Feather name="plus" size={14} color="#C9A84C" />
+                <Text style={styles.goldOutlineBtnText}>Block a Date</Text>
               </TouchableOpacity>
             )}
+
+            {/* Locked: Day-of Runsheet */}
+            <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+            <LockedFeature
+              icon="clock"
+              title="Day-of Runsheet"
+              desc="Build a running order — Baraat 7pm, Pheras 8:30pm — shared with your full team in real time. Push notifications 30 mins before each function."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="list"
+              title="Checklist Templates"
+              desc="Category-specific pre-wedding checklists that auto-attach to every new booking. Equipment packed, shot list confirmed, venue recce done."
+              build="Build 2"
+            />
+
           </View>
         )}
 
-        {/* TOOLS */}
+        {/* ════════════════════════════════
+            TOOLS TAB
+        ════════════════════════════════ */}
         {activeTab === 'Tools' && (
           <View style={styles.tabPane}>
-            <Text style={styles.sectionLabel}>Business Tools</Text>
 
+            {/* Promo Engine — LIVE */}
+            <Text style={styles.sectionLabel}>Live Tools</Text>
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Promo Engine</Text>
-                <TouchableOpacity style={styles.toolAction} onPress={() => setShowPromoForm(true)}>
-                  <Text style={styles.toolActionText}>+ Create Promo</Text>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="zap" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Promo Engine</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowPromoForm(true)}>
+                  <Text style={styles.toolActionText}>+ Create</Text>
                 </TouchableOpacity>
               </View>
               <Text style={styles.toolDesc}>Run time-limited offers. Couples in your city get notified instantly.</Text>
@@ -867,17 +852,23 @@ export default function VendorDashboardScreen() {
               ))}
             </View>
 
+            {/* Portfolio — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Portfolio Photos</Text>
-                <TouchableOpacity style={styles.toolAction} onPress={handleImageUpload} disabled={uploadingImage}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="image" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Portfolio Photos</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={handleImageUpload} disabled={uploadingImage}>
                   {uploadingImage
                     ? <ActivityIndicator size="small" color="#C9A84C" />
                     : <Text style={styles.toolActionText}>+ Upload</Text>
                   }
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Upload photos to your public portfolio</Text>
+              <Text style={styles.toolDesc}>Upload photos to your public portfolio. Basic: 10 photos · Premium: 30 · Elite: Unlimited.</Text>
               {portfolioImages.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                   {portfolioImages.map((uri, index) => (
@@ -887,105 +878,122 @@ export default function VendorDashboardScreen() {
               )}
             </View>
 
+            {/* Invoice Generator — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Invoice Generator</Text>
-                <TouchableOpacity style={styles.toolAction} onPress={() => setShowInvoiceForm(!showInvoiceForm)}>
-                  <Text style={styles.toolActionText}>{showInvoiceForm ? 'Cancel' : 'Create Invoice'}</Text>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="file-text" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Invoice Generator</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowInvoiceForm(!showInvoiceForm)}>
+                  <Text style={styles.toolActionText}>{showInvoiceForm ? 'Cancel' : 'Create'}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Professional invoices with auto GST calculation</Text>
+              <Text style={styles.toolDesc}>Professional branded invoices with auto GST calculation.</Text>
               {showInvoiceForm && (
                 <View style={styles.invoiceForm}>
-                  <TextInput style={styles.invoiceInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={invoiceClient} onChangeText={setInvoiceClient} />
-                  <TextInput style={styles.invoiceInput} placeholder="Amount (₹)" placeholderTextColor="#8C7B6E" value={invoiceAmount} onChangeText={setInvoiceAmount} keyboardType="number-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={invoiceClient} onChangeText={setInvoiceClient} />
+                  <TextInput style={styles.fieldInput} placeholder="Amount (₹)" placeholderTextColor="#8C7B6E" value={invoiceAmount} onChangeText={setInvoiceAmount} keyboardType="number-pad" />
                   {invoiceAmount ? (
                     <View style={styles.gstPreview}>
                       <Text style={styles.gstPreviewText}>GST (18%): ₹{(parseInt(invoiceAmount) * 0.18).toLocaleString('en-IN')}</Text>
                       <Text style={styles.gstPreviewTotal}>Total: ₹{(parseInt(invoiceAmount) * 1.18).toLocaleString('en-IN')}</Text>
                     </View>
                   ) : null}
-                  <TouchableOpacity style={styles.generateBtn} onPress={handleGenerateInvoice}>
-                    <Text style={styles.generateBtnText}>Generate Invoice PDF</Text>
+                  <TouchableOpacity style={styles.goldBtn} onPress={handleGenerateInvoice}>
+                    <Text style={styles.goldBtnText}>GENERATE INVOICE PDF</Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
 
+            {/* GST Report — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>GST & Tax Report</Text>
-                <TouchableOpacity style={styles.toolAction} onPress={handleDownloadGSTReport}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="percent" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>GST Autopilot</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={handleDownloadGSTReport}>
                   <Text style={styles.toolActionText}>Download PDF</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Annual income summary — CA-ready GST report for filing</Text>
+              <Text style={styles.toolDesc}>CA-ready annual GST summary. One tap to generate and share.</Text>
               <View style={styles.gstRow}>
-                <View style={styles.gstItem}>
-                  <Text style={styles.gstAmount}>
-                    {invoices.length > 0
-                      ? `₹${invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}`
-                      : '₹84L'}
-                  </Text>
-                  <Text style={styles.gstLabel}>Total Income</Text>
-                </View>
-                <View style={styles.gstItem}>
-                  <Text style={styles.gstAmount}>
-                    {invoices.length > 0
-                      ? `₹${invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0).toLocaleString('en-IN')}`
-                      : '₹15.1L'}
-                  </Text>
-                  <Text style={styles.gstLabel}>GST (18%)</Text>
-                </View>
-                <View style={styles.gstItem}>
-                  <Text style={styles.gstAmount}>FY {new Date().getFullYear()}</Text>
-                  <Text style={styles.gstLabel}>Period</Text>
-                </View>
+                {[
+                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}` : '₹84L', lbl: 'Total Income' },
+                  { amt: invoices.length > 0 ? `₹${invoices.reduce((s: number, i: any) => s + (i.gst_amount || 0), 0).toLocaleString('en-IN')}` : '₹15.1L', lbl: 'GST (18%)' },
+                  { amt: `FY ${new Date().getFullYear()}`, lbl: 'Period' },
+                ].map((g, i, arr) => (
+                  <View key={g.lbl} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                    <Text style={styles.gstAmount}>{g.amt}</Text>
+                    <Text style={styles.gstLabel}>{g.lbl}</Text>
+                    {i < arr.length - 1 && <View style={styles.gstDivider} />}
+                  </View>
+                ))}
               </View>
             </View>
 
+            {/* Payment Tracker — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Payment Tracker</Text>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="credit-card" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Payment Tracker</Text>
+                </View>
               </View>
-              <Text style={styles.toolDesc}>Track all incoming payments and pending amounts</Text>
-              <View style={styles.paymentTrackerRow}>
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={styles.paymentTrackerAmount}>₹9L</Text>
-                  <Text style={styles.paymentTrackerLabel}>Received</Text>
-                </View>
-                <View style={styles.paymentTrackerDivider} />
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={[styles.paymentTrackerAmount, { color: '#C9A84C' }]}>₹6L</Text>
-                  <Text style={styles.paymentTrackerLabel}>Pending</Text>
-                </View>
-                <View style={styles.paymentTrackerDivider} />
-                <View style={styles.paymentTrackerItem}>
-                  <Text style={styles.paymentTrackerAmount}>₹60K</Text>
-                  <Text style={styles.paymentTrackerLabel}>In Escrow</Text>
-                </View>
+              <Text style={styles.toolDesc}>Track all incoming payments and pending amounts.</Text>
+              <View style={styles.gstRow}>
+                {[
+                  { amt: '₹9L', lbl: 'Received', color: '#2C2420' },
+                  { amt: '₹6L', lbl: 'Pending', color: '#C9A84C' },
+                  { amt: '₹60K', lbl: 'In Escrow', color: '#2C2420' },
+                ].map((p, i, arr) => (
+                  <View key={p.lbl} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                    <Text style={[styles.gstAmount, { color: p.color }]}>{p.amt}</Text>
+                    <Text style={styles.gstLabel}>{p.lbl}</Text>
+                  </View>
+                ))}
               </View>
             </View>
 
+            {/* Refer a Vendor — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Refer a Vendor</Text>
-                <TouchableOpacity style={styles.toolAction} onPress={() => {
-                  const message = `Hey! I've been using The Dream Wedding to manage my wedding business — leads, invoices, GST reports, everything in one place. You should check it out!\n\nJoin here: https://thedreamwedding.in/vendor`;
-                  Linking.openURL(`whatsapp://send?text=${encodeURIComponent(message)}`);
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="share-2" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Refer a Vendor</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => {
+                  const msg = `Hey! I've been using The Dream Wedding to manage my wedding business — leads, invoices, GST reports. You should check it out!\n\nJoin here: https://thedreamwedding.in/vendor`;
+                  Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`);
                 }}>
-                  <Text style={styles.toolActionText}>Share via WhatsApp</Text>
+                  <Text style={styles.toolActionText}>Share</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.toolDesc}>Refer another vendor and get 1 month subscription free</Text>
+              <Text style={styles.toolDesc}>Refer another vendor and get 1 month subscription free.</Text>
             </View>
 
+            {/* Portfolio Analytics — LIVE */}
             <View style={styles.toolCard}>
               <View style={styles.toolHeader}>
-                <Text style={styles.toolTitle}>Portfolio Analytics</Text>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="trending-up" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Portfolio Analytics</Text>
+                </View>
               </View>
-              <Text style={styles.toolDesc}>See which photos get the most saves and views</Text>
-              <View style={styles.analyticsList}>
+              <Text style={styles.toolDesc}>See which photos get the most saves and views.</Text>
+              <View style={styles.analyticsTable}>
                 {[
                   { photo: 'Top portfolio image', saves: 47, views: 312 },
                   { photo: 'Second image', saves: 38, views: 289 },
@@ -1001,18 +1009,93 @@ export default function VendorDashboardScreen() {
                 ))}
               </View>
             </View>
+
+            {/* Competitor Benchmarking — LIVE */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="bar-chart-2" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Competitor Benchmarking</Text>
+                </View>
+              </View>
+              <Text style={styles.toolDesc}>See how your pricing and traction compares to similar vendors in your city.</Text>
+              {benchmark && (
+                <View style={styles.benchmarkMini}>
+                  <Text style={styles.benchmarkMiniText}>
+                    Avg. in your category: ₹{benchmark.avgStartingPrice?.toLocaleString('en-IN')} starting price
+                  </Text>
+                  <Text style={styles.benchmarkMiniSub}>
+                    {benchmark.vendorCount} vendors · Range ₹{benchmark.minStartingPrice?.toLocaleString('en-IN')} – ₹{benchmark.maxStartingPrice?.toLocaleString('en-IN')}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* BUILD 2 LOCKED TOOLS */}
+            <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+            <LockedFeature
+              icon="check-square"
+              title="Team Task Board"
+              desc="Assign tasks to team members per event. Set deadlines, track completion, get photo confirmation. Replaces WhatsApp coordination entirely."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="thumbs-up"
+              title="Client Approval Workflows"
+              desc="Send mood boards and design proposals for couple approval. Full audit trail — 'Couple approved this design on March 15, 2026 at 2:34pm.'"
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="users"
+              title="Team Management"
+              desc="Add team members with their own logins. Assign roles, manage access and track their task completion across all active events."
+              build="Build 2"
+            />
+
+            {/* BUILD 3 LOCKED TOOLS */}
+            <Text style={styles.sectionLabel}>Coming in Build 3</Text>
+            <LockedFeature
+              icon="cpu"
+              title="AI Brief Generation"
+              desc="At the moment of booking, AI auto-generates a structured brief from the couple's onboarding data and sends it to you. No briefing calls needed."
+              build="Build 3"
+            />
+            <LockedFeature
+              icon="trending-up"
+              title="AI Pricing Intelligence"
+              desc="Dynamic pricing recommendations based on demand patterns, competitor rates and booking velocity. Know exactly when to raise or lower your price."
+              build="Build 3"
+            />
+            <LockedFeature
+              icon="bar-chart"
+              title="Full Performance Analytics"
+              desc="Enquiry-to-booking conversion rates, seasonal demand curves, revenue forecasting and competitor ranking history."
+              build="Build 3"
+            />
+            <LockedFeature
+              icon="map-pin"
+              title="Real-time Team Location"
+              desc="Opt-in location sharing for your team during active events. For event managers coordinating 50-person teams across multiple locations."
+              build="Build 3"
+            />
+
           </View>
         )}
 
-        {/* REVIEWS */}
+        {/* ════════════════════════════════
+            REVIEWS TAB
+        ════════════════════════════════ */}
         {activeTab === 'Reviews' && (
           <View style={styles.tabPane}>
             <View style={styles.ratingOverview}>
               <Text style={styles.ratingBig}>4.9</Text>
               <Text style={styles.ratingStars}>★★★★★</Text>
               <Text style={styles.ratingCount}>124 reviews</Text>
-              <Text style={styles.ratingNote}>Only app-booked couples can leave reviews</Text>
+              <Text style={styles.ratingNote}>Only app-booked couples can leave verified reviews</Text>
             </View>
+
             <Text style={styles.sectionLabel}>Video Reviews</Text>
             {[
               { id: '1', client: 'Priya & Rahul', function: 'Wedding · Dec 2024', rating: 5 },
@@ -1030,34 +1113,61 @@ export default function VendorDashboardScreen() {
                   <Text style={styles.reviewRating}>{'★'.repeat(review.rating)}</Text>
                 </View>
                 <View style={styles.videoThumb}>
-                  <Text style={styles.videoThumbText}>▶  Play Video Review</Text>
+                  <Feather name="play-circle" size={20} color="#C9A84C" />
+                  <Text style={styles.videoThumbText}>Play Video Review</Text>
                 </View>
               </View>
             ))}
+
+            <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+            <LockedFeature
+              icon="star"
+              title="Review Response System"
+              desc="Respond publicly to couple reviews. Your response is shown below their review on your profile — manage your reputation professionally."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="award"
+              title="Verified Elite Badge"
+              desc="Earn the Verified Elite badge after 5 confirmed app bookings with 4.8+ average rating. Displayed on your profile and in swipe cards."
+              build="Build 2"
+            />
           </View>
         )}
 
-        {/* CLIENTS */}
+        {/* ════════════════════════════════
+            CLIENTS TAB
+        ════════════════════════════════ */}
         {activeTab === 'Clients' && (
           <View style={[styles.tabPane, { paddingBottom: 40 }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={styles.clientsHeader}>
               <Text style={styles.sectionLabel}>My Clients ({clients.length})</Text>
               <TouchableOpacity style={styles.addClientBtn} onPress={() => setShowAddClient(true)}>
-                <Text style={styles.addClientBtnText}>+ Add Client</Text>
+                <Feather name="plus" size={12} color="#C9A84C" />
+                <Text style={styles.addClientBtnText}>Add Client</Text>
               </TouchableOpacity>
             </View>
+
             <View style={styles.viralCard}>
-              <Text style={styles.viralTitle}>Your network is your growth engine</Text>
+              <View style={styles.viralHeader}>
+                <Feather name="zap" size={14} color="#C9A84C" />
+                <Text style={styles.viralTitle}>Your network is your growth engine</Text>
+              </View>
               <Text style={styles.viralText}>
-                Add your existing clients to The Dream Wedding. They get onboarded, discover vendors for their other functions, and refer their friends. This is how you grow without spending on ads.
+                Add your existing clients to The Dream Wedding. They get onboarded, discover vendors for other functions, and refer their friends. This is how you grow without spending on ads.
               </Text>
             </View>
+
             {clientsLoading ? (
               <ActivityIndicator color="#C9A84C" style={{ paddingVertical: 20 }} />
             ) : clients.length === 0 ? (
-              <View style={styles.emptyClients}>
-                <Text style={styles.emptyClientsText}>No clients added yet</Text>
-                <Text style={styles.emptyClientsSub}>Add your first client and send them a WhatsApp invite</Text>
+              <View style={styles.emptyCard}>
+                <Feather name="users" size={28} color="#C4B8AC" />
+                <Text style={styles.emptyTitle}>No clients yet</Text>
+                <Text style={styles.emptySub}>Add your first client and send them a WhatsApp invite to join the platform</Text>
+                <TouchableOpacity style={styles.goldBtn} onPress={() => setShowAddClient(true)}>
+                  <Text style={styles.goldBtnText}>ADD FIRST CLIENT</Text>
+                </TouchableOpacity>
               </View>
             ) : (
               clients.map(client => (
@@ -1068,216 +1178,302 @@ export default function VendorDashboardScreen() {
                     <Text style={styles.clientDate}>{client.wedding_date}</Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.inviteBtn, client.invited && styles.inviteBtnDone]}
+                    style={[styles.whatsappBtn, client.invited && styles.whatsappBtnDone]}
                     onPress={() => !client.invited && handleSendWhatsAppInvite(client)}
                     disabled={client.invited}
                   >
-                    <Text style={[styles.inviteBtnText, client.invited && styles.inviteBtnTextDone]}>
-                      {client.invited ? 'Invited ✓' : '📲 WhatsApp'}
+                    <Text style={[styles.whatsappBtnText, client.invited && styles.whatsappBtnTextDone]}>
+                      {client.invited ? 'Invited ✓' : '📲 Invite'}
                     </Text>
                   </TouchableOpacity>
                 </View>
               ))
             )}
+
+            <Text style={styles.sectionLabel}>Coming in Build 2</Text>
+            <LockedFeature
+              icon="database"
+              title="Bulk Client Import"
+              desc="Import your entire client database via CSV upload. All past couples onboard in one go and find their booking history waiting."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="gift"
+              title="Client Anniversary Reminders"
+              desc="Get reminded on each couple's wedding anniversary. One tap to send a personalised message — stay top of mind for referrals."
+              build="Build 2"
+            />
+            <LockedFeature
+              icon="repeat"
+              title="Repeat Booking Tracker"
+              desc="Track which clients have hired you more than once. Your most loyal clients are your best referral source — identify and nurture them."
+              build="Build 3"
+            />
+
           </View>
         )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Bottom Nav */}
+      {/* ── Bottom Nav ── */}
       <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
-          <Text style={[styles.navLabel, styles.navActive]}>Dashboard</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/messaging')}>
-          <Text style={styles.navLabel}>Messages</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={handleLogout}>
-          <Text style={styles.navLabel}>Log Out</Text>
-        </TouchableOpacity>
+        {[
+          { label: 'Dashboard', icon: 'grid', active: true, onPress: () => {} },
+          { label: 'Messages', icon: 'message-circle', active: false, onPress: () => router.push('/messaging') },
+          { label: 'Log Out', icon: 'log-out', active: false, onPress: handleLogout },
+        ].map(item => (
+          <TouchableOpacity key={item.label} style={styles.navItem} onPress={item.onPress}>
+            <Feather name={item.icon as any} size={20} color={item.active ? '#2C2420' : '#8C7B6E'} />
+            <Text style={[styles.navLabel, item.active && styles.navLabelActive]}>{item.label}</Text>
+            {item.active && <View style={styles.navDot} />}
+          </TouchableOpacity>
+        ))}
       </View>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
+
+  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 16 },
-  businessName: { fontSize: 18, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
-  category: { fontSize: 13, color: '#8C7B6E', marginTop: 3 },
+  headerLeft: { gap: 3 },
+  businessName: { fontSize: 20, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
+  category: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
   liveToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 50, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#FFFFFF' },
   liveToggleActive: { borderColor: '#4CAF50', backgroundColor: '#4CAF5010' },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#8C7B6E' },
   liveDotActive: { backgroundColor: '#4CAF50' },
-  liveToggleText: { fontSize: 13, color: '#8C7B6E', fontWeight: '500' },
+  liveToggleText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_500Medium' },
   liveToggleTextActive: { color: '#4CAF50' },
+
+  // Tabs
   tabScroll: { maxHeight: 44, marginBottom: 16 },
   tabContent: { paddingHorizontal: 24, gap: 8, alignItems: 'center' },
   tab: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 50, borderWidth: 1, borderColor: '#E8E0D5', backgroundColor: '#FFFFFF' },
   tabActive: { backgroundColor: '#2C2420', borderColor: '#2C2420' },
-  tabText: { fontSize: 13, color: '#2C2420' },
-  tabTextActive: { color: '#F5F0E8', fontWeight: '500' },
+  tabText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
+  tabTextActive: { color: '#F5F0E8', fontFamily: 'DMSans_500Medium' },
+
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 24 },
   tabPane: { gap: 14 },
-  statsRow: { flexDirection: 'row', gap: 12 },
-  statCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
-  statNumber: { fontSize: 24, color: '#2C2420', fontWeight: '400' },
-  statLabel: { fontSize: 11, color: '#8C7B6E', textAlign: 'center' },
-  revenueCard: { backgroundColor: '#2C2420', borderRadius: 14, padding: 20 },
+  sectionLabel: { fontSize: 11, color: '#8C7B6E', letterSpacing: 1.5, textTransform: 'uppercase', fontFamily: 'DMSans_500Medium' },
+
+  // Stats
+  statsRow: { flexDirection: 'row', gap: 10 },
+  statCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: '#E8E0D5' },
+  statNumber: { fontSize: 26, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
+  statLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', textAlign: 'center', letterSpacing: 0.3 },
+
+  // Revenue card
+  revenueCard: { backgroundColor: '#2C2420', borderRadius: 16, padding: 20, gap: 14 },
+  revenueEyebrow: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 },
   revenueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   revenueItem: { flex: 1, alignItems: 'center', gap: 4 },
   revenueDivider: { width: 1, height: 36, backgroundColor: '#3C3430' },
-  revenueAmount: { fontSize: 22, color: '#C9A84C', fontWeight: '400' },
-  revenueLabel: { fontSize: 11, color: '#8C7B6E' },
-  forecastRow: { borderTopWidth: 1, borderTopColor: '#3C3430', paddingTop: 12, marginTop: 4 },
-  forecastText: { fontSize: 12, color: '#C9A84C', textAlign: 'center', letterSpacing: 0.3 },
+  revenueAmount: { fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_300Light' },
+  revenueLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
+
+  // Alert card
   alertCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#C9A84C', gap: 6 },
-  alertTitle: { fontSize: 14, color: '#2C2420', fontWeight: '600' },
-  alertText: { fontSize: 12, color: '#8C7B6E' },
-  alertLink: { fontSize: 13, color: '#C9A84C', fontWeight: '500', marginTop: 4 },
-  subscriptionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#E8E0D5' },
-  subscriptionPlan: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  subscriptionDetail: { fontSize: 12, color: '#8C7B6E', marginTop: 3 },
-  verifiedBadge: { backgroundColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
-  eliteBadge: { backgroundColor: '#2C2420', borderWidth: 1, borderColor: '#C9A84C' },
-  eliteCard: { backgroundColor: '#2C2420', borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#C9A84C' },
-  eliteCardTitle: { fontSize: 14, color: '#C9A84C', fontWeight: '600' },
-  eliteCardText: { fontSize: 13, color: '#B8A99A', lineHeight: 20 },
-  upgradeCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, gap: 8, borderWidth: 1, borderColor: '#E8D9B5' },
-  upgradeCardTitle: { fontSize: 14, color: '#2C2420', fontWeight: '600' },
-  upgradeCardText: { fontSize: 13, color: '#8C7B6E', lineHeight: 20 },
-  upgradeBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  upgradeBtnText: { fontSize: 13, color: '#C9A84C', fontWeight: '500' },
-  verifiedBadgeText: { fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
+  alertRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  alertTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  alertText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  alertLink: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
+
+  // Plan card
+  planCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#E8E0D5' },
+  planLeft: { gap: 3 },
+  planName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  planDetail: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  planBadge: { backgroundColor: '#C9A84C', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
+  planBadgeElite: { backgroundColor: '#2C2420', borderWidth: 1, borderColor: '#C9A84C' },
+  planBadgeText: { fontSize: 12, color: '#FFFFFF', fontFamily: 'DMSans_500Medium' },
+
+  // Upgrade card
+  upgradeCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, gap: 10, borderWidth: 1, borderColor: '#E8D9B5' },
+  upgradeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  upgradeTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  upgradeText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
+  upgradeBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  upgradeBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium', letterSpacing: 1 },
+
+  // Benchmark
   benchmarkCard: { backgroundColor: '#FFF8EC', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8D9B5', gap: 8 },
-  benchmarkTitle: { fontSize: 13, color: '#2C2420', fontWeight: '500' },
-  benchmarkText: { fontSize: 13, color: '#8C7B6E', lineHeight: 20 },
-  sectionLabel: { fontSize: 12, color: '#8C7B6E', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: '500' },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  actionCard: { width: (width - 60) / 2, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
-  actionNumber: { fontSize: 22, color: '#C9A84C', fontWeight: '500' },
-  actionLabel: { fontSize: 12, color: '#8C7B6E' },
-  previewBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 14, alignItems: 'center', backgroundColor: '#FFFFFF' },
-  previewBtnText: { fontSize: 13, color: '#C9A84C' },
+  benchmarkHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  benchmarkTitle: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium', flex: 1 },
+  benchmarkText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
+  benchmarkRange: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_300Light' },
+  benchmarkMini: { backgroundColor: '#F5F0E8', borderRadius: 8, padding: 12, gap: 4 },
+  benchmarkMiniText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
+  benchmarkMiniSub: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  liveDotSmall: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#4CAF50' },
+  liveBadgeText: { fontSize: 10, color: '#4CAF50', fontFamily: 'DMSans_500Medium' },
+
+  // Action grid
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  actionCard: { width: (width - 58) / 2, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
+  actionNumber: { fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_300Light' },
+  actionLabel: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 16 },
+
+  // Preview btn
+  previewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 14, backgroundColor: '#FFFFFF' },
+  previewBtnText: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_300Light' },
+
+  // Coming soon section
+  comingSoonSection: { gap: 10 },
+  comingSoonHeader: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5, textTransform: 'uppercase' },
+
+  // Booking cards
   bookingCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#C9A84C', gap: 14 },
   bookingTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  bookingName: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  bookingMeta: { fontSize: 12, color: '#8C7B6E', marginTop: 3 },
+  bookingName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  bookingMeta: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: 3 },
   escrowBadge: { backgroundColor: '#C9A84C20', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
-  escrowBadgeText: { fontSize: 11, color: '#C9A84C', fontWeight: '500' },
+  escrowBadgeText: { fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
   bookingActions: { flexDirection: 'row', gap: 10 },
   declineBtn: { flex: 1, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  declineBtnText: { fontSize: 13, color: '#8C7B6E', fontWeight: '500' },
-  confirmBookingBtn: { flex: 2, backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  confirmBookingBtnText: { fontSize: 13, color: '#C9A84C', fontWeight: '600' },
+  declineBtnText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_400Regular' },
+  confirmBtn: { flex: 2, backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  confirmBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium', letterSpacing: 0.8 },
+
+  // List cards
   listCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E8E0D5', overflow: 'hidden' },
   listDivider: { height: 1, backgroundColor: '#E8E0D5', marginHorizontal: 16 },
   leadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16 },
   leadInfo: { gap: 3 },
-  leadName: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
-  leadDate: { fontSize: 12, color: '#8C7B6E' },
+  leadName: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  leadDate: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   leadRight: { alignItems: 'flex-end', gap: 4 },
-  leadValue: { fontSize: 13, color: '#2C2420', fontWeight: '500' },
+  leadValue: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
   stageBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 },
-  stageBadgeText: { fontSize: 10, fontWeight: '500' },
-  scoreBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3, marginTop: 2 },
-  scoreText: { fontSize: 10, fontWeight: '600' },
+  stageBadgeText: { fontSize: 10, fontFamily: 'DMSans_500Medium' },
+  scoreBadge: { borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 },
+  scoreText: { fontSize: 10, fontFamily: 'DMSans_500Medium' },
+
+  // Inquiries
   inquiryCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', gap: 10 },
   inquiryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  inquiryName: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  inquiryMeta: { fontSize: 12, color: '#8C7B6E', marginTop: 2 },
+  inquiryName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  inquiryMeta: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: 2 },
   inquiryBadge: { borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
-  inquiryBadgeText: { fontSize: 11, fontWeight: '500' },
-  inquiryMessage: { fontSize: 13, color: '#8C7B6E', lineHeight: 20, fontStyle: 'italic' },
-  inquiryActions: { flexDirection: 'row', gap: 8 },
-  replyBtn: { flex: 1, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  replyBtnText: { fontSize: 13, color: '#2C2420' },
-  calendarHint: { fontSize: 13, color: '#8C7B6E', lineHeight: 20 },
+  inquiryBadgeText: { fontSize: 11, fontFamily: 'DMSans_500Medium' },
+  inquiryMessage: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20, fontStyle: 'italic' },
+  replyBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  replyBtnText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
+
+  // Calendar
+  calendarHint: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
   blockedHeader: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E8E0D5' },
-  blockedTitle: { fontSize: 13, color: '#8C7B6E', fontWeight: '500' },
+  blockedTitle: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_500Medium' },
   blockedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
-  blockedDate: { fontSize: 14, color: '#2C2420' },
+  blockedDateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  blockedDate: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   unblockBtn: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
-  unblockBtnText: { fontSize: 12, color: '#8C7B6E' },
-  blockDateBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, alignItems: 'center', backgroundColor: '#FFFFFF' },
-  blockDateBtnText: { fontSize: 14, color: '#C9A84C', fontWeight: '500' },
+  unblockBtnText: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_400Regular' },
+  emptyText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+
+  // Tool cards
   toolCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
   toolHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  toolTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  toolAction: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  toolActionText: { fontSize: 12, color: '#C9A84C', fontWeight: '500' },
-  toolDesc: { fontSize: 13, color: '#8C7B6E', lineHeight: 20, marginTop: -4 },
-  promoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
+  toolTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toolIconBox: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5', justifyContent: 'center', alignItems: 'center' },
+  toolTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  toolActionBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  toolActionText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
+  toolDesc: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20 },
+
+  // Promo
+  promoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
   promoInfo: { flex: 1, gap: 3 },
-  promoTitle: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
-  promoMeta: { fontSize: 12, color: '#8C7B6E' },
+  promoTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
+  promoMeta: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   promoBadge: { borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
-  promoBadgeText: { fontSize: 11, fontWeight: '500' },
+  promoBadgeText: { fontSize: 11, fontFamily: 'DMSans_500Medium' },
+
+  // Invoice
   invoiceForm: { gap: 10, borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
-  invoiceInput: { backgroundColor: '#F5F0E8', borderRadius: 8, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 12, paddingHorizontal: 14, fontSize: 14, color: '#2C2420' },
+  fieldInput: { backgroundColor: '#F5F0E8', borderRadius: 8, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 12, paddingHorizontal: 14, fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   gstPreview: { backgroundColor: '#F5F0E8', borderRadius: 8, padding: 12, gap: 4 },
-  gstPreviewText: { fontSize: 13, color: '#8C7B6E' },
-  gstPreviewTotal: { fontSize: 14, color: '#2C2420', fontWeight: '600' },
-  generateBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  generateBtnText: { fontSize: 14, color: '#F5F0E8', fontWeight: '500' },
-  paymentTrackerRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
-  paymentTrackerItem: { flex: 1, alignItems: 'center', gap: 4 },
-  paymentTrackerDivider: { width: 1, backgroundColor: '#E8E0D5' },
-  paymentTrackerAmount: { fontSize: 18, color: '#2C2420', fontWeight: '500' },
-  paymentTrackerLabel: { fontSize: 11, color: '#8C7B6E' },
-  analyticsList: { borderTopWidth: 1, borderTopColor: '#E8E0D5', overflow: 'hidden' },
-  analyticsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  analyticsPhoto: { fontSize: 13, color: '#2C2420', fontWeight: '500' },
-  analyticsStats: { fontSize: 12, color: '#8C7B6E' },
+  gstPreviewText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  gstPreviewTotal: { fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+
+  // GST row
   gstRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12 },
-  gstItem: { flex: 1, alignItems: 'center', gap: 4 },
-  gstAmount: { fontSize: 16, color: '#2C2420', fontWeight: '500' },
-  gstLabel: { fontSize: 11, color: '#8C7B6E' },
+  gstAmount: { fontSize: 16, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
+  gstLabel: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  gstDivider: { position: 'absolute', right: 0, top: 4, width: 1, height: 28, backgroundColor: '#E8E0D5' },
+
+  // Analytics
+  analyticsTable: { borderTopWidth: 1, borderTopColor: '#E8E0D5' },
+  analyticsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
+  analyticsPhoto: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
+  analyticsStats: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+
+  // Reviews
   ratingOverview: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E8E0D5' },
-  ratingBig: { fontSize: 48, color: '#2C2420', fontWeight: '300' },
+  ratingBig: { fontSize: 52, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light' },
   ratingStars: { fontSize: 20, color: '#C9A84C' },
-  ratingCount: { fontSize: 13, color: '#8C7B6E' },
-  ratingNote: { fontSize: 11, color: '#8C7B6E', textAlign: 'center', fontStyle: 'italic' },
+  ratingCount: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  ratingNote: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', textAlign: 'center', fontStyle: 'italic' },
   reviewCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
   reviewTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   reviewAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
-  reviewAvatarText: { fontSize: 16, color: '#C9A84C', fontWeight: '400' },
+  reviewAvatarText: { fontSize: 16, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' },
   reviewInfo: { flex: 1, gap: 2 },
-  reviewName: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
-  reviewFunction: { fontSize: 12, color: '#8C7B6E' },
+  reviewName: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  reviewFunction: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
   reviewRating: { fontSize: 13, color: '#C9A84C' },
-  videoThumb: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 20, alignItems: 'center' },
-  videoThumbText: { fontSize: 14, color: '#F5F0E8', letterSpacing: 0.5 },
-  emptyClients: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5', gap: 8 },
-  emptyClientsText: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  emptyClientsSub: { fontSize: 13, color: '#8C7B6E', textAlign: 'center', lineHeight: 20 },
+  videoThumb: { backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  videoThumbText: { fontSize: 14, color: '#F5F0E8', fontFamily: 'DMSans_300Light', letterSpacing: 0.5 },
+
+  // Clients
+  clientsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  addClientBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#2C2420', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  addClientBtnText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
+  viralCard: { backgroundColor: '#2C2420', borderRadius: 14, padding: 18, gap: 10 },
+  viralHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  viralTitle: { fontSize: 14, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' },
+  viralText: { fontSize: 13, color: '#B8A99A', fontFamily: 'DMSans_300Light', lineHeight: 20 },
+  emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5', gap: 12 },
+  emptyTitle: { fontSize: 16, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  emptySub: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', textAlign: 'center', lineHeight: 20 },
   clientCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E8E0D5', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   clientInfo: { gap: 3 },
-  clientName: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  clientPhone: { fontSize: 12, color: '#8C7B6E' },
-  clientDate: { fontSize: 12, color: '#C9A84C' },
-  inviteBtn: { backgroundColor: '#25D366', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  inviteBtnDone: { backgroundColor: '#E8E0D5' },
-  inviteBtnText: { fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
-  inviteBtnTextDone: { color: '#8C7B6E' },
-  addClientBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  addClientBtnText: { fontSize: 12, color: '#C9A84C', fontWeight: '500' },
-  viralCard: { backgroundColor: '#2C2420', borderRadius: 14, padding: 18, gap: 8 },
-  viralTitle: { fontSize: 15, color: '#C9A84C', fontWeight: '500' },
-  viralText: { fontSize: 13, color: '#B8A99A', lineHeight: 20 },
+  clientName: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  clientPhone: { fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+  clientDate: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_300Light' },
+  whatsappBtn: { backgroundColor: '#25D366', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  whatsappBtnDone: { backgroundColor: '#E8E0D5' },
+  whatsappBtnText: { fontSize: 12, color: '#FFFFFF', fontFamily: 'DMSans_500Medium' },
+  whatsappBtnTextDone: { color: '#8C7B6E' },
+
+  // Shared buttons
+  goldBtn: { backgroundColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  goldBtnText: { fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_500Medium', letterSpacing: 1 },
+  goldOutlineBtn: { borderWidth: 1, borderColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: '#FFFFFF' },
+  goldOutlineBtnText: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_400Regular' },
+
+  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#F5F0E8', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 28, gap: 14 },
-  modalTitle: { fontSize: 22, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
-  modalSubtitle: { fontSize: 13, color: '#8C7B6E', marginTop: -8, lineHeight: 20 },
-  modalInput: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 14, paddingHorizontal: 16, fontSize: 14, color: '#2C2420' },
+  modalTitle: { fontSize: 24, color: '#2C2420', fontFamily: 'PlayfairDisplay_300Light', letterSpacing: 0.3 },
+  modalSubtitle: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', marginTop: -8, lineHeight: 20 },
+  modalInput: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 14, paddingHorizontal: 16, fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_400Regular' },
   modalBtn: { backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 16, alignItems: 'center' },
-  modalBtnText: { fontSize: 15, color: '#F5F0E8', fontWeight: '500' },
+  modalBtnText: { fontSize: 13, color: '#F5F0E8', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 },
   modalCancel: { alignItems: 'center', paddingVertical: 8 },
-  modalCancelText: { fontSize: 14, color: '#8C7B6E' },
-  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 20, paddingBottom: 32, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8' },
-  navItem: { alignItems: 'center' },
-  navLabel: { fontSize: 14, color: '#8C7B6E', fontWeight: '500' },
-  navActive: { color: '#2C2420' },
+  modalCancelText: { fontSize: 14, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
+
+  // Bottom nav
+  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8' },
+  navItem: { alignItems: 'center', gap: 4 },
+  navLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
+  navLabelActive: { color: '#2C2420', fontFamily: 'DMSans_500Medium' },
+  navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C9A84C' },
 });
