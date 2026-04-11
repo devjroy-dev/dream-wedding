@@ -1013,6 +1013,213 @@ app.post('/api/seed', async (req, res) => {
   }
 });
 
+
+// ==================
+// CONTRACT ROUTES
+// ==================
+
+app.get('/api/contracts/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_contracts')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/contracts', async (req, res) => {
+  try {
+    const now = new Date();
+    const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const financial_year = `FY ${year}-${String(year + 1).slice(-2)}`;
+    const { data, error } = await supabase
+      .from('vendor_contracts')
+      .insert([{ ...req.body, financial_year }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/contracts/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_contracts')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
+// EXPENSE ROUTES
+// ==================
+
+app.get('/api/expenses/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_expenses')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/expenses', async (req, res) => {
+  try {
+    const now = new Date();
+    const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const financial_year = `FY ${year}-${String(year + 1).slice(-2)}`;
+    const { data, error } = await supabase
+      .from('vendor_expenses')
+      .insert([{ ...req.body, financial_year }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/expenses/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('vendor_expenses')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
+// PAYMENT SCHEDULE ROUTES
+// ==================
+
+app.get('/api/payment-schedules/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_payment_schedules')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/payment-schedules', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_payment_schedules')
+      .insert([req.body])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/payment-schedules/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_payment_schedules')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
+// TEAM MEMBER ROUTES
+// ==================
+
+app.get('/api/team/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_team_members')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .eq('active', true)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/team', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_team_members')
+      .insert([req.body])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/team/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_team_members')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/team/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('vendor_team_members')
+      .update({ active: false })
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);

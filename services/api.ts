@@ -266,3 +266,79 @@ export const deleteVendorClient = async (id: string) => {
   const response = await api.delete(`/vendor-clients/${id}`);
   return response.data;
 };
+
+// ==================
+// CONTRACTS
+// ==================
+
+export const getContracts = async (vendorId: string) => {
+  const response = await api.get(`/contracts/${vendorId}`);
+  return response.data;
+};
+
+export const createContract = async (contractData: any) => {
+  const response = await api.post('/contracts', contractData);
+  return response.data;
+};
+
+export const updateContract = async (id: string, data: any) => {
+  const response = await api.patch(`/contracts/${id}`, data);
+  return response.data;
+};
+
+// ==================
+// EXPENSES
+// ==================
+
+export const getExpenses = async (vendorId: string) => {
+  const response = await api.get(`/expenses/${vendorId}`);
+  return response.data;
+};
+
+export const addExpense = async (expenseData: any) => {
+  const response = await api.post('/expenses', expenseData);
+  return response.data;
+};
+
+export const deleteExpense = async (id: string) => {
+  const response = await api.delete(`/expenses/${id}`);
+  return response.data;
+};
+
+// ==================
+// PAYMENT SCHEDULES
+// ==================
+
+export const getPaymentSchedules = async (vendorId: string) => {
+  const response = await api.get(`/payment-schedules/${vendorId}`);
+  return response.data;
+};
+
+export const createPaymentSchedule = async (data: any) => {
+  const response = await api.post('/payment-schedules', data);
+  return response.data;
+};
+
+export const updatePaymentSchedule = async (id: string, data: any) => {
+  const response = await api.patch(`/payment-schedules/${id}`, data);
+  return response.data;
+};
+
+// ==================
+// TEAM MEMBERS
+// ==================
+
+export const getTeamMembers = async (vendorId: string) => {
+  const response = await api.get(`/team/${vendorId}`);
+  return response.data;
+};
+
+export const addTeamMember = async (data: any) => {
+  const response = await api.post('/team', data);
+  return response.data;
+};
+
+export const removeTeamMember = async (id: string) => {
+  const response = await api.delete(`/team/${id}`);
+  return response.data;
+};

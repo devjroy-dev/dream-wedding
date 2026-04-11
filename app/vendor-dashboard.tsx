@@ -177,6 +177,49 @@ export default function VendorDashboardScreen() {
   const [newPromoTitle, setNewPromoTitle] = useState('');
   const [newPromoExpiry, setNewPromoExpiry] = useState('');
 
+  // Contract state
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [showContractForm, setShowContractForm] = useState(false);
+  const [contractClient, setContractClient] = useState('');
+  const [contractPhone, setContractPhone] = useState('');
+  const [contractEventType, setContractEventType] = useState('Wedding');
+  const [contractEventDate, setContractEventDate] = useState('');
+  const [contractVenue, setContractVenue] = useState('');
+  const [contractServices, setContractServices] = useState('');
+  const [contractTotal, setContractTotal] = useState('');
+  const [contractAdvance, setContractAdvance] = useState('');
+  const [contractDeliverables, setContractDeliverables] = useState('');
+  const [contractCancellation, setContractCancellation] = useState('Token amount is non-refundable. Balance refundable if cancelled 30+ days before event.');
+
+  // Expense state
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [expenseDesc, setExpenseDesc] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseCategory, setExpenseCategory] = useState('Travel');
+  const [expenseClient, setExpenseClient] = useState('');
+  const [expensesLoading, setExpensesLoading] = useState(false);
+
+  // Payment schedule state
+  const [paymentSchedules, setPaymentSchedules] = useState<any[]>([]);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentClient, setPaymentClient] = useState('');
+  const [paymentPhone, setPaymentPhone] = useState('');
+  const [paymentTotal, setPaymentTotal] = useState('');
+  const [paymentInstalments, setPaymentInstalments] = useState([
+    { label: 'Token', amount: '', due_date: '', paid: false },
+    { label: 'Advance', amount: '', due_date: '', paid: false },
+    { label: 'Final', amount: '', due_date: '', paid: false },
+  ]);
+
+  // Team state
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [showTeamForm, setShowTeamForm] = useState(false);
+  const [teamMemberName, setTeamMemberName] = useState('');
+  const [teamMemberPhone, setTeamMemberPhone] = useState('');
+  const [teamMemberRole, setTeamMemberRole] = useState('');
+  const [teamLoading, setTeamLoading] = useState(false);
+
   // Data state
   const [benchmark, setBenchmark] = useState<any>(null);
   const [leads, setLeads] = useState<any[]>([]);
@@ -209,8 +252,345 @@ export default function VendorDashboardScreen() {
       if (activeTab === 'Calendar') { loadBlockedDates(); }
       if (activeTab === 'Clients') { loadClients(); }
       if (activeTab === 'Tax & Finance') { loadTDS(); }
+      if (activeTab === 'Tools') { loadContracts(); loadExpenses(); loadPaymentSchedules(); loadTeamMembers(); }
     }
   }, [vendorSession, activeTab]);
+
+  const loadContracts = async () => {
+    try {
+      const res = await fetch(`${API}/api/contracts/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success) setContracts(data.data || []);
+    } catch (e) {}
+  };
+
+  const loadExpenses = async () => {
+    try {
+      setExpensesLoading(true);
+      const res = await fetch(`${API}/api/expenses/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success) setExpenses(data.data || []);
+    } catch (e) {} finally { setExpensesLoading(false); }
+  };
+
+  const loadPaymentSchedules = async () => {
+    try {
+      const res = await fetch(`${API}/api/payment-schedules/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success) setPaymentSchedules(data.data || []);
+    } catch (e) {}
+  };
+
+  const loadTeamMembers = async () => {
+    try {
+      setTeamLoading(true);
+      const res = await fetch(`${API}/api/team/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success) setTeamMembers(data.data || []);
+    } catch (e) {} finally { setTeamLoading(false); }
+  };
+
+  const handleGenerateContract = async () => {
+    if (!contractClient || !contractTotal || !contractEventDate) {
+      Alert.alert('Missing info', 'Please enter client name, event date and total amount.');
+      return;
+    }
+    try {
+      const balance = parseInt(contractTotal) - parseInt(contractAdvance || '0');
+      const contractData = {
+        vendor_id: vendorSession.vendorId,
+        client_name: contractClient,
+        client_phone: contractPhone,
+        event_type: contractEventType,
+        event_date: contractEventDate,
+        venue: contractVenue,
+        service_description: contractServices,
+        total_amount: parseInt(contractTotal),
+        advance_amount: parseInt(contractAdvance || '0'),
+        balance_amount: balance,
+        deliverables: contractDeliverables,
+        cancellation_policy: contractCancellation,
+        status: 'issued',
+      };
+
+      // Save to Supabase
+      await fetch(`${API}/api/contracts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(contractData),
+      });
+
+      // Generate PDF
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Helvetica, sans-serif; padding: 40px; color: #2C2420; }
+            h1 { font-size: 28px; font-weight: 300; letter-spacing: 4px; margin-bottom: 4px; }
+            h2 { font-size: 11px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 32px; }
+            .gold { color: #C9A84C; }
+            .section { margin-bottom: 28px; }
+            .section-title { font-size: 10px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #E8E0D5; padding-bottom: 6px; }
+            .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #F5F0E8; font-size: 13px; }
+            .amount-box { background: #2C2420; color: #F5F0E8; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .amount-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+            .amount-gold { color: #C9A84C; font-size: 20px; font-weight: 300; }
+            .terms { background: #F5F0E8; padding: 16px; border-radius: 8px; font-size: 12px; color: #8C7B6E; line-height: 1.6; }
+            .signature { display: flex; justify-content: space-between; margin-top: 60px; }
+            .sig-box { width: 45%; border-top: 1px solid #2C2420; padding-top: 8px; font-size: 12px; color: #8C7B6E; }
+            .footer { margin-top: 40px; font-size: 10px; color: #8C7B6E; text-align: center; border-top: 1px solid #E8E0D5; padding-top: 16px; }
+          </style>
+        </head>
+        <body>
+          <h1>THE DREAM WEDDING</h1>
+          <h2>Service Agreement</h2>
+
+          <div class="section">
+            <div class="section-title">Parties</div>
+            <div class="row"><span>Vendor</span><span><strong>${vendorSession?.vendorName || 'Vendor'}</strong></span></div>
+            <div class="row"><span>Client</span><span><strong>${contractClient}</strong></span></div>
+            ${contractPhone ? `<div class="row"><span>Client Phone</span><span>${contractPhone}</span></div>` : ''}
+          </div>
+
+          <div class="section">
+            <div class="section-title">Event Details</div>
+            <div class="row"><span>Event Type</span><span>${contractEventType}</span></div>
+            <div class="row"><span>Event Date</span><span><strong>${contractEventDate}</strong></span></div>
+            ${contractVenue ? `<div class="row"><span>Venue</span><span>${contractVenue}</span></div>` : ''}
+          </div>
+
+          ${contractServices ? `
+          <div class="section">
+            <div class="section-title">Services</div>
+            <p style="font-size:13px; line-height:1.6; color:#2C2420;">${contractServices}</p>
+          </div>` : ''}
+
+          ${contractDeliverables ? `
+          <div class="section">
+            <div class="section-title">Deliverables</div>
+            <p style="font-size:13px; line-height:1.6; color:#2C2420;">${contractDeliverables}</p>
+          </div>` : ''}
+
+          <div class="amount-box">
+            <div class="amount-row"><span>Total Amount</span><span class="amount-gold">Rs.${parseInt(contractTotal).toLocaleString('en-IN')}</span></div>
+            <div class="amount-row"><span>Advance / Token</span><span>Rs.${parseInt(contractAdvance || '0').toLocaleString('en-IN')}</span></div>
+            <div class="amount-row"><span>Balance Due</span><span>Rs.${balance.toLocaleString('en-IN')}</span></div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Cancellation Policy</div>
+            <div class="terms">${contractCancellation}</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Additional Terms</div>
+            <div class="terms">
+              1. This agreement is binding once the advance amount is received.<br>
+              2. Any additional services requested on the day of the event will be charged separately.<br>
+              3. The vendor reserves the right to use images/videos for portfolio purposes unless explicitly requested otherwise in writing.<br>
+              4. Disputes subject to jurisdiction of courts in ${vendorSession?.city || 'Delhi NCR'}.
+            </div>
+          </div>
+
+          <div class="signature">
+            <div class="sig-box">
+              <strong>${vendorSession?.vendorName || 'Vendor'}</strong><br>
+              Vendor Signature & Date
+            </div>
+            <div class="sig-box">
+              <strong>${contractClient}</strong><br>
+              Client Signature & Date
+            </div>
+          </div>
+
+          <div class="footer">
+            Generated by The Dream Wedding · thedreamwedding.in · ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+        </body>
+        </html>
+      `;
+
+      const printModule = await import('expo-print');
+      const sharingModule = await import('expo-sharing');
+      const { uri } = await printModule.printToFileAsync({ html });
+      await sharingModule.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Service Agreement',
+        UTI: 'com.adobe.pdf',
+      });
+
+      loadContracts();
+      setContractClient('');
+      setContractPhone('');
+      setContractEventDate('');
+      setContractVenue('');
+      setContractServices('');
+      setContractTotal('');
+      setContractAdvance('');
+      setContractDeliverables('');
+      setShowContractForm(false);
+      Alert.alert('Contract Ready', 'PDF generated. Share via WhatsApp with your client.');
+    } catch (e) {
+      Alert.alert('Error', 'Could not generate contract.');
+    }
+  };
+
+  const handleAddExpense = async () => {
+    if (!expenseDesc || !expenseAmount) {
+      Alert.alert('Missing info', 'Please enter description and amount.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/expenses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          description: expenseDesc,
+          amount: parseInt(expenseAmount),
+          category: expenseCategory,
+          client_name: expenseClient,
+          expense_date: new Date().toLocaleDateString('en-IN'),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setExpenses(prev => [data.data, ...prev]);
+        setExpenseDesc('');
+        setExpenseAmount('');
+        setExpenseClient('');
+        setShowExpenseForm(false);
+        Alert.alert('Expense Added', 'Expense recorded successfully.');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save expense.');
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    try {
+      await fetch(`${API}/api/expenses/${id}`, { method: 'DELETE' });
+      setExpenses(prev => prev.filter(e => e.id !== id));
+    } catch (e) {}
+  };
+
+  const handleExportExpenses = async () => {
+    if (expenses.length === 0) {
+      Alert.alert('No expenses', 'No expenses recorded yet.');
+      return;
+    }
+    try {
+      const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+      const rows = expenses.map(exp => `
+        <tr>
+          <td>${exp.expense_date || ''}</td>
+          <td>${exp.category || ''}</td>
+          <td>${exp.description}</td>
+          <td>${exp.client_name || '—'}</td>
+          <td style="text-align:right">Rs.${(exp.amount || 0).toLocaleString('en-IN')}</td>
+        </tr>
+      `).join('');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Helvetica,sans-serif;padding:40px;color:#2C2420}h1{font-size:24px;font-weight:300;letter-spacing:4px}h2{font-size:12px;color:#8C7B6E;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px}table{width:100%;border-collapse:collapse}th{font-size:10px;color:#8C7B6E;letter-spacing:1px;text-transform:uppercase;padding:10px 8px;border-bottom:1px solid #E8E0D5;text-align:left}td{padding:12px 8px;border-bottom:1px solid #F5F0E8;font-size:13px}.total{margin-top:24px;background:#2C2420;padding:20px;border-radius:8px;color:#F5F0E8;display:flex;justify-content:space-between}.gold{color:#C9A84C;font-size:18px}</style></head><body><h1>THE DREAM WEDDING</h1><h2>Expense Report — ${vendorSession?.vendorName || 'Vendor'} · FY ${new Date().getFullYear()}</h2><table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Client</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table><div class="total"><span>Total Expenses</span><span class="gold">Rs.${totalExpenses.toLocaleString('en-IN')}</span></div></body></html>`;
+      const printModule = await import('expo-print');
+      const sharingModule = await import('expo-sharing');
+      const { uri } = await printModule.printToFileAsync({ html });
+      await sharingModule.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Expense Report', UTI: 'com.adobe.pdf' });
+    } catch (e) {
+      Alert.alert('Error', 'Could not generate expense report.');
+    }
+  };
+
+  const handleSavePaymentSchedule = async () => {
+    if (!paymentClient || !paymentTotal) {
+      Alert.alert('Missing info', 'Please enter client name and total amount.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/payment-schedules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          client_name: paymentClient,
+          client_phone: paymentPhone,
+          total_amount: parseInt(paymentTotal),
+          instalments: paymentInstalments,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPaymentSchedules(prev => [data.data, ...prev]);
+        setPaymentClient('');
+        setPaymentPhone('');
+        setPaymentTotal('');
+        setPaymentInstalments([
+          { label: 'Token', amount: '', due_date: '', paid: false },
+          { label: 'Advance', amount: '', due_date: '', paid: false },
+          { label: 'Final', amount: '', due_date: '', paid: false },
+        ]);
+        setShowPaymentForm(false);
+        Alert.alert('Schedule Saved', 'Payment schedule created successfully.');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save payment schedule.');
+    }
+  };
+
+  const handleMarkInstalmentPaid = async (scheduleId: string, instalmentIndex: number) => {
+    try {
+      const schedule = paymentSchedules.find(s => s.id === scheduleId);
+      if (!schedule) return;
+      const updated = [...schedule.instalments];
+      updated[instalmentIndex] = { ...updated[instalmentIndex], paid: true };
+      await fetch(`${API}/api/payment-schedules/${scheduleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instalments: updated }),
+      });
+      setPaymentSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, instalments: updated } : s));
+    } catch (e) {
+      Alert.alert('Error', 'Could not update payment.');
+    }
+  };
+
+  const handleAddTeamMember = async () => {
+    if (!teamMemberName || !teamMemberRole) {
+      Alert.alert('Missing info', 'Please enter name and role.');
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/team`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorSession.vendorId,
+          name: teamMemberName,
+          phone: teamMemberPhone,
+          role: teamMemberRole,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTeamMembers(prev => [data.data, ...prev]);
+        setTeamMemberName('');
+        setTeamMemberPhone('');
+        setTeamMemberRole('');
+        setShowTeamForm(false);
+        Alert.alert('Team Member Added', `${teamMemberName} added to your team.`);
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not add team member.');
+    }
+  };
+
+  const handleRemoveTeamMember = async (id: string) => {
+    try {
+      await fetch(`${API}/api/team/${id}`, { method: 'DELETE' });
+      setTeamMembers(prev => prev.filter(m => m.id !== id));
+    } catch (e) {}
+  };
 
   const loadSession = async () => {
     try {
@@ -1426,6 +1806,279 @@ export default function VendorDashboardScreen() {
                   </View>
                 ))}
               </View>
+            </View>
+
+            {/* Contract Generator */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="file-text" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Contract Generator</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowContractForm(!showContractForm)}>
+                  <Text style={styles.toolActionText}>{showContractForm ? 'Cancel' : 'Create'}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.toolDesc}>Professional service agreements for any client. Generated as PDF — share via WhatsApp instantly.</Text>
+              {showContractForm && (
+                <View style={styles.invoiceForm}>
+                  <TextInput style={styles.fieldInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={contractClient} onChangeText={setContractClient} />
+                  <TextInput style={styles.fieldInput} placeholder="Client phone (optional)" placeholderTextColor="#8C7B6E" value={contractPhone} onChangeText={setContractPhone} keyboardType="phone-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Event type (e.g. Wedding, Sangeet)" placeholderTextColor="#8C7B6E" value={contractEventType} onChangeText={setContractEventType} />
+                  <TextInput style={styles.fieldInput} placeholder="Event date (e.g. March 15, 2026)" placeholderTextColor="#8C7B6E" value={contractEventDate} onChangeText={setContractEventDate} />
+                  <TextInput style={styles.fieldInput} placeholder="Venue (optional)" placeholderTextColor="#8C7B6E" value={contractVenue} onChangeText={setContractVenue} />
+                  <TextInput style={[styles.fieldInput, { height: 80, textAlignVertical: 'top' }]} placeholder="Services description" placeholderTextColor="#8C7B6E" value={contractServices} onChangeText={setContractServices} multiline />
+                  <TextInput style={[styles.fieldInput, { height: 80, textAlignVertical: 'top' }]} placeholder="Deliverables (e.g. 500 edited photos, 2 highlight reels)" placeholderTextColor="#8C7B6E" value={contractDeliverables} onChangeText={setContractDeliverables} multiline />
+                  <TextInput style={styles.fieldInput} placeholder="Total amount (Rs.)" placeholderTextColor="#8C7B6E" value={contractTotal} onChangeText={setContractTotal} keyboardType="number-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Advance / token amount (Rs.)" placeholderTextColor="#8C7B6E" value={contractAdvance} onChangeText={setContractAdvance} keyboardType="number-pad" />
+                  {contractTotal && contractAdvance ? (
+                    <View style={styles.gstPreview}>
+                      <Text style={styles.gstPreviewText}>Balance due: Rs.{(parseInt(contractTotal) - parseInt(contractAdvance)).toLocaleString('en-IN')}</Text>
+                    </View>
+                  ) : null}
+                  <TextInput style={[styles.fieldInput, { height: 80, textAlignVertical: 'top' }]} placeholder="Cancellation policy" placeholderTextColor="#8C7B6E" value={contractCancellation} onChangeText={setContractCancellation} multiline />
+                  <TouchableOpacity style={styles.goldBtn} onPress={handleGenerateContract}>
+                    <Feather name="file-text" size={14} color="#2C2420" />
+                    <Text style={styles.goldBtnText}>GENERATE CONTRACT PDF</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {contracts.length > 0 && (
+                <View style={{ gap: 0, borderTopWidth: 1, borderTopColor: '#E8E0D5', marginTop: 4 }}>
+                  {contracts.slice(0, 3).map((contract: any, index: number) => (
+                    <View key={contract.id}>
+                      <View style={styles.invoiceHistoryRow}>
+                        <View style={{ flex: 1, gap: 3 }}>
+                          <Text style={styles.invoiceHistoryClient}>{contract.client_name}</Text>
+                          <Text style={styles.invoiceHistoryMeta}>{contract.event_type} · {contract.event_date}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                          <Text style={styles.invoiceHistoryAmount}>Rs.{(contract.total_amount || 0).toLocaleString('en-IN')}</Text>
+                          <View style={[styles.invoiceStatusBtn, { backgroundColor: '#C9A84C20', borderColor: '#C9A84C' }]}>
+                            <Text style={[styles.invoiceStatusText, { color: '#C9A84C' }]}>Issued</Text>
+                          </View>
+                        </View>
+                      </View>
+                      {index < contracts.slice(0, 3).length - 1 && <View style={styles.listDivider} />}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* Payment Schedule Tracker */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="calendar" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Payment Schedule</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowPaymentForm(!showPaymentForm)}>
+                  <Text style={styles.toolActionText}>{showPaymentForm ? 'Cancel' : 'Create'}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.toolDesc}>Track token, advance and final payments per client. Mark instalments paid with one tap.</Text>
+              {showPaymentForm && (
+                <View style={styles.invoiceForm}>
+                  <TextInput style={styles.fieldInput} placeholder="Client name" placeholderTextColor="#8C7B6E" value={paymentClient} onChangeText={setPaymentClient} />
+                  <TextInput style={styles.fieldInput} placeholder="Client phone (optional)" placeholderTextColor="#8C7B6E" value={paymentPhone} onChangeText={setPaymentPhone} keyboardType="phone-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Total booking amount (Rs.)" placeholderTextColor="#8C7B6E" value={paymentTotal} onChangeText={setPaymentTotal} keyboardType="number-pad" />
+                  <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Payment Instalments</Text>
+                  {paymentInstalments.map((inst, index) => (
+                    <View key={index} style={{ flexDirection: 'row', gap: 8 }}>
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        placeholder={`${inst.label} amount`}
+                        placeholderTextColor="#8C7B6E"
+                        value={inst.amount}
+                        onChangeText={(text) => {
+                          const updated = [...paymentInstalments];
+                          updated[index] = { ...updated[index], amount: text };
+                          setPaymentInstalments(updated);
+                        }}
+                        keyboardType="number-pad"
+                      />
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        placeholder="Due date"
+                        placeholderTextColor="#8C7B6E"
+                        value={inst.due_date}
+                        onChangeText={(text) => {
+                          const updated = [...paymentInstalments];
+                          updated[index] = { ...updated[index], due_date: text };
+                          setPaymentInstalments(updated);
+                        }}
+                      />
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.goldBtn} onPress={handleSavePaymentSchedule}>
+                    <Text style={styles.goldBtnText}>SAVE SCHEDULE</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {paymentSchedules.length > 0 && (
+                <View style={{ gap: 12, borderTopWidth: 1, borderTopColor: '#E8E0D5', paddingTop: 12, marginTop: 4 }}>
+                  {paymentSchedules.map((schedule: any) => (
+                    <View key={schedule.id} style={{ gap: 8 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={styles.invoiceHistoryClient}>{schedule.client_name}</Text>
+                        <Text style={styles.invoiceHistoryAmount}>Rs.{(schedule.total_amount || 0).toLocaleString('en-IN')}</Text>
+                      </View>
+                      {(schedule.instalments || []).map((inst: any, idx: number) => (
+                        <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 8 }}>
+                          <View style={{ gap: 2 }}>
+                            <Text style={styles.tdsLedgerType}>{inst.label}</Text>
+                            <Text style={styles.tdsLedgerDate}>{inst.due_date || 'No date set'} · Rs.{parseInt(inst.amount || '0').toLocaleString('en-IN')}</Text>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.invoiceStatusBtn, { backgroundColor: inst.paid ? '#4CAF5020' : '#FFF8EC', borderColor: inst.paid ? '#4CAF50' : '#C9A84C' }]}
+                            onPress={() => !inst.paid && handleMarkInstalmentPaid(schedule.id, idx)}
+                            disabled={inst.paid}
+                          >
+                            <Text style={[styles.invoiceStatusText, { color: inst.paid ? '#4CAF50' : '#C9A84C' }]}>
+                              {inst.paid ? 'Paid' : 'Mark Paid'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                      <View style={styles.listDivider} />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* Expense Tracker */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="minus-circle" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>Expense Tracker</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={styles.toolActionBtn} onPress={handleExportExpenses}>
+                    <Text style={styles.toolActionText}>Export</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowExpenseForm(!showExpenseForm)}>
+                    <Text style={styles.toolActionText}>{showExpenseForm ? 'Cancel' : '+ Add'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={styles.toolDesc}>Track travel, equipment, editing and other costs per booking. Know your actual profit margin.</Text>
+              {showExpenseForm && (
+                <View style={styles.invoiceForm}>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    {['Travel', 'Equipment', 'Editing', 'Assistant', 'Food', 'Other'].map(cat => (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[styles.segmentBtn, expenseCategory === cat && styles.segmentBtnActive]}
+                        onPress={() => setExpenseCategory(cat)}
+                      >
+                        <Text style={[styles.segmentBtnText, expenseCategory === cat && styles.segmentBtnTextActive]}>{cat}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TextInput style={styles.fieldInput} placeholder="Description" placeholderTextColor="#8C7B6E" value={expenseDesc} onChangeText={setExpenseDesc} />
+                  <TextInput style={styles.fieldInput} placeholder="Amount (Rs.)" placeholderTextColor="#8C7B6E" value={expenseAmount} onChangeText={setExpenseAmount} keyboardType="number-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Client name (optional)" placeholderTextColor="#8C7B6E" value={expenseClient} onChangeText={setExpenseClient} />
+                  <TouchableOpacity style={styles.goldBtn} onPress={handleAddExpense}>
+                    <Text style={styles.goldBtnText}>SAVE EXPENSE</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {expensesLoading ? (
+                <ActivityIndicator color="#C9A84C" />
+              ) : expenses.length > 0 ? (
+                <View style={{ borderTopWidth: 1, borderTopColor: '#E8E0D5', marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: '#F5F0E8', borderRadius: 8, marginTop: 8 }}>
+                    <Text style={styles.tdsBreakdownLabel}>Total Expenses</Text>
+                    <Text style={[styles.invoiceHistoryAmount, { color: '#C9A84C' }]}>
+                      Rs.{expenses.reduce((s, e) => s + (e.amount || 0), 0).toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+                  {expenses.slice(0, 5).map((exp: any, index: number) => (
+                    <View key={exp.id}>
+                      <View style={styles.invoiceHistoryRow}>
+                        <View style={{ flex: 1, gap: 3 }}>
+                          <Text style={styles.invoiceHistoryClient}>{exp.description}</Text>
+                          <Text style={styles.invoiceHistoryMeta}>{exp.category} · {exp.expense_date}</Text>
+                          {exp.client_name ? <Text style={styles.invoiceHistoryDesc}>{exp.client_name}</Text> : null}
+                        </View>
+                        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                          <Text style={[styles.invoiceHistoryAmount, { color: '#B5303A' }]}>
+                            -Rs.{(exp.amount || 0).toLocaleString('en-IN')}
+                          </Text>
+                          <TouchableOpacity onPress={() => handleDeleteExpense(exp.id)}>
+                            <Feather name="trash-2" size={13} color="#8C7B6E" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      {index < expenses.slice(0, 5).length - 1 && <View style={styles.listDivider} />}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            {/* Team Management */}
+            <View style={styles.toolCard}>
+              <View style={styles.toolHeader}>
+                <View style={styles.toolTitleRow}>
+                  <View style={styles.toolIconBox}>
+                    <Feather name="users" size={14} color="#C9A84C" />
+                  </View>
+                  <Text style={styles.toolTitle}>My Team</Text>
+                </View>
+                <TouchableOpacity style={styles.toolActionBtn} onPress={() => setShowTeamForm(!showTeamForm)}>
+                  <Text style={styles.toolActionText}>{showTeamForm ? 'Cancel' : '+ Add'}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.toolDesc}>Add your assistants, editors and coordinators. Assign them to bookings in Build 2.</Text>
+              {showTeamForm && (
+                <View style={styles.invoiceForm}>
+                  <TextInput style={styles.fieldInput} placeholder="Name" placeholderTextColor="#8C7B6E" value={teamMemberName} onChangeText={setTeamMemberName} />
+                  <TextInput style={styles.fieldInput} placeholder="Phone (optional)" placeholderTextColor="#8C7B6E" value={teamMemberPhone} onChangeText={setTeamMemberPhone} keyboardType="phone-pad" />
+                  <TextInput style={styles.fieldInput} placeholder="Role (e.g. Second Shooter, Editor)" placeholderTextColor="#8C7B6E" value={teamMemberRole} onChangeText={setTeamMemberRole} />
+                  <TouchableOpacity style={styles.goldBtn} onPress={handleAddTeamMember}>
+                    <Text style={styles.goldBtnText}>ADD TEAM MEMBER</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {teamLoading ? (
+                <ActivityIndicator color="#C9A84C" />
+              ) : teamMembers.length === 0 ? (
+                <Text style={styles.emptyText}>No team members yet.</Text>
+              ) : (
+                <View style={{ borderTopWidth: 1, borderTopColor: '#E8E0D5', marginTop: 4 }}>
+                  {teamMembers.map((member: any, index: number) => (
+                    <View key={member.id}>
+                      <View style={styles.invoiceHistoryRow}>
+                        <View style={{ flex: 1, gap: 3 }}>
+                          <Text style={styles.invoiceHistoryClient}>{member.name}</Text>
+                          <Text style={styles.invoiceHistoryMeta}>{member.role}{member.phone ? ` · ${member.phone}` : ''}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                          {member.phone ? (
+                            <TouchableOpacity onPress={() => Linking.openURL(`whatsapp://send?phone=91${member.phone}`)}>
+                              <Feather name="message-circle" size={16} color="#25D366" />
+                            </TouchableOpacity>
+                          ) : null}
+                          <TouchableOpacity onPress={() => handleRemoveTeamMember(member.id)}>
+                            <Feather name="trash-2" size={14} color="#8C7B6E" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      {index < teamMembers.length - 1 && <View style={styles.listDivider} />}
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             {/* Refer a Vendor */}
