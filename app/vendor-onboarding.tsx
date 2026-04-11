@@ -153,18 +153,18 @@ export default function VendorOnboardingScreen() {
       const vendorData = {
         name: businessName.trim(),
         category: selectedCategory,
-        cities: selectedCities,
         city: selectedCities[0] || '',
         instagram_url: instagram.trim(),
         starting_price: parseInt(startingPrice) || 0,
         vibe_tags: selectedVibes,
         about: extraInfo.trim(),
+        equipment: extraInfo.trim(),
+        delivery_time: 'As discussed',
         portfolio_images: portfolioImages,
         subscription_active: true,
         is_verified: false,
         rating: 0,
         review_count: 0,
-        phone: parsed.phone || '',
       };
 
       const result = await createVendor(vendorData);
