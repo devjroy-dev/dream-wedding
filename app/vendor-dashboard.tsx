@@ -385,9 +385,9 @@ export default function VendorDashboardScreen() {
   ];
 
   const MOCK_INQUIRIES = [
-    { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi, I\'m interested in your services for my Wedding on Dec 15. Are you available?', status: 'new' },
-    { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Hi, I\'m interested in your services for Sangeet on Nov 20. Are you available?', status: 'replied' },
-    { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Hi, I\'m interested in your services for Reception on Jan 5. Are you available?', status: 'new' },
+    { id: '1', name: 'Priya & Rahul', function: 'Wedding', date: 'December 15, 2025', message: 'Hi! We loved your portfolio, especially the candid shots. Getting married Dec 15 in Delhi — 2 day coverage needed. What are your packages?', status: 'new' },
+    { id: '2', name: 'Sneha & Arjun', function: 'Sangeet', date: 'November 20, 2025', message: 'Looking for something editorial and fun for our Sangeet — not too traditional. Budget around Rs 1.5L. Would that work?', status: 'replied' },
+    { id: '3', name: 'Ananya & Dev', function: 'Reception', date: 'January 5, 2026', message: 'Can you share pricing for 3 functions — Reception, Sangeet and Wedding day? Flexible on January dates.', status: 'new' },
   ];
 
   return (
@@ -507,6 +507,35 @@ export default function VendorDashboardScreen() {
                   <Text style={styles.revenueLabel}>Confirmed</Text>
                 </View>
               </View>
+            </View>
+
+            {/* Spotlight Score */}
+            <View style={styles.spotlightCard}>
+              <View style={styles.spotlightHeader}>
+                <Feather name="star" size={13} color="#C9A84C" />
+                <Text style={styles.spotlightTitle}>Spotlight Score</Text>
+                <View style={styles.spotlightRankBadge}>
+                  <Text style={styles.spotlightRankText}>#3 This Month</Text>
+                </View>
+              </View>
+              <Text style={styles.spotlightScore}>2,847</Text>
+              <View style={styles.spotlightBreakdown}>
+                <View style={styles.spotlightItem}>
+                  <Text style={styles.spotlightItemNum}>140</Text>
+                  <Text style={styles.spotlightItemLbl}>Saves x3</Text>
+                </View>
+                <View style={styles.spotlightDivider} />
+                <View style={styles.spotlightItem}>
+                  <Text style={styles.spotlightItemNum}>57</Text>
+                  <Text style={styles.spotlightItemLbl}>Enquiries x5</Text>
+                </View>
+                <View style={styles.spotlightDivider} />
+                <View style={styles.spotlightItem}>
+                  <Text style={styles.spotlightItemNum}>12</Text>
+                  <Text style={styles.spotlightItemLbl}>Bookings x10</Text>
+                </View>
+              </View>
+              <Text style={styles.spotlightHint}>Refreshes 1st of every month. Earned, not bought.</Text>
             </View>
 
             {/* Pending bookings alert */}
@@ -1154,7 +1183,7 @@ export default function VendorDashboardScreen() {
                 <Text style={styles.viralTitle}>Your network is your growth engine</Text>
               </View>
               <Text style={styles.viralText}>
-                Add your existing clients to The Dream Wedding. They get onboarded, discover vendors for other functions, and refer their friends. This is how you grow without spending on ads.
+                Zero ad spend. Every vendor with 20 clients = 20 new platform users instantly.
               </Text>
             </View>
 
@@ -1221,7 +1250,7 @@ export default function VendorDashboardScreen() {
         {[
           { label: 'Dashboard', icon: 'grid', active: true, onPress: () => {} },
           { label: 'Messages', icon: 'message-circle', active: false, onPress: () => router.push('/messaging') },
-          { label: 'Log Out', icon: 'log-out', active: false, onPress: handleLogout },
+          { label: 'Settings', icon: 'settings', active: false, onPress: () => Alert.alert('Settings', 'Manage your account', [{ text: 'Log Out', style: 'destructive', onPress: handleLogout }, { text: 'Cancel', style: 'cancel' }]) },
         ].map(item => (
           <TouchableOpacity key={item.label} style={styles.navItem} onPress={item.onPress}>
             <Feather name={item.icon as any} size={20} color={item.active ? '#2C2420' : '#8C7B6E'} />
@@ -1476,4 +1505,21 @@ const styles = StyleSheet.create({
   navLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
   navLabelActive: { color: '#2C2420', fontFamily: 'DMSans_500Medium' },
   navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C9A84C' },
+  spotlightCard: { backgroundColor: '#2C2420', borderRadius: 16, padding: 18, gap: 12, borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)' },
+  spotlightHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  spotlightTitle: { flex: 1, fontSize: 13, color: '#F5F0E8', fontFamily: 'DMSans_500Medium' },
+  spotlightRankBadge: { backgroundColor: 'rgba(201,168,76,0.12)', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)' },
+  spotlightRankText: { fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' },
+  spotlightScore: { fontSize: 44, color: '#C9A84C', fontFamily: 'PlayfairDisplay_300Light', lineHeight: 48 },
+  spotlightBreakdown: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 },
+  spotlightItem: { flex: 1, alignItems: 'center', gap: 3 },
+  spotlightItemNum: { fontSize: 18, color: '#F5F0E8', fontFamily: 'PlayfairDisplay_300Light' },
+  spotlightItemLbl: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
+  spotlightDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.07)' },
+  spotlightHint: { fontSize: 10, color: 'rgba(140,123,110,0.55)', fontFamily: 'DMSans_300Light' },
+  viralFlow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  viralStep: { alignItems: 'center', gap: 6, flex: 1 },
+  viralStepNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)', justifyContent: 'center', alignItems: 'center' },
+  viralStepNumTxt: { fontSize: 13, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' },
+  viralStepTxt: { fontSize: 10, color: 'rgba(245,240,232,0.6)', fontFamily: 'DMSans_300Light', textAlign: 'center', lineHeight: 14 },
 });
