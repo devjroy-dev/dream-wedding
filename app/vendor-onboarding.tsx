@@ -16,7 +16,7 @@ import {
   PlayfairDisplay_400Regular,
   PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
-} from '@expo-google-fonts/playfair-display';
+} from '@expo-google-fonts/playfair-display/index';
 import {
   DMSans_300Light,
   DMSans_400Regular,

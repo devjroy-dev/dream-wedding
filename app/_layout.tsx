@@ -46,7 +46,6 @@ export default function RootLayout() {
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
-          <Stack.Screen name="splash" />
           <Stack.Screen name="login" />
           <Stack.Screen name="otp" />
           <Stack.Screen name="user-type" />

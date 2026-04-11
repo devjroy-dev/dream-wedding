@@ -15,7 +15,7 @@ import {
   PlayfairDisplay_400Regular,
   PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
-} from '@expo-google-fonts/playfair-display';
+} from '@expo-google-fonts/playfair-display/index';
 import {
   DMSans_300Light,
   DMSans_400Regular,
@@ -32,7 +32,6 @@ GoogleSignin.configure({
 export default function LoginScreen() {
   const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [animationDone, setAnimationDone] = useState(false);
 
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const logoTranslate = useRef(new Animated.Value(20)).current;
@@ -41,7 +40,8 @@ export default function LoginScreen() {
   const buttonsTranslate = useRef(new Animated.Value(60)).current;
   const buttonsOpacity = useRef(new Animated.Value(0)).current;
 
-  const [fontsLoaded] = useFonts({
+  // Load fonts — but don't block render on them
+  useFonts({
     PlayfairDisplay_300Light,
     PlayfairDisplay_400Regular,
     PlayfairDisplay_400Regular_Italic,
@@ -51,9 +51,8 @@ export default function LoginScreen() {
     DMSans_500Medium,
   });
 
+  // Animation starts immediately on mount — no font dependency
   useEffect(() => {
-    if (!fontsLoaded) return;
-
     Animated.sequence([
       Animated.parallel([
         Animated.timing(logoOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
@@ -66,8 +65,8 @@ export default function LoginScreen() {
         Animated.timing(buttonsOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
         Animated.timing(buttonsTranslate, { toValue: 0, duration: 600, useNativeDriver: true }),
       ]),
-    ]).start(() => setAnimationDone(true));
-  }, [fontsLoaded]);
+    ]).start();
+  }, []);
 
   const handleGoogleLogin = async () => {
     try {
@@ -110,10 +109,6 @@ export default function LoginScreen() {
       setGoogleLoading(false);
     }
   };
-
-  if (!fontsLoaded) {
-    return <View style={styles.container} />;
-  }
 
   return (
     <View style={styles.container}>
@@ -212,8 +207,6 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
     paddingTop: 60,
   },
-
-  // Logo
   logoSection: {
     flex: 0.9,
     justifyContent: 'center',
@@ -226,16 +219,15 @@ const styles = StyleSheet.create({
   logoThe: {
     fontSize: 13,
     color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
     letterSpacing: 12,
     textTransform: 'uppercase',
   },
   logoMain: {
     fontSize: 48,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
     letterSpacing: 1,
     textAlign: 'center',
+    fontWeight: '300',
   },
   logoDivider: {
     height: 1,
@@ -245,19 +237,15 @@ const styles = StyleSheet.create({
   logoTagline: {
     fontSize: 15,
     color: '#8C7B6E',
-    fontFamily: 'PlayfairDisplay_400Regular_Italic',
     letterSpacing: 0.5,
+    fontStyle: 'italic',
   },
-
-  // Bottom
   bottomSection: {
     gap: 20,
   },
   buttons: {
     gap: 12,
   },
-
-  // Social buttons
   socialButton: {
     width: '100%',
     borderWidth: 1,
@@ -277,10 +265,7 @@ const styles = StyleSheet.create({
     color: '#2C2420',
     fontSize: 14,
     letterSpacing: 0.3,
-    fontFamily: 'DMSans_400Regular',
   },
-
-  // Google
   googleIconBox: {
     width: 20,
     height: 20,
@@ -292,8 +277,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4285F4',
   },
-
-  // Apple
   appleButton: {
     backgroundColor: '#000000',
     borderColor: '#000000',
@@ -309,16 +292,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: -0.5,
-    fontFamily: 'DMSans_500Medium',
   },
   appleButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     letterSpacing: 0.3,
-    fontFamily: 'DMSans_400Regular',
   },
-
-  // Divider
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -333,10 +312,7 @@ const styles = StyleSheet.create({
   dividerText: {
     color: '#8C7B6E',
     fontSize: 12,
-    fontFamily: 'DMSans_300Light',
   },
-
-  // Phone
   phoneButton: {
     width: '100%',
     backgroundColor: '#2C2420',
@@ -348,10 +324,7 @@ const styles = StyleSheet.create({
     color: '#F5F0E8',
     fontSize: 14,
     letterSpacing: 0.8,
-    fontFamily: 'DMSans_300Light',
   },
-
-  // Vendor link
   vendorRow: {
     alignItems: 'center',
     paddingTop: 4,
@@ -362,6 +335,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 0.3,
     textDecorationLine: 'underline',
-    fontFamily: 'DMSans_300Light',
   },
 });
