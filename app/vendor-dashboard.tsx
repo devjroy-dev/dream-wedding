@@ -139,6 +139,17 @@ export default function VendorDashboardScreen() {
   const [activeTab, setActiveTab] = useState('Overview');
   const [isLive, setIsLive] = useState(true);
   const [vendorSession, setVendorSession] = useState<any>(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editAbout, setEditAbout] = useState('');
+  const [editStartingPrice, setEditStartingPrice] = useState('');
+  const [editInstagram, setEditInstagram] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editVibes, setEditVibes] = useState<string[]>([]);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [clientNotes, setClientNotes] = useState<Record<string, string>>({});
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
 
   useFonts({
     PlayfairDisplay_300Light,
@@ -255,6 +266,72 @@ export default function VendorDashboardScreen() {
       if (activeTab === 'Tools') { loadContracts(); loadExpenses(); loadPaymentSchedules(); loadTeamMembers(); }
     }
   }, [vendorSession, activeTab]);
+
+  const openSettings = async () => {
+    try {
+      const res = await fetch(`${API}/api/vendors/${vendorSession.vendorId}`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        setEditName(data.data.name || '');
+        setEditAbout(data.data.about || '');
+        setEditStartingPrice(String(data.data.starting_price || ''));
+        setEditInstagram(data.data.instagram_url || '');
+        setEditCity(data.data.city || '');
+        setEditVibes(data.data.vibe_tags || []);
+      }
+    } catch (e) {}
+    setShowSettingsModal(true);
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      setSavingProfile(true);
+      const res = await fetch(`${API}/api/vendors/${vendorSession.vendorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName,
+          about: editAbout,
+          starting_price: parseInt(editStartingPrice) || 0,
+          instagram_url: editInstagram,
+          city: editCity,
+          vibe_tags: editVibes,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const updatedSession = {
+          ...vendorSession,
+          vendorName: editName,
+          city: editCity,
+        };
+        await AsyncStorage.setItem('vendor_session', JSON.stringify(updatedSession));
+        setVendorSession(updatedSession);
+        setShowSettingsModal(false);
+        Alert.alert('Profile Updated', 'Your changes are live on The Dream Wedding.');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSaveClientNote = async (clientId: string) => {
+    try {
+      await fetch(`${API}/api/vendor-clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: noteText }),
+      });
+      setClientNotes(prev => ({ ...prev, [clientId]: noteText }));
+      setEditingNoteId(null);
+      setNoteText('');
+      setClients(prev => prev.map(c => c.id === clientId ? { ...c, notes: noteText } : c));
+    } catch (e) {
+      Alert.alert('Error', 'Could not save note.');
+    }
+  };
 
   const loadContracts = async () => {
     try {
@@ -1114,6 +1191,105 @@ export default function VendorDashboardScreen() {
             <TouchableOpacity style={styles.modalCancel} onPress={() => setShowAddClient(false)}>
               <Text style={styles.modalCancelText}>Cancel</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Settings / Profile Edit Modal ── */}
+      <Modal visible={showSettingsModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <Text style={styles.modalSubtitle}>Changes go live immediately on The Dream Wedding</Text>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>BUSINESS NAME</Text>
+                <TextInput style={styles.settingsInput} value={editName} onChangeText={setEditName} placeholder="Your business name" placeholderTextColor="#8C7B6E" />
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>ABOUT</Text>
+                <TextInput style={[styles.settingsInput, { height: 90, textAlignVertical: 'top' }]} value={editAbout} onChangeText={setEditAbout} placeholder="Tell couples what makes you special..." placeholderTextColor="#8C7B6E" multiline />
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>STARTING PRICE (Rs.)</Text>
+                <TextInput style={styles.settingsInput} value={editStartingPrice} onChangeText={setEditStartingPrice} placeholder="e.g. 80000" placeholderTextColor="#8C7B6E" keyboardType="number-pad" />
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>INSTAGRAM HANDLE</Text>
+                <TextInput style={styles.settingsInput} value={editInstagram} onChangeText={setEditInstagram} placeholder="@yourbusiness" placeholderTextColor="#8C7B6E" autoCapitalize="none" />
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>PRIMARY CITY</Text>
+                <TextInput style={styles.settingsInput} value={editCity} onChangeText={setEditCity} placeholder="e.g. Delhi NCR" placeholderTextColor="#8C7B6E" />
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>YOUR VIBE TAGS</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  {['Candid', 'Traditional', 'Luxury', 'Cinematic', 'Boho', 'Festive', 'Minimalist', 'Royal'].map(vibe => (
+                    <TouchableOpacity
+                      key={vibe}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: editVibes.includes(vibe) ? '#C9A84C' : '#E8E0D5',
+                        borderRadius: 50,
+                        paddingVertical: 8,
+                        paddingHorizontal: 16,
+                        backgroundColor: editVibes.includes(vibe) ? '#C9A84C' : '#FFFFFF',
+                      }}
+                      onPress={() => {
+                        setEditVibes(prev =>
+                          prev.includes(vibe)
+                            ? prev.filter(v => v !== vibe)
+                            : [...prev, vibe]
+                        );
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 13,
+                        color: editVibes.includes(vibe) ? '#2C2420' : '#2C2420',
+                        fontFamily: editVibes.includes(vibe) ? 'DMSans_500Medium' : 'DMSans_400Regular',
+                      }}>
+                        {vibe}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ height: 16 }} />
+
+              <TouchableOpacity
+                style={[styles.goldBtn, savingProfile && { opacity: 0.6 }]}
+                onPress={handleSaveProfile}
+                disabled={savingProfile}
+              >
+                {savingProfile
+                  ? <ActivityIndicator color="#2C2420" />
+                  : <Text style={styles.goldBtnText}>SAVE CHANGES</Text>
+                }
+              </TouchableOpacity>
+
+              <View style={{ height: 12 }} />
+
+              <TouchableOpacity
+                style={[styles.goldOutlineBtn, { borderColor: '#B5303A' }]}
+                onPress={() => {
+                  setShowSettingsModal(false);
+                  handleLogout();
+                }}
+              >
+                <Feather name="log-out" size={14} color="#B5303A" />
+                <Text style={[styles.goldOutlineBtnText, { color: '#B5303A' }]}>LOG OUT</Text>
+              </TouchableOpacity>
+
+              <View style={{ height: 16 }} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2413,6 +2589,46 @@ export default function VendorDashboardScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
+                {editingNoteId === client.id ? (
+                  <View style={styles.noteEditRow}>
+                    <TextInput
+                      style={styles.noteInput}
+                      value={noteText}
+                      onChangeText={setNoteText}
+                      placeholder="Add notes — lehenga colour, skin tone, preferences..."
+                      placeholderTextColor="#8C7B6E"
+                      multiline
+                      autoFocus
+                    />
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={[styles.unblockBtn, { flex: 1, alignItems: 'center' }]}
+                        onPress={() => { setEditingNoteId(null); setNoteText(''); }}
+                      >
+                        <Text style={styles.unblockBtnText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.goldBtn, { flex: 2 }]}
+                        onPress={() => handleSaveClientNote(client.id)}
+                      >
+                        <Text style={styles.goldBtnText}>SAVE NOTE</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.noteRow}
+                    onPress={() => {
+                      setEditingNoteId(client.id);
+                      setNoteText(client.notes || '');
+                    }}
+                  >
+                    <Feather name="edit-2" size={11} color="#8C7B6E" />
+                    <Text style={styles.noteText} numberOfLines={2}>
+                      {client.notes ? client.notes : 'Add notes...'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               ))
             )}
 
@@ -2431,7 +2647,7 @@ export default function VendorDashboardScreen() {
         {[
           { label: 'Dashboard', icon: 'grid', active: true, onPress: () => {} },
           { label: 'Messages', icon: 'message-circle', active: false, onPress: () => router.push('/messaging') },
-          { label: 'Settings', icon: 'settings', active: false, onPress: () => Alert.alert('Settings', 'Manage your account', [{ text: 'Log Out', style: 'destructive', onPress: handleLogout }, { text: 'Cancel', style: 'cancel' }]) },
+          { label: 'Settings', icon: 'settings', active: false, onPress: () => openSettings() },
         ].map(item => (
           <TouchableOpacity key={item.label} style={styles.navItem} onPress={item.onPress}>
             <Feather name={item.icon as any} size={20} color={item.active ? '#2C2420' : '#8C7B6E'} />
@@ -2675,6 +2891,13 @@ const styles = StyleSheet.create({
   spotlightItemLbl: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.3 },
   spotlightDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.07)' },
   spotlightHint: { fontSize: 10, color: 'rgba(140,123,110,0.55)', fontFamily: 'DMSans_300Light' },
+  settingsSection: { gap: 6, marginBottom: 16 },
+  settingsSectionLabel: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 },
+  settingsInput: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 14, paddingHorizontal: 16, fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
+  noteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F0EDE8', marginTop: 4 },
+  noteText: { flex: 1, fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light', fontStyle: 'italic', lineHeight: 18 },
+  noteEditRow: { paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F0EDE8', marginTop: 4 },
+  noteInput: { backgroundColor: '#F5F0E8', borderRadius: 8, borderWidth: 1, borderColor: '#E8E0D5', paddingVertical: 10, paddingHorizontal: 12, fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', minHeight: 70, textAlignVertical: 'top' },
   noticeCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFF8EC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E8D9B5' },
   invoiceHistoryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14 },
   invoiceHistoryClient: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' },
