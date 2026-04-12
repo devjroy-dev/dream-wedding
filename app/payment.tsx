@@ -55,6 +55,9 @@ export default function HomeScreen() {
 
       {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Feather name="arrow-left" size={20} color="#2C2420" />
+        </TouchableOpacity>
         <View>
           <Text style={styles.greeting}>Hello, {userName}</Text>
           <Text style={styles.subGreeting}>Find your dream wedding team</Text>
@@ -191,6 +194,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
   greeting: { fontSize: 28, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
   subGreeting: { fontSize: 13, color: '#8C7B6E', marginTop: 4, letterSpacing: 0.3 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
