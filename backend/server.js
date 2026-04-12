@@ -1280,6 +1280,61 @@ app.get('/api/vendor-logins/:firebaseUID', async (req, res) => {
   }
 });
 
+
+// ==================
+// ACCESS CODES — Invite Only Gate
+// ==================
+
+app.post('/api/access-codes/generate', async (req, res) => {
+  try {
+    const { type, created_by, note } = req.body;
+    // type: 'vendor_permanent' | 'vendor_demo' | 'couple_demo'
+    const code = type.split('_')[0].toUpperCase() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    const expires_at = type === 'vendor_permanent' ? null
+      : type === 'vendor_demo' ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase.from('access_codes').insert([{
+      code, type, expires_at, created_by: created_by || 'dev', note: note || '',
+      used: false, used_count: 0,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/access-codes/validate', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ success: false, error: 'Code required' });
+    const { data, error } = await supabase.from('access_codes').select('*').eq('code', code.toUpperCase().trim()).single();
+    if (error || !data) return res.json({ success: false, error: 'Invalid code' });
+    if (data.expires_at && new Date(data.expires_at) < new Date()) {
+      return res.json({ success: false, error: 'Code expired' });
+    }
+    // Increment used count
+    await supabase.from('access_codes').update({ used: true, used_count: (data.used_count || 0) + 1 }).eq('id', data.id);
+    res.json({ success: true, data: {
+      type: data.type,
+      expires_at: data.expires_at,
+      note: data.note,
+    }});
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/access-codes', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('access_codes').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);

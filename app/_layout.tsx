@@ -15,6 +15,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   const checkSession = async () => {
     try {
+      // Step 1 — Check access grant
+      const accessRaw = await AsyncStorage.getItem("access_grant");
+      if (!accessRaw) { router.replace("/access-gate"); return; }
+      const access = JSON.parse(accessRaw);
+      if (!access.granted) { router.replace("/access-gate"); return; }
+      if (access.expires_at && new Date(access.expires_at) < new Date()) {
+        await AsyncStorage.removeItem("access_grant");
+        router.replace("/access-gate");
+        return;
+      }
+      // Step 2 — Check session
       const [userSession, vendorSession] = await Promise.all([
         AsyncStorage.getItem("user_session"),
         AsyncStorage.getItem("vendor_session"),
@@ -35,8 +46,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           return;
         }
       }
+      if (!inAuthGroup) {
+        if (access.type === "vendor_permanent" || access.type === "vendor_demo") {
+          router.replace("/vendor-login");
+        } else {
+          router.replace("/login");
+        }
+      }
     } catch (e) {
-      router.replace("/login");
+      router.replace("/access-gate");
     } finally {
       setChecking(false);
     }
@@ -60,6 +78,7 @@ export default function RootLayout() {
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="access-gate" />
           <Stack.Screen name="login" />
           <Stack.Screen name="otp" />
           <Stack.Screen name="user-type" />
