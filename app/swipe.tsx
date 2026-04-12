@@ -49,13 +49,6 @@ export default function SwipeScreen() {
   const [userBudget, setUserBudget] = useState<number | null>(null);
   const [savedCount, setSavedCount] = useState(0);
 
-  // Freemium limits
-  const DAILY_SWIPE_LIMIT = 20;
-  const MOODBOARD_SAVE_LIMIT = 3;
-  const [swipeCount, setSwipeCount] = useState(0);
-  const [moodboardCount, setMoodboardCount] = useState(0);
-  const [showSwipeWall, setShowSwipeWall] = useState(false);
-  const [showMoodboardWall, setShowMoodboardWall] = useState(false);
 
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
@@ -92,40 +85,8 @@ export default function SwipeScreen() {
         const parsed = JSON.parse(session);
         setUserId(parsed.userId || parsed.uid || null);
         if (parsed.budget) setUserBudget(parsed.budget);
-        const adminEmails = ['devjroy@gmail.com', 'swati@thedreamwedding.in', 'thedreamwedding.app@gmail.com'];
-        if (adminEmails.includes(parsed.email)) {
-          setSwipeCount(0);
-          setMoodboardCount(0);
-          await AsyncStorage.setItem('swipe_count_date', JSON.stringify({ date: new Date().toDateString(), count: 0 }));
-          await AsyncStorage.setItem('moodboard_count', '0');
-        }
       }
-      // Load today's freemium counts
-      const today = new Date().toDateString();
-      const swipeData = await AsyncStorage.getItem('swipe_count_date');
-      const swipeDataParsed = swipeData ? JSON.parse(swipeData) : null;
-      if (swipeDataParsed && swipeDataParsed.date === today) {
-        setSwipeCount(swipeDataParsed.count);
-      } else {
-        await AsyncStorage.setItem('swipe_count_date', JSON.stringify({ date: today, count: 0 }));
-        setSwipeCount(0);
-      }
-      const moodData = await AsyncStorage.getItem('moodboard_count');
-      if (moodData) setMoodboardCount(parseInt(moodData));
     } catch (e) {}
-  };
-
-  const incrementSwipeCount = async () => {
-    const today = new Date().toDateString();
-    const newCount = swipeCount + 1;
-    setSwipeCount(newCount);
-    await AsyncStorage.setItem('swipe_count_date', JSON.stringify({ date: today, count: newCount }));
-  };
-
-  const incrementMoodboardCount = async () => {
-    const newCount = moodboardCount + 1;
-    setMoodboardCount(newCount);
-    await AsyncStorage.setItem('moodboard_count', String(newCount));
   };
 
   const loadVendors = async () => {
@@ -218,19 +179,6 @@ export default function SwipeScreen() {
     const vendor = vendors[currentIndex];
     if (!vendor) return;
 
-    // Check moodboard limit BEFORE saving
-    if (moodboardCount >= MOODBOARD_SAVE_LIMIT) {
-      setShowMoodboardWall(true);
-      // Still animate card out — don't save it
-      Animated.timing(position, {
-        toValue: { x: width + 100, y: 0 },
-        duration: 250,
-        useNativeDriver: false,
-      }).start(() => nextCard());
-      incrementSwipeCount();
-      return;
-    }
-
     // Animate card out right
     Animated.timing(position, {
       toValue: { x: width + 100, y: 0 },
@@ -239,8 +187,6 @@ export default function SwipeScreen() {
     }).start(() => nextCard());
 
     setSavedCount(prev => prev + 1);
-    incrementMoodboardCount();
-
     // Save to moodboard
     if (userId) {
       try {
@@ -262,12 +208,6 @@ export default function SwipeScreen() {
   };
 
   const handleSwipeLeft = () => {
-    // Check daily swipe limit
-    if (swipeCount >= DAILY_SWIPE_LIMIT) {
-      setShowSwipeWall(true);
-      return;
-    }
-    incrementSwipeCount();
     Animated.timing(position, {
       toValue: { x: -width - 100, y: 0 },
       duration: 250,
@@ -366,44 +306,6 @@ export default function SwipeScreen() {
   // ─── Main swipe screen ──────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-
-      {/* ── Swipe Limit Wall ── */}
-      {showSwipeWall && (
-        <View style={freemiumStyles.wall}>
-          <View style={freemiumStyles.card}>
-            <Text style={freemiumStyles.emoji}>✦</Text>
-            <Text style={freemiumStyles.title}>Daily limit reached</Text>
-            <Text style={freemiumStyles.sub}>You've seen {DAILY_SWIPE_LIMIT} vendors today. Come back tomorrow — or unlock unlimited swipes with Premium.</Text>
-            <View style={freemiumStyles.countdownRow}>
-              <Feather name="clock" size={13} color="#C9A84C" />
-              <Text style={freemiumStyles.countdown}>Resets at midnight</Text>
-            </View>
-            <TouchableOpacity style={freemiumStyles.upgradeBtn} onPress={() => setShowSwipeWall(false)}>
-              <Text style={freemiumStyles.upgradeBtnText}>UPGRADE TO PREMIUM — Rs.499/mo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={freemiumStyles.dismissBtn} onPress={() => { setShowSwipeWall(false); router.back(); }}>
-              <Text style={freemiumStyles.dismissBtnText}>Maybe later</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* ── Moodboard Full Wall ── */}
-      {showMoodboardWall && (
-        <View style={freemiumStyles.wall}>
-          <View style={freemiumStyles.card}>
-            <Text style={freemiumStyles.emoji}>♡</Text>
-            <Text style={freemiumStyles.title}>Moodboard is full</Text>
-            <Text style={freemiumStyles.sub}>Free accounts can save up to {MOODBOARD_SAVE_LIMIT} vendors. Upgrade to save up to 30 and build your dream team.</Text>
-            <TouchableOpacity style={freemiumStyles.upgradeBtn} onPress={() => setShowMoodboardWall(false)}>
-              <Text style={freemiumStyles.upgradeBtnText}>UPGRADE TO PREMIUM — Rs.499/mo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={freemiumStyles.dismissBtn} onPress={() => setShowMoodboardWall(false)}>
-              <Text style={freemiumStyles.dismissBtnText}>Continue browsing</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
 
       {/* Toast */}
       {showToast && (
@@ -1092,73 +994,3 @@ const styles = StyleSheet.create({
   },
 });
 
-const freemiumStyles = StyleSheet.create({
-  wall: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(20,12,4,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 999,
-    paddingHorizontal: 28,
-  },
-  card: {
-    backgroundColor: '#F5F0E8',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    gap: 14,
-    width: '100%',
-  },
-  emoji: {
-    fontSize: 36,
-    color: '#C9A84C',
-  },
-  title: {
-    fontSize: 26,
-    color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_400Regular',
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  sub: {
-    fontSize: 14,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  countdownRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  countdown: {
-    fontSize: 13,
-    color: '#C9A84C',
-    fontFamily: 'DMSans_400Regular',
-  },
-  upgradeBtn: {
-    backgroundColor: '#2C2420',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    width: '100%',
-    marginTop: 4,
-  },
-  upgradeBtnText: {
-    fontSize: 12,
-    color: '#C9A84C',
-    fontFamily: 'DMSans_500Medium',
-    letterSpacing: 1,
-  },
-  dismissBtn: {
-    paddingVertical: 8,
-  },
-  dismissBtnText: {
-    fontSize: 13,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-  },
-});

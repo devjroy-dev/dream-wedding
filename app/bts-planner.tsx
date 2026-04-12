@@ -83,10 +83,6 @@ const getRSVPColor = (rsvp: string) => {
 export default function BTSPlannerScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Budget');
-  const [showPremiumWall, setShowPremiumWall] = useState(false);
-  const adminEmails = ['devjroy@gmail.com', 'swati@thedreamwedding.in', 'thedreamwedding.app@gmail.com'];
-  const isAdmin = adminEmails.includes(userSession?.email || '');
-  const FREE_TABS = isAdmin ? ['Budget', 'Guests', 'Registry', 'To Do', 'Payments', 'Journey', 'Website'] : ['Budget', 'Guests'];
   const [userId, setUserId] = useState('');
   const [userSession, setUserSession] = useState<any>(null);
 
@@ -370,23 +366,6 @@ export default function BTSPlannerScreen() {
   return (
     <View style={styles.container}>
 
-      {/* ── Premium Wall Modal ── */}
-      {showPremiumWall && (
-        <View style={premiumWallStyles.wall}>
-          <View style={premiumWallStyles.card}>
-            <Text style={premiumWallStyles.emoji}>✦</Text>
-            <Text style={premiumWallStyles.title}>Premium feature</Text>
-            <Text style={premiumWallStyles.sub}>Registry, To Do, Payments, Journey and Wedding Website are included in Premium. Upgrade to unlock the full planning suite.</Text>
-            <TouchableOpacity style={premiumWallStyles.upgradeBtn} onPress={() => setShowPremiumWall(false)}>
-              <Text style={premiumWallStyles.upgradeBtnText}>UPGRADE TO PREMIUM — Rs.499/mo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={premiumWallStyles.dismissBtn} onPress={() => setShowPremiumWall(false)}>
-              <Text style={premiumWallStyles.dismissBtnText}>Maybe later</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
       {/* Add Guest Modal */}
       <Modal visible={showAddGuest} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -544,22 +523,13 @@ export default function BTSPlannerScreen() {
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
             onPress={() => {
-              if (!FREE_TABS.includes(tab)) {
-                setShowPremiumWall(true);
-                return;
-              }
               setActiveTab(tab);
             }}
             activeOpacity={0.8}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              {!FREE_TABS.includes(tab) && (
-                <Feather name="lock" size={9} color={activeTab === tab ? '#F5F0E8' : '#C9A84C'} />
-              )}
-              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                {tab}
-              </Text>
-            </View>
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab}
+            </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -2093,37 +2063,3 @@ const styles = StyleSheet.create({
   navLabelActive: { color: '#2C2420', fontFamily: 'DMSans_500Medium' },
 });
 
-const premiumWallStyles = StyleSheet.create({
-  wall: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(20,12,4,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 999,
-    paddingHorizontal: 28,
-  },
-  card: {
-    backgroundColor: '#F5F0E8',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    gap: 14,
-    width: '100%',
-  },
-  emoji: { fontSize: 32, color: '#C9A84C' },
-  title: { fontSize: 26, color: '#2C2420', fontWeight: '300', letterSpacing: 0.3, textAlign: 'center' },
-  sub: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },
-  upgradeBtn: {
-    backgroundColor: '#2C2420',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    width: '100%',
-    marginTop: 4,
-  },
-  upgradeBtnText: { fontSize: 12, color: '#C9A84C', fontWeight: '500', letterSpacing: 1 },
-  dismissBtn: { paddingVertical: 8 },
-  dismissBtnText: { fontSize: 13, color: '#8C7B6E' },
-});
