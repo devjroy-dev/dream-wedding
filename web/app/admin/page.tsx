@@ -216,9 +216,9 @@ export default function AdminPage() {
                 ['Database', 'Supabase — Mumbai', '#4CAF50'],
                 ['Web Portal', 'Vercel', '#4CAF50'],
                 ['Domain', 'thedreamwedding.in', '#4CAF50'],
-                ['Access Gate', 'Invite Only — Active', '#4CAF50'],
+                ['Access Gate', 'Removed — Add back post-investor', '#9E9E9E'],
                 ['Contact Filter', 'Active', '#4CAF50'],
-                ['Freemium Gate', 'Active', '#4CAF50'],
+                ['Freemium Gate', 'Removed — Add back post-investor', '#9E9E9E'],
                 ['Play Store', 'Not Published Yet', '#C9A84C'],
               ].map(([label, val, color]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}>
@@ -509,9 +509,9 @@ export default function AdminPage() {
             <div style={s.cardPad}>
               <div style={{ fontSize: 16, fontWeight: 500, color: '#2C2420', marginBottom: 20 }}>Platform Controls</div>
               {[
-                { label: 'Access Gate (Invite Only)', status: 'ON', color: '#4CAF50' },
+                { label: 'Access Gate (Invite Only)', status: 'REMOVED', color: '#9E9E9E' },
                 { label: 'Contact Filter', status: 'ON', color: '#4CAF50' },
-                { label: 'Freemium Gating', status: 'ON', color: '#4CAF50' },
+                { label: 'Freemium Gating', status: 'REMOVED', color: '#9E9E9E' },
                 { label: 'Play Store', status: 'Not Published', color: '#C9A84C' },
                 { label: 'App Store / TestFlight', status: 'Not Configured', color: '#C9A84C' },
               ].map(item => (
