@@ -50,14 +50,23 @@ export default function OTPScreen() {
         const userResult = await createOrGetUser(userPhone);
         userData = userResult.data;
       } catch (e) {}
-      await AsyncStorage.setItem('user_session', JSON.stringify({
+      const session = {
         uid: firebaseUID,
         userId: userData?.id || firebaseUID,
         phone: userPhone,
-        userType: 'couple',
+        email: userData?.email || '',
         name: userData?.name || '',
-      }));
-      router.replace('/user-type');
+        userType: 'couple',
+        avatar: userData?.avatar || '',
+        wedding_date: userData?.wedding_date || '',
+      };
+      await AsyncStorage.setItem('user_session', JSON.stringify(session));
+      // If returning user, go home. If new, go to user-type
+      if (userData && userData.name && userData.name.length > 0) {
+        router.replace('/home');
+      } else {
+        router.replace('/user-type');
+      }
     } catch (error: any) {
       const msg = error?.code === 'auth/invalid-verification-code' ? 'The code you entered is incorrect. Please try again.'
         : error?.code === 'auth/code-expired' ? 'This code has expired. Please request a new one.'
