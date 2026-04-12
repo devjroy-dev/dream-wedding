@@ -1,111 +1,77 @@
 'use client';
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { signIn } from 'next-auth/react';
 
 export default function VendorLoginPage() {
-  const router = useRouter();
-
-  const handleGoogleLogin = () => {
-    window.location.href = '/api/auth/signin/google?callbackUrl=/vendor/dashboard';
+  const handleGoogleLogin = async () => {
+    await signIn('google', { callbackUrl: '/vendor/dashboard' });
   };
 
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: 'var(--cream)',
+      backgroundColor: '#F5F0E8',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       padding: '24px',
     }}>
       <div style={{ width: '100%', maxWidth: '440px' }}>
-
         <div style={{ textAlign: 'center', marginBottom: '48px' }}>
           <span style={{
             fontFamily: 'Playfair Display, serif',
             fontSize: '22px',
             fontWeight: 300,
-            color: 'var(--dark)',
+            color: '#2C2420',
             letterSpacing: '2px',
             textTransform: 'uppercase',
             display: 'block',
             marginBottom: '8px',
-          }}>
-            The Dream Wedding
-          </span>
+          }}>The Dream Wedding</span>
           <span style={{
             fontFamily: 'DM Sans, sans-serif',
             fontSize: '12px',
-            fontWeight: 300,
-            color: 'var(--grey)',
+            color: '#8C7B6E',
             letterSpacing: '0.5px',
             fontStyle: 'italic',
-          }}>
-            Vendor Partner Portal
-          </span>
+          }}>Vendor Partner Portal</span>
         </div>
 
         <div style={{
-          background: 'var(--white)',
-          border: '1px solid var(--border)',
+          background: '#FFFFFF',
+          border: '1px solid #E8E0D5',
           borderRadius: '20px',
           padding: '48px 40px',
           textAlign: 'center',
         }}>
           <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '14px',
-            backgroundColor: 'var(--light-gold)',
-            border: '1px solid var(--gold-border)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 24px',
-            fontSize: '24px',
-          }}>
-            ✦
-          </div>
+            width: '56px', height: '56px', borderRadius: '14px',
+            backgroundColor: '#FFF8EC', border: '1px solid #E8D9B5',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 24px', fontSize: '24px',
+          }}>✦</div>
 
           <h1 style={{
             fontFamily: 'Playfair Display, serif',
-            fontSize: '28px',
-            fontWeight: 300,
-            color: 'var(--dark)',
-            marginBottom: '10px',
-            letterSpacing: '0.3px',
-          }}>
-            Welcome back
-          </h1>
+            fontSize: '28px', fontWeight: 300, color: '#2C2420',
+            marginBottom: '10px', letterSpacing: '0.3px',
+          }}>Welcome back</h1>
+
           <p style={{
             fontFamily: 'DM Sans, sans-serif',
-            fontSize: '14px',
-            fontWeight: 300,
-            color: 'var(--grey)',
-            marginBottom: '36px',
-            lineHeight: 1.6,
-          }}>
-            Sign in with your Google account to access your vendor dashboard.
-          </p>
+            fontSize: '14px', color: '#8C7B6E',
+            marginBottom: '36px', lineHeight: 1.6,
+          }}>Sign in with your Google account to access your vendor dashboard.</p>
 
           <button
             onClick={handleGoogleLogin}
             style={{
-              width: '100%',
-              background: 'var(--dark)',
-              color: 'var(--cream)',
-              fontFamily: 'DM Sans, sans-serif',
-              fontSize: '13px',
-              fontWeight: 500,
-              letterSpacing: '1px',
-              padding: '16px 24px',
-              borderRadius: '10px',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '12px',
+              width: '100%', background: '#2C2420', color: '#F5F0E8',
+              fontFamily: 'DM Sans, sans-serif', fontSize: '13px',
+              fontWeight: 500, letterSpacing: '1px',
+              padding: '16px 24px', borderRadius: '10px',
+              border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: '12px',
               textTransform: 'uppercase',
             }}
           >
@@ -119,42 +85,22 @@ export default function VendorLoginPage() {
           </button>
 
           <div style={{
-            marginTop: '32px',
-            paddingTop: '24px',
-            borderTop: '1px solid var(--border)',
+            marginTop: '32px', paddingTop: '24px',
+            borderTop: '1px solid #E8E0D5',
           }}>
-            <p style={{
-              fontFamily: 'DM Sans, sans-serif',
-              fontSize: '13px',
-              fontWeight: 300,
-              color: 'var(--grey)',
-              marginBottom: '12px',
-            }}>
+            <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '13px', color: '#8C7B6E', marginBottom: '12px' }}>
               Not a vendor yet?
             </p>
-            <a href="/#download" style={{
-              fontFamily: 'DM Sans, sans-serif',
-              fontSize: '13px',
-              color: 'var(--gold)',
-              textDecoration: 'none',
-              fontWeight: 400,
-            }}>
+            <a href="/#download" style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '13px', color: '#C9A84C', textDecoration: 'none' }}>
               Download the app to get started →
             </a>
           </div>
         </div>
 
         <p style={{
-          textAlign: 'center',
-          fontFamily: 'DM Sans, sans-serif',
-          fontSize: '12px',
-          fontWeight: 300,
-          color: 'var(--grey-light)',
-          marginTop: '32px',
-          fontStyle: 'italic',
-        }}>
-          The Dream Wedding · thedreamwedding.in
-        </p>
+          textAlign: 'center', fontFamily: 'DM Sans, sans-serif',
+          fontSize: '12px', color: '#8C7B6E', marginTop: '32px', fontStyle: 'italic',
+        }}>The Dream Wedding · thedreamwedding.in</p>
       </div>
     </div>
   );
