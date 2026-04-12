@@ -41,6 +41,12 @@ export default function InquiryScreen() {
       if (result.success) setVendor(result.data);
       const eq = await AsyncStorage.getItem('enquiry_count');
       if (eq) setEnquiryCount(parseInt(eq));
+      const adminEmails = ['devjroy@gmail.com', 'swati@thedreamwedding.in', 'thedreamwedding.app@gmail.com'];
+      const sess = await AsyncStorage.getItem('user_session');
+      if (sess && adminEmails.includes(JSON.parse(sess).email)) {
+        setEnquiryCount(0);
+        await AsyncStorage.setItem('enquiry_count', '0');
+      }
     } catch (e) {}
   };
 

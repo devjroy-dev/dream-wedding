@@ -92,6 +92,13 @@ export default function SwipeScreen() {
         const parsed = JSON.parse(session);
         setUserId(parsed.userId || parsed.uid || null);
         if (parsed.budget) setUserBudget(parsed.budget);
+        const adminEmails = ['devjroy@gmail.com', 'swati@thedreamwedding.in', 'thedreamwedding.app@gmail.com'];
+        if (adminEmails.includes(parsed.email)) {
+          setSwipeCount(0);
+          setMoodboardCount(0);
+          await AsyncStorage.setItem('swipe_count_date', JSON.stringify({ date: new Date().toDateString(), count: 0 }));
+          await AsyncStorage.setItem('moodboard_count', '0');
+        }
       }
       // Load today's freemium counts
       const today = new Date().toDateString();

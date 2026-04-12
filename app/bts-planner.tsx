@@ -84,7 +84,9 @@ export default function BTSPlannerScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Budget');
   const [showPremiumWall, setShowPremiumWall] = useState(false);
-  const FREE_TABS = ['Budget', 'Guests'];
+  const adminEmails = ['devjroy@gmail.com', 'swati@thedreamwedding.in', 'thedreamwedding.app@gmail.com'];
+  const isAdmin = adminEmails.includes(userSession?.email || '');
+  const FREE_TABS = isAdmin ? ['Budget', 'Guests', 'Registry', 'To Do', 'Payments', 'Journey', 'Website'] : ['Budget', 'Guests'];
   const [userId, setUserId] = useState('');
   const [userSession, setUserSession] = useState<any>(null);
 
