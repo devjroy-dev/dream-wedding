@@ -2115,7 +2115,9 @@ export default function VendorDashboardScreen() {
                               <TouchableOpacity
                                 style={[styles.invoiceStatusBtn, { backgroundColor: '#25D36620', borderColor: '#25D366', minWidth: 60 }]}
                                 onPress={() => {
-                                  const message = `Hi ${schedule.client_name}, this is a friendly reminder that your ${inst.label} payment of Rs.${parseInt(inst.amount || '0').toLocaleString('en-IN')} was due on ${inst.due_date}. Request you to please transfer at your earliest convenience. Thank you! — ${vendorSession && vendorSession.vendorName ? vendorSession.vendorName : 'Your Vendor'}, The Dream Wedding`;
+                                  const vendorName = vendorSession?.vendorName || 'Your Vendor';
+                                  const amount = parseInt(inst.amount || '0').toLocaleString('en-IN');
+                                  const message = `Hi ${schedule.client_name}! 👋\n\nThis is a friendly reminder that your *${inst.label}* payment of *Rs.${amount}* was due on *${inst.due_date}*.\n\nRequest you to please transfer at your earliest convenience.\n\nThank you!\n— ${vendorName}\n📱 The Dream Wedding`;
                                   Linking.openURL(`whatsapp://send?phone=91${schedule.client_phone}&text=${encodeURIComponent(message)}`);
                                 }}
                               >
