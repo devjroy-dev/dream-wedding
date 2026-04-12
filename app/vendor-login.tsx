@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, Alert
+  TextInput, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { PhoneAuthProvider, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
@@ -9,10 +10,28 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../services/firebase';
 
+const API = 'https://dream-wedding-production-89ae.up.railway.app';
+
 GoogleSignin.configure({
   webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
   offlineAccess: true,
 });
+
+async function lookupVendor(email: string, phone?: string) {
+  try {
+    if (email) {
+      const res = await fetch(`${API}/api/vendors?email=${encodeURIComponent(email)}`);
+      const data = await res.json();
+      if (data.success && data.data && data.data.length > 0) return data.data[0];
+    }
+    if (phone) {
+      const res = await fetch(`${API}/api/vendors?phone=${encodeURIComponent(phone)}`);
+      const data = await res.json();
+      if (data.success && data.data && data.data.length > 0) return data.data[0];
+    }
+    return null;
+  } catch (e) { return null; }
+}
 
 export default function VendorLoginScreen() {
   const router = useRouter();
@@ -23,77 +42,61 @@ export default function VendorLoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [verificationId, setVerificationId] = useState('');
 
+  const buildAndSaveSession = async (firebaseUID: string, extra: any, vendor: any) => {
+    if (vendor && vendor.id) {
+      const session = {
+        uid: firebaseUID, userId: firebaseUID, userType: 'vendor',
+        vendorId: vendor.id, vendorName: vendor.name,
+        category: vendor.category, city: vendor.city,
+        plan: vendor.plan || 'basic', onboarded: true, ...extra,
+      };
+      await AsyncStorage.setItem('vendor_session', JSON.stringify(session));
+      router.replace('/vendor-dashboard');
+    } else {
+      await AsyncStorage.setItem('vendor_session', JSON.stringify({
+        uid: firebaseUID, userId: firebaseUID,
+        userType: 'vendor', onboarded: false, ...extra,
+      }));
+      router.replace('/vendor-onboarding');
+    }
+  };
+
   const handleGoogleLogin = async () => {
     try {
       setGoogleLoading(true);
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       await GoogleSignin.signIn();
       const { idToken } = await GoogleSignin.getTokens();
-
-      if (!idToken) throw new Error('No ID token received');
-
+      if (!idToken) throw new Error('No ID token');
       const credential = GoogleAuthProvider.credential(idToken);
       const result = await signInWithCredential(auth, credential);
-      const firebaseUID = result.user.uid;
-      const userName = result.user.displayName || '';
-      const userEmail = result.user.email || '';
-
-      const existingSession = await AsyncStorage.getItem('vendor_session');
-      const existingParsed = existingSession ? JSON.parse(existingSession) : {};
-
-      await AsyncStorage.setItem('vendor_session', JSON.stringify({
-        ...existingParsed,
-        uid: firebaseUID,
-        userId: firebaseUID,
-        email: userEmail,
-        name: userName,
-        userType: 'vendor',
-      }));
-
-      if (existingParsed.onboarded && existingParsed.vendorId) {
-        router.replace('/vendor-dashboard');
-      } else {
-        router.replace('/vendor-onboarding');
-      }
+      const vendor = await lookupVendor(result.user.email || '');
+      await buildAndSaveSession(result.user.uid, {
+        email: result.user.email || '',
+        name: result.user.displayName || '',
+      }, vendor);
     } catch (error: any) {
-      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // User cancelled — do nothing
-      } else if (error.code === statusCodes.IN_PROGRESS) {
-        Alert.alert('Please wait', 'Sign in already in progress');
-      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        Alert.alert('Error', 'Google Play Services not available on this device');
-      } else {
-        Alert.alert('Sign in failed', 'Could not sign in with Google. Please try again.');
-        console.error('Vendor Google Sign-In error:', JSON.stringify(error));
-      }
-    } finally {
-      setGoogleLoading(false);
-    }
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {}
+      else if (error.code === statusCodes.IN_PROGRESS) Alert.alert('Please wait', 'Sign in already in progress');
+      else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) Alert.alert('Error', 'Google Play Services not available');
+      else Alert.alert('Sign in failed', 'Could not sign in with Google. Please try again.');
+    } finally { setGoogleLoading(false); }
   };
 
   const handleSendOTP = async () => {
     try {
       setLoading(true);
-      const phoneNumber = `+91${phone}`;
       const provider = new PhoneAuthProvider(auth);
-      const verificationId = await provider.verifyPhoneNumber(
-        phoneNumber,
-        { type: 'recaptcha', verify: () => Promise.resolve('') } as any
-      );
-      setVerificationId(verificationId);
+      const vid = await provider.verifyPhoneNumber(`+91${phone}`, { type: 'recaptcha', verify: () => Promise.resolve('') } as any);
+      setVerificationId(vid);
       setOtpSent(true);
       Alert.alert('Code Sent', `Verification code sent to +91 ${phone}`);
     } catch (error: any) {
-      console.error('OTP error:', JSON.stringify(error));
-      const msg = error?.code === 'auth/invalid-phone-number'
-        ? 'Please enter a valid 10-digit phone number.'
-        : error?.code === 'auth/too-many-requests'
-        ? 'Too many attempts. Please try again later.'
-        : 'Could not send OTP. Please build a new APK and try on your device.';
+      const msg = error?.code === 'auth/invalid-phone-number' ? 'Please enter a valid 10-digit number.'
+        : error?.code === 'auth/too-many-requests' ? 'Too many attempts. Try again later.'
+        : 'Could not send OTP. Please try again.';
       Alert.alert('Error', msg);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleVerify = async () => {
@@ -101,139 +104,74 @@ export default function VendorLoginScreen() {
       setLoading(true);
       const credential = PhoneAuthProvider.credential(verificationId, otp);
       const result = await signInWithCredential(auth, credential);
-      const firebaseUID = result.user.uid;
-      const userPhone = result.user.phoneNumber || `+91${phone}`;
-
-      const existingSession = await AsyncStorage.getItem('vendor_session');
-      const existingParsed = existingSession ? JSON.parse(existingSession) : {};
-
-      await AsyncStorage.setItem('vendor_session', JSON.stringify({
-        ...existingParsed,
-        uid: firebaseUID,
-        userId: firebaseUID,
-        phone: userPhone,
-        userType: 'vendor',
-      }));
-
-      if (existingParsed.onboarded && existingParsed.vendorId) {
-        router.replace('/vendor-dashboard');
-      } else {
-        router.replace('/vendor-onboarding');
-      }
+      const vendor = await lookupVendor('', result.user.phoneNumber || `+91${phone}`);
+      await buildAndSaveSession(result.user.uid, {
+        phone: result.user.phoneNumber || `+91${phone}`,
+      }, vendor);
     } catch (error: any) {
-      console.error('Verify error:', JSON.stringify(error));
       Alert.alert('Error', 'Incorrect OTP. Please check and try again.');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backBtn}>←</Text>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backBtnText}>←</Text>
         </TouchableOpacity>
-      </View>
-
-      <View style={styles.content}>
         <Text style={styles.logo}>The Dream Wedding</Text>
         <Text style={styles.tag}>Vendor Portal</Text>
         <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.googleButton}
-          onPress={handleGoogleLogin}
-          disabled={googleLoading}
-        >
-          {googleLoading ? (
-            <ActivityIndicator color="#2C2420" />
-          ) : (
+        <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
+          {googleLoading ? <ActivityIndicator color="#2C2420" /> : (
             <View style={styles.googleButtonInner}>
               <Text style={styles.googleIcon}>G</Text>
               <Text style={styles.googleButtonText}>Continue with Google</Text>
             </View>
           )}
         </TouchableOpacity>
-
         <View style={styles.orRow}>
-          <View style={styles.orLine} />
-          <Text style={styles.orText}>or use phone</Text>
-          <View style={styles.orLine} />
+          <View style={styles.orLine} /><Text style={styles.orText}>or use phone</Text><View style={styles.orLine} />
         </View>
-
         {!otpSent ? (
           <>
-            <Text style={styles.title}>Welcome,{'\n'}Wedding Professional</Text>
+            <Text style={styles.title}>Welcome,{'
+'}Wedding Professional</Text>
             <Text style={styles.subtitle}>Enter your phone number to continue</Text>
             <View style={styles.phoneRow}>
-              <View style={styles.countryCode}>
-                <Text style={styles.countryCodeText}>🇮🇳 +91</Text>
-              </View>
-              <TextInput
-                style={styles.input}
-                placeholder="10 digit mobile number"
-                placeholderTextColor="#8C7B6E"
-                keyboardType="phone-pad"
-                maxLength={10}
-                value={phone}
-                onChangeText={setPhone}
-              />
+              <View style={styles.countryCode}><Text style={styles.countryCodeText}>🇮🇳 +91</Text></View>
+              <TextInput style={styles.input} placeholder="10 digit mobile number" placeholderTextColor="#8C7B6E" keyboardType="phone-pad" maxLength={10} value={phone} onChangeText={setPhone} />
             </View>
-            <TouchableOpacity
-              style={[styles.button, (phone.length !== 10 || loading) && styles.buttonDisabled]}
-              onPress={handleSendOTP}
-              disabled={phone.length !== 10 || loading}
-            >
-              {loading
-                ? <ActivityIndicator color="#FAF6F0" />
-                : <Text style={styles.buttonText}>Send OTP</Text>
-              }
+            <TouchableOpacity style={[styles.button, (phone.length !== 10 || loading) && styles.buttonDisabled]} onPress={handleSendOTP} disabled={phone.length !== 10 || loading}>
+              {loading ? <ActivityIndicator color="#FAF6F0" /> : <Text style={styles.buttonText}>Send OTP</Text>}
             </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={styles.title}>Verify your{'\n'}number</Text>
+            <Text style={styles.title}>Verify your{'
+'}number</Text>
             <Text style={styles.subtitle}>OTP sent to +91 {phone}</Text>
-            <TextInput
-              style={styles.otpInput}
-              placeholder="000000"
-              placeholderTextColor="#C9B99A"
-              keyboardType="number-pad"
-              maxLength={6}
-              value={otp}
-              onChangeText={setOtp}
-              textAlign="center"
-            />
-            <TouchableOpacity
-              style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]}
-              onPress={handleVerify}
-              disabled={otp.length !== 6 || loading}
-            >
-              {loading
-                ? <ActivityIndicator color="#FAF6F0" />
-                : <Text style={styles.buttonText}>Verify & Continue</Text>
-              }
+            <TextInput style={styles.otpInput} placeholder="000000" placeholderTextColor="#C9B99A" keyboardType="number-pad" maxLength={6} value={otp} onChangeText={setOtp} textAlign="center" />
+            <TouchableOpacity style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]} onPress={handleVerify} disabled={otp.length !== 6 || loading}>
+              {loading ? <ActivityIndicator color="#FAF6F0" /> : <Text style={styles.buttonText}>Verify & Continue</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setOtpSent(false); setOtp(''); }}>
               <Text style={styles.resendText}>← Change number</Text>
             </TouchableOpacity>
           </>
         )}
-
         <TouchableOpacity style={styles.customerLink} onPress={() => router.replace('/login')}>
           <Text style={styles.customerLinkText}>Looking to plan a wedding? →</Text>
         </TouchableOpacity>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60, paddingHorizontal: 30 },
-  header: { marginBottom: 24 },
-  backBtn: { fontSize: 22, color: '#1C1C1C' },
-  content: { flex: 1, gap: 14 },
+  container: { flexGrow: 1, backgroundColor: '#FAF6F0', paddingTop: 60, paddingHorizontal: 30, paddingBottom: 40, gap: 14 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', marginBottom: 10 },
+  backBtnText: { fontSize: 22, color: '#1C1C1C' },
   logo: { fontSize: 22, color: '#C9A84C', fontWeight: '500', letterSpacing: 2 },
   tag: { fontSize: 11, color: '#8C7B6E', letterSpacing: 3, textTransform: 'uppercase', marginTop: -8 },
   divider: { height: 1, backgroundColor: '#E8DDD4', marginVertical: 4 },
