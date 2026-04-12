@@ -480,6 +480,41 @@ app.post('/api/bookings/:id/cancel', async (req, res) => {
   }
 });
 
+
+// ==================
+// CONTACT FILTER — Airbnb style
+// ==================
+
+function containsContactInfo(text) {
+  if (!text) return false;
+  const patterns = [
+    /\b[6-9]\d{9}\b/,                          // Indian phone numbers
+    /\+91[\s-]?[6-9]\d{9}/,                    // +91 format
+    /\b\d{10}\b/,                               // 10 digit numbers
+    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,  // emails
+    /@[a-zA-Z0-9_.]{2,}/,                         // @handles
+    /instagram\.com\//i,                          // instagram links
+    /wa\.me\//i,                                  // whatsapp links
+    /whatsapp/i,                                   // whatsapp mentions
+    /telegram/i,                                   // telegram
+  ];
+  return patterns.some(p => p.test(text));
+}
+
+function sanitizeMessage(text) {
+  if (!text) return text;
+  return text
+    .replace(/\b[6-9]\d{9}\b/g, '[ contact hidden ]')
+    .replace(/\+91[\s-]?[6-9]\d{9}/g, '[ contact hidden ]')
+    .replace(/\b\d{10}\b/g, '[ contact hidden ]')
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[ contact hidden ]')
+    .replace(/@[a-zA-Z0-9_.]{2,}/g, '[ contact hidden ]')
+    .replace(/instagram\.com\/[^\s]*/gi, '[ contact hidden ]')
+    .replace(/wa\.me\/[^\s]*/gi, '[ contact hidden ]')
+    .replace(/whatsapp/gi, '[ contact hidden ]')
+    .replace(/telegram/gi, '[ contact hidden ]');
+}
+
 // ==================
 // MESSAGING ROUTES
 // ==================
@@ -496,9 +531,12 @@ app.get('/api/messages/:userId/:vendorId', async (req, res) => {
 
 app.post('/api/messages', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('messages').insert([req.body]).select().single();
+    const { message, ...rest } = req.body;
+    const filtered = sanitizeMessage(message);
+    const wasFiltered = filtered !== message;
+    const { data, error } = await supabase.from('messages').insert([{ ...rest, message: filtered, was_filtered: wasFiltered }]).select().single();
     if (error) throw error;
-    res.json({ success: true, data });
+    res.json({ success: true, data, was_filtered: wasFiltered });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
