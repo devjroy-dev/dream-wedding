@@ -140,8 +140,7 @@ export default function VendorLoginScreen() {
         </View>
         {!otpSent ? (
           <>
-            <Text style={styles.title}>Welcome,{'
-'}Wedding Professional</Text>
+            <Text style={styles.title}>Welcome,{'\n'}Wedding Professional</Text>
             <Text style={styles.subtitle}>Enter your phone number to continue</Text>
             <View style={styles.phoneRow}>
               <View style={styles.countryCode}><Text style={styles.countryCodeText}>🇮🇳 +91</Text></View>
@@ -153,8 +152,7 @@ export default function VendorLoginScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.title}>Verify your{'
-'}number</Text>
+            <Text style={styles.title}>Verify your{'\n'}number</Text>
             <Text style={styles.subtitle}>OTP sent to +91 {phone}</Text>
             <TextInput style={styles.otpInput} placeholder="000000" placeholderTextColor="#C9B99A" keyboardType="number-pad" maxLength={6} value={otp} onChangeText={setOtp} textAlign="center" />
             <TouchableOpacity style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]} onPress={handleVerify} disabled={otp.length !== 6 || loading}>

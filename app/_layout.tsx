@@ -17,12 +17,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     try {
       // Step 1 — Check access grant
       const accessRaw = await AsyncStorage.getItem("access_grant");
-      if (!accessRaw) { router.replace("/access-gate"); return; }
+      if (!accessRaw) { router.replace("/access-gate" as any); return; }
       const access = JSON.parse(accessRaw);
-      if (!access.granted) { router.replace("/access-gate"); return; }
+      if (!access.granted) { router.replace("/access-gate" as any); return; }
       if (access.expires_at && new Date(access.expires_at) < new Date()) {
         await AsyncStorage.removeItem("access_grant");
-        router.replace("/access-gate");
+        router.replace("/access-gate" as any);
         return;
       }
       // Step 2 — Check session
@@ -31,7 +31,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem("vendor_session"),
       ]);
       const inAuthGroup = AUTH_SCREENS.includes(segments[0] as string);
-      const isIndexScreen = segments[0] === "index" || segments[0] === undefined;
+      const isIndexScreen = !segments[0] || segments[0] === undefined;
       if (vendorSession) {
         const parsed = JSON.parse(vendorSession);
         if (parsed.vendorId) {
@@ -54,7 +54,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
-      router.replace("/access-gate");
+      router.replace("/access-gate" as any);
     } finally {
       setChecking(false);
     }

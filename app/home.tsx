@@ -8,9 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
-  PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
 import {
@@ -79,10 +77,6 @@ export default function HomeScreen() {
   const [greeting, setGreeting] = useState('Good morning');
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_400Regular_Italic,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -311,7 +305,7 @@ const styles = StyleSheet.create({
   greeting: {
     fontSize: 24,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   countdownRow: {

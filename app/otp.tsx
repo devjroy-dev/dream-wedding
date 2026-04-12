@@ -88,8 +88,7 @@ export default function OTPScreen() {
         <View style={styles.content}>
           {isEmailMode ? (
             <>
-              <Text style={styles.title}>Your email{'
-'}address</Text>
+              <Text style={styles.title}>Your email{'\n'}address</Text>
               <Text style={styles.subtitle}>We'll send you a magic link</Text>
               <TextInput style={styles.inputFull} placeholder="your@email.com" placeholderTextColor="#8C7B6E" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} />
               <TouchableOpacity style={[styles.button, (!email.includes('@') || loading) && styles.buttonDisabled]} onPress={() => Alert.alert('Coming Soon', 'Email login will be available shortly.')} disabled={!email.includes('@') || loading}>
@@ -101,8 +100,7 @@ export default function OTPScreen() {
             </>
           ) : !otpSent ? (
             <>
-              <Text style={styles.title}>Your phone{'
-'}number</Text>
+              <Text style={styles.title}>Your phone{'\n'}number</Text>
               <Text style={styles.subtitle}>We'll send a 6-digit verification code</Text>
               <View style={styles.phoneRow}>
                 <View style={styles.countryCode}><Text style={styles.countryCodeText}>+91</Text></View>
@@ -114,8 +112,7 @@ export default function OTPScreen() {
             </>
           ) : (
             <>
-              <Text style={styles.title}>Enter the{'
-'}code</Text>
+              <Text style={styles.title}>Enter the{'\n'}code</Text>
               <Text style={styles.subtitle}>Sent to +91 {phone}</Text>
               <TextInput style={styles.otpInput} placeholder="000000" placeholderTextColor="#C9B99A" keyboardType="number-pad" maxLength={6} value={otp} onChangeText={setOtp} textAlign="center" />
               <TouchableOpacity style={[styles.button, (otp.length !== 6 || loading) && styles.buttonDisabled]} onPress={handleVerify} disabled={otp.length !== 6 || loading}>

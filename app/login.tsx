@@ -10,7 +10,7 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { createOrGetUser } from '../services/api';
-import { useFonts, PlayfairDisplay_300Light, PlayfairDisplay_400Regular, PlayfairDisplay_400Regular_Italic, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
+import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
 import { DMSans_300Light, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 
 const { height } = Dimensions.get('window');
@@ -20,8 +20,7 @@ GoogleSignin.configure({
   offlineAccess: true,
 });
 
-export default function LoginScreen() {
-  const router = useRouter();
+export default function LoginScreen() { const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const logoTranslate = useRef(new Animated.Value(20)).current;
@@ -30,7 +29,7 @@ export default function LoginScreen() {
   const buttonsTranslate = useRef(new Animated.Value(60)).current;
   const buttonsOpacity = useRef(new Animated.Value(0)).current;
 
-  useFonts({ PlayfairDisplay_300Light, PlayfairDisplay_400Regular, PlayfairDisplay_400Regular_Italic, PlayfairDisplay_600SemiBold, DMSans_300Light, DMSans_400Regular, DMSans_500Medium });
+  useFonts({ PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold, DMSans_300Light, DMSans_400Regular, DMSans_500Medium });
 
   useEffect(() => {
     Animated.sequence([

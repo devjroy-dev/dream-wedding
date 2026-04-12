@@ -9,9 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getVendors } from '../services/api';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
-  PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
 import {
@@ -63,10 +61,6 @@ export default function SpotlightScreen() {
   const currentYear = new Date().getFullYear();
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_400Regular_Italic,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -430,7 +424,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   subtitle: {
@@ -471,7 +465,7 @@ const styles = StyleSheet.create({
   editorialText: {
     fontSize: 12,
     color: '#8C7B6E',
-    fontFamily: 'PlayfairDisplay_400Regular_Italic',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.2,
     lineHeight: 18,
     textAlign: 'center',
@@ -612,7 +606,7 @@ const styles = StyleSheet.create({
   featuredName: {
     fontSize: 28,
     color: '#F5F0E8',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   featuredMeta: {

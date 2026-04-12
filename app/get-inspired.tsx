@@ -7,9 +7,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
-  PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
 import {
@@ -116,10 +114,6 @@ export default function GetInspiredScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_400Regular_Italic,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -430,7 +424,7 @@ const styles = StyleSheet.create({
   vendorName: {
     fontSize: 26,
     color: '#F5F0E8',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   vendorLocationRow: {

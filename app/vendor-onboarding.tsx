@@ -12,9 +12,7 @@ import { createVendor } from '../services/api';
 import { uploadMultipleImages } from '../services/cloudinary';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
-  PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
 import {
@@ -67,10 +65,6 @@ export default function VendorOnboardingScreen() {
   const [panNumber, setPanNumber] = useState('');
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_400Regular_Italic,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -641,7 +635,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
     lineHeight: 44,
   },

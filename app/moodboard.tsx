@@ -10,7 +10,6 @@ import { Feather } from '@expo/vector-icons';
 import { getMoodboard, removeFromMoodboard } from '../services/api';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display';
@@ -45,9 +44,6 @@ export default function MoodboardScreen() {
   const [removing, setRemoving] = useState<string | null>(null);
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -499,7 +495,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   count: {
@@ -840,7 +836,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 24,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
     textAlign: 'center',
   },

@@ -10,7 +10,6 @@ import { Feather } from '@expo/vector-icons';
 import { getVendors, addToMoodboard } from '../services/api';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display';
@@ -71,9 +70,6 @@ export default function SwipeScreen() {
   const position = useRef(new Animated.ValueXY()).current;
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -839,7 +835,7 @@ const styles = StyleSheet.create({
   vendorName: {
     fontSize: 26,
     color: '#F5F0E8',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   vendorMeta: {
@@ -1037,7 +1033,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 28,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   emptySubtitle: {
@@ -1114,7 +1110,7 @@ const freemiumStyles = StyleSheet.create({
   title: {
     fontSize: 26,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
     textAlign: 'center',
   },

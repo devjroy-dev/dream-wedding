@@ -13,9 +13,7 @@ import {
 import * as Contacts from 'expo-contacts';
 import {
   useFonts,
-  PlayfairDisplay_300Light,
   PlayfairDisplay_400Regular,
-  PlayfairDisplay_400Regular_Italic,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
 import {
@@ -125,10 +123,6 @@ export default function BTSPlannerScreen() {
   const [selectedPrompt, setSelectedPrompt] = useState('');
 
   const [fontsLoaded] = useFonts({
-    PlayfairDisplay_300Light,
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_400Regular_Italic,
-    PlayfairDisplay_600SemiBold,
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
@@ -1235,13 +1229,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   subtitle: {
     fontSize: 12,
     color: '#8C7B6E',
-    fontFamily: 'PlayfairDisplay_400Regular_Italic',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.2,
   },
   countdownRow: {
@@ -1321,7 +1315,7 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontSize: 22,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
   },
   summaryLabel: {
     fontSize: 11,
@@ -1768,13 +1762,13 @@ const styles = StyleSheet.create({
   journeyHeroTitle: {
     fontSize: 26,
     color: '#F5F0E8',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   journeyHeroQuote: {
     fontSize: 14,
     color: '#C9A84C',
-    fontFamily: 'PlayfairDisplay_400Regular_Italic',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   journeyHeroText: {
@@ -1887,7 +1881,7 @@ const styles = StyleSheet.create({
   emptyStateTitle: {
     fontSize: 20,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   emptyStateText: {
@@ -1928,7 +1922,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 22,
     color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_300Light',
+    fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
   },
   modalSubtitle: {
