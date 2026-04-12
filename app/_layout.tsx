@@ -1,60 +1,42 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Stack, useRouter, useSegments } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useState } from "react";
+import { View, ActivityIndicator } from "react-native";
 
-const AUTH_SCREENS = ['login', 'otp', 'user-type', 'vendor-login', 'vendor-onboarding'];
+const AUTH_SCREENS = ["login", "otp", "user-type", "vendor-login", "vendor-onboarding"];
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const segments = useSegments();
   const [checking, setChecking] = useState(true);
 
-  useEffect(() => {
-    checkSession();
-  }, []);
+  useEffect(() => { checkSession(); }, []);
 
   const checkSession = async () => {
     try {
-      // Always check BOTH session keys
       const [userSession, vendorSession] = await Promise.all([
-        AsyncStorage.getItem('user_session'),
-        AsyncStorage.getItem('vendor_session'),
+        AsyncStorage.getItem("user_session"),
+        AsyncStorage.getItem("vendor_session"),
       ]);
-
       const inAuthGroup = AUTH_SCREENS.includes(segments[0] as string);
-      const isIndexScreen = segments[0] === 'index' || segments[0] === undefined;
-
+      const isIndexScreen = segments[0] === "index" || segments[0] === undefined;
       if (vendorSession) {
-        // Vendor is logged in
         const parsed = JSON.parse(vendorSession);
         if (parsed.vendorId) {
-          if (inAuthGroup || isIndexScreen) {
-            router.replace('/vendor-dashboard');
-          }
+          if (inAuthGroup || isIndexScreen) router.replace("/vendor-dashboard");
           return;
         }
       }
-
       if (userSession) {
-        // Couple is logged in
         const parsed = JSON.parse(userSession);
         if (parsed.uid) {
-          if (inAuthGroup || isIndexScreen) {
-            router.replace('/home');
-          }
+          if (inAuthGroup || isIndexScreen) router.replace("/home");
           return;
         }
       }
-
-      // No valid session — send to login
-      if (!inAuthGroup) {
-        router.replace('/login');
-      }
     } catch (e) {
-      // On any error, go to login safely
-      router.replace('/login');
+      router.replace("/login");
     } finally {
       setChecking(false);
     }
@@ -62,7 +44,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (checking) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: "#F5F0E8", justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator color="#C9A84C" size="large" />
       </View>
     );
