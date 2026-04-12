@@ -25,6 +25,9 @@ export default function InquiryScreen() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [enquiryCount, setEnquiryCount] = useState(0);
+  const [showEnquiryWall, setShowEnquiryWall] = useState(false);
+  const ENQUIRY_LIMIT = 3;
 
   useEffect(() => {
     loadData();
@@ -36,6 +39,8 @@ export default function InquiryScreen() {
       if (stored) setSession(JSON.parse(stored));
       const result = await getVendor(id as string);
       if (result.success) setVendor(result.data);
+      const eq = await AsyncStorage.getItem('enquiry_count');
+      if (eq) setEnquiryCount(parseInt(eq));
     } catch (e) {}
   };
 
@@ -59,6 +64,10 @@ export default function InquiryScreen() {
   const autoMessage = `Hi, I'm ${userName}. I'm interested in your services for my ${selectedFunction} on ${displayDate}. ${isQuote ? 'Could you please share your pricing and packages?' : 'Are you available on this date?'}`;
 
   const handleSend = async () => {
+    if (enquiryCount >= ENQUIRY_LIMIT) {
+      setShowEnquiryWall(true);
+      return;
+    }
     try {
       setLoading(true);
 
@@ -97,6 +106,9 @@ export default function InquiryScreen() {
       }
 
       setSent(true);
+      const newCount = enquiryCount + 1;
+      setEnquiryCount(newCount);
+      await AsyncStorage.setItem('enquiry_count', String(newCount));
     } catch (e) {
       Alert.alert('Error', 'Could not send your inquiry. Please try again.');
     } finally {
@@ -135,6 +147,24 @@ export default function InquiryScreen() {
 
   return (
     <View style={styles.container}>
+
+      {/* ── Enquiry Limit Wall ── */}
+      {showEnquiryWall && (
+        <View style={wallStyles.wall}>
+          <View style={wallStyles.card}>
+            <Text style={wallStyles.emoji}>✉</Text>
+            <Text style={wallStyles.title}>Enquiry limit reached</Text>
+            <Text style={wallStyles.sub}>Free accounts can send {ENQUIRY_LIMIT} enquiries. This is your highest-intent moment — upgrade to Premium Plus for unlimited enquiries and priority vendor responses.</Text>
+            <TouchableOpacity style={wallStyles.upgradeBtn} onPress={() => setShowEnquiryWall(false)}>
+              <Text style={wallStyles.upgradeBtnText}>UPGRADE TO PREMIUM PLUS — Rs.999/mo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={wallStyles.dismissBtn} onPress={() => { setShowEnquiryWall(false); router.back(); }}>
+              <Text style={wallStyles.dismissBtnText}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backBtn}>←</Text>
@@ -312,4 +342,39 @@ const styles = StyleSheet.create({
   messagingBtn: { backgroundColor: '#2C2420', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   messagingBtnText: { fontSize: 15, color: '#F5F0E8', fontWeight: '500' },
   backLink: { fontSize: 14, color: '#C9A84C', textAlign: 'center' },
+});
+
+const wallStyles = StyleSheet.create({
+  wall: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(20,12,4,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+    paddingHorizontal: 28,
+  },
+  card: {
+    backgroundColor: '#F5F0E8',
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    gap: 14,
+    width: '100%',
+  },
+  emoji: { fontSize: 36, color: '#C9A84C' },
+  title: { fontSize: 26, color: '#2C2420', fontWeight: '300', letterSpacing: 0.3, textAlign: 'center' },
+  sub: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },
+  upgradeBtn: {
+    backgroundColor: '#2C2420',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    width: '100%',
+    marginTop: 4,
+  },
+  upgradeBtnText: { fontSize: 12, color: '#C9A84C', fontWeight: '500', letterSpacing: 1 },
+  dismissBtn: { paddingVertical: 8 },
+  dismissBtnText: { fontSize: 13, color: '#8C7B6E' },
 });
