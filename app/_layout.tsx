@@ -11,7 +11,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const [checking, setChecking] = useState(true);
 
-  useEffect(() => { checkSession(); }, []);
+  useEffect(() => {
+    // Small delay to ensure navigation is ready
+    const timer = setTimeout(() => {
+      checkSession();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const checkSession = async () => {
     try {
