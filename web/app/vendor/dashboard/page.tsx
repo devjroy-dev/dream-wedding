@@ -262,6 +262,9 @@ export default function VendorDashboard() {
 
   // Form states
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [interestAmount, setInterestAmount] = useState('');
+  const [interestRate, setInterestRate] = useState('18');
+  const [interestDays, setInterestDays] = useState('');
   const [gstNumber, setGstNumber] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankAccount, setBankAccount] = useState('');
@@ -2587,6 +2590,43 @@ export default function VendorDashboard() {
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)' }}>No outstanding payments. Every instalment is paid.</div>
               </div>
             )}
+
+            {/* Late Payment Interest Calculator */}
+            <div className="card" style={{ padding: '28px 32px' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px', letterSpacing: '0.1px' }}>Late Payment Interest Calculator</div>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>Calculate interest on overdue amounts at 18% p.a. (standard industry rate)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+                <div>
+                  <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Overdue Amount (Rs.)</label>
+                  <input style={inp} type="number" placeholder="e.g. 50000" value={interestAmount} onChange={e => setInterestAmount(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Annual Rate (%)</label>
+                  <input style={inp} type="number" placeholder="18" value={interestRate} onChange={e => setInterestRate(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Days Overdue</label>
+                  <input style={inp} type="number" placeholder="e.g. 30" value={interestDays} onChange={e => setInterestDays(e.target.value)} />
+                </div>
+              </div>
+              {interestAmount && interestDays && interestRate && (
+                <div style={{ background: '#F9FAFB', borderRadius: '8px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Interest Due</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '24px', fontWeight: 700, color: '#DC2626' }}>
+                      Rs.{Math.round(parseInt(interestAmount) * (parseFloat(interestRate) / 100) * (parseInt(interestDays) / 365)).toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Total to Recover</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '24px', fontWeight: 700, color: 'var(--dark)' }}>
+                      Rs.{(parseInt(interestAmount) + Math.round(parseInt(interestAmount) * (parseFloat(interestRate) / 100) * (parseInt(interestDays) / 365))).toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
