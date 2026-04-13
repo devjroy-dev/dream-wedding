@@ -48,7 +48,30 @@ export default function MoodboardScreen() {
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
-  });
+    compareBtn: {
+    position: 'absolute',
+    bottom: 90,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#2C2420',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 50,
+    shadowColor: '#2C2420',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  compareBtnText: {
+    fontSize: 13,
+    color: '#F5F0E8',
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.3,
+  },
+});
 
   useFocusEffect(
     useCallback(() => {
@@ -372,11 +395,14 @@ export default function MoodboardScreen() {
           <View style={styles.actionBar}>
             <TouchableOpacity
               style={styles.compareBtn}
-              onPress={() => router.push('/compare' as any)}
+              onPress={() => {
+                const ids = saved.map(s => s.vendor_id || s.vendors?.id).filter(Boolean);
+                router.push(`/compare?ids=${ids.join(',')}` as any);
+              }}
               activeOpacity={0.85}
             >
               <Feather name="columns" size={14} color="#2C2420" />
-              <Text style={styles.compareBtnText}>Compare</Text>
+              <Text style={styles.compareBtnText}>Compare ({saved.length})</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.shareBtn}
@@ -428,6 +454,18 @@ export default function MoodboardScreen() {
         <View style={{ height: 120 }} />
 
       </ScrollView>
+
+      {/* Compare floating button */}
+      {comparable && (
+        <TouchableOpacity
+          style={styles.compareBtn}
+          onPress={() => router.push(`/compare?ids=${comparable.ids.join(',')}` as any)}
+          activeOpacity={0.85}
+        >
+          <Feather name="columns" size={14} color="#F5F0E8" />
+          <Text style={styles.compareBtnText}>Compare {comparable.category} ({comparable.ids.length})</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Bottom Nav */}
       <BottomNav />
