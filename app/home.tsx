@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, ScrollView, TextInput, ImageBackground
+  Dimensions, ScrollView, Animated
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,63 +20,38 @@ import BottomNav from '../components/BottomNav';
 import { registerForPushNotifications, savePushToken } from '../services/notifications';
 
 const { width } = Dimensions.get('window');
-const CARD_SIZE = (width - 62) / 2;
 
 const CATEGORIES = [
-  { id: 'venues',           label: 'Venues',             sub: 'Palaces, farmhouses & luxury hotels',  icon: 'home'       },
-  { id: 'photographers',   label: 'Photographers',       sub: 'Candid, traditional & cinematic',      icon: 'camera'     },
-  { id: 'mua',             label: 'Makeup Artists',      sub: 'Bridal & party makeup',                icon: 'scissors'   },
-  { id: 'designers',       label: 'Designers',           sub: 'Bridal & groom wear',                  icon: 'star'       },
-  { id: 'jewellery',       label: 'Jewellery',           sub: 'Bridal & custom jewellery',            icon: 'circle'     },
-  { id: 'choreographers',  label: 'Choreographers',      sub: 'Sangeet & performance prep',           icon: 'music'      },
-  { id: 'content-creators',label: 'Content Creators',    sub: 'BTS Reels & short films',              icon: 'video'      },
-  { id: 'dj',              label: 'DJ & Music',          sub: 'Live music & DJ services',             icon: 'headphones' },
-  { id: 'event-managers',  label: 'Event Managers',      sub: 'Luxury & destination weddings',        icon: 'briefcase'  },
-  { id: 'bridal-wellness', label: 'Bridal Wellness',     sub: 'Skin, hair, health & dermatology',     icon: 'heart'      },
+  { id: 'venues',           label: 'Venues',          icon: 'home'       },
+  { id: 'photographers',    label: 'Photographers',   icon: 'camera'     },
+  { id: 'mua',              label: 'Makeup Artists',   icon: 'scissors'   },
+  { id: 'designers',        label: 'Designers',        icon: 'star'       },
+  { id: 'jewellery',        label: 'Jewellery',        icon: 'circle'     },
+  { id: 'choreographers',   label: 'Choreographers',  icon: 'music'      },
+  { id: 'content-creators', label: 'Content Creators', icon: 'video'      },
+  { id: 'dj',               label: 'DJ & Music',       icon: 'headphones' },
+  { id: 'event-managers',   label: 'Event Managers',   icon: 'briefcase'  },
+  { id: 'bridal-wellness',  label: 'Bridal Wellness',  icon: 'heart'      },
 ];
 
-// FEATURED CARDS — swap image URIs for real vendor images when confirmed
-const QUICK_CARDS = [
-  {
-    id: 'get-inspired',
-    title: 'Get Inspired',
-    sub: 'Venues · Décor · Photography',
-    route: '/get-inspired',
-    // SWAP: Replace with curated venue/decor/photographer image
-    image: 'https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=800',
-  },
-  {
-    id: 'look-book',
-    title: 'Look Book',
-    sub: 'Designers · MUAs · Jewellers',
-    route: '/look-book',
-    // SWAP: Replace with designer/bridal look image
-    image: 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=800',
-  },
-  {
-    id: 'event-managers',
-    title: 'Event Managers',
-    sub: 'Grand weddings · Full service',
-    route: '/destination-weddings',
-    // SWAP: Replace with event manager's best wedding setup image
-    image: 'https://images.unsplash.com/photo-1478146896981-b80fe463b330?w=800',
-  },
-  {
-    id: 'special-offers',
-    title: 'Special Offers',
-    sub: 'Exclusive deals from top vendors',
-    route: '/special-offers',
-    // SWAP: Replace with curated offer visual
-    image: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800',
-  },
+const QUOTES = [
+  'Every love story is beautiful, but yours will be extraordinary.',
+  'The best thing to hold onto in life is each other.',
+  'Together is a wonderful place to be.',
+  'Where there is love, there is life.',
+  'In all the world, there is no heart for me like yours.',
+  'Two souls, one journey.',
+  'Love is the bridge between two hearts.',
 ];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
   const [userName, setUserName] = useState('');
   const [daysToGo, setDaysToGo] = useState<number | null>(null);
   const [greeting, setGreeting] = useState('Good morning');
+
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(16)).current;
 
   const [fontsLoaded] = useFonts({
     DMSans_300Light,
@@ -87,6 +62,10 @@ export default function HomeScreen() {
   useEffect(() => {
     loadSession();
     setTimeGreeting();
+    Animated.parallel([
+      Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.timing(slideUp, { toValue: 0, duration: 600, useNativeDriver: true }),
+    ]).start();
   }, []);
 
   const setTimeGreeting = () => {
@@ -102,7 +81,6 @@ export default function HomeScreen() {
       if (session) {
         const parsed = JSON.parse(session);
         if (parsed.name) setUserName(parsed.name.split(' ')[0]);
-        // Register push token
         registerForPushNotifications().then(token => {
           if (token && parsed.userId) savePushToken(token, parsed.userId);
         });
@@ -117,416 +95,212 @@ export default function HomeScreen() {
     } catch (e) {}
   };
 
-  const filteredCategories = CATEGORIES.filter(cat =>
-    cat.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    cat.sub.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // fonts load async — render proceeds
+  const todayQuote = QUOTES[new Date().getDate() % QUOTES.length];
 
   return (
-    <View style={styles.container}>
+    <View style={s.container}>
 
       {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>
+      <Animated.View style={[s.header, { opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
+        <View style={s.headerLeft}>
+          <Text style={s.greeting}>
             {greeting}{userName ? `, ${userName}` : ''}
           </Text>
           {daysToGo ? (
-            <View style={styles.countdownRow}>
-              <Text style={styles.countdownNumber}>{daysToGo}</Text>
-              <Text style={styles.countdownLabel}> days to your wedding</Text>
+            <View style={s.countdownRow}>
+              <Text style={s.countdownNumber}>{daysToGo}</Text>
+              <Text style={s.countdownLabel}> days to your wedding</Text>
             </View>
           ) : (
-            <Text style={styles.subGreeting}>Find your dream wedding team</Text>
+            <Text style={s.subGreeting}>Find your dream wedding team</Text>
           )}
         </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            onPress={() => router.push('/notifications')}
-            style={styles.iconBtn}
-          >
+        <View style={s.headerRight}>
+          <TouchableOpacity onPress={() => router.push('/notifications')} style={s.iconBtn}>
             <Feather name="bell" size={18} color="#2C2420" />
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.push('/profile')}
-            style={styles.avatar}
-          >
-            <Text style={styles.avatarText}>
-              {userName?.[0]?.toUpperCase() || 'D'}
-            </Text>
+          <TouchableOpacity onPress={() => router.push('/profile')} style={s.avatar}>
+            <Text style={s.avatarText}>{userName?.[0]?.toUpperCase() || 'D'}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} style={s.scroll} contentContainerStyle={s.scrollContent}>
 
-        {/* Search */}
-        <View style={styles.searchBar}>
-          <Feather name="search" size={15} color="#8C7B6E" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search vendors, categories..."
-            placeholderTextColor="#8C7B6E"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={14} color="#8C7B6E" />
-            </TouchableOpacity>
-          )}
+        {/* Daily quote */}
+        <View style={s.quoteWrap}>
+          <View style={s.quoteDivider} />
+          <Text style={s.quoteText}>{todayQuote}</Text>
+          <View style={s.quoteDivider} />
         </View>
 
-        {/* Featured Cards — 2x2 premium placement */}
-        <View style={styles.cardGrid}>
-          {QUICK_CARDS.map((card, index) => (
+        {/* Category pills */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.pillsContent}
+          style={s.pillsScroll}
+        >
+          {CATEGORIES.map(cat => (
             <TouchableOpacity
-              key={card.id}
-              style={styles.quickCard}
-              onPress={() => router.push(card.route as any)}
-              activeOpacity={0.9}
+              key={cat.id}
+              style={s.pill}
+              onPress={() => router.push(`/swipe?category=${cat.id}` as any)}
+              activeOpacity={0.8}
             >
-              <ImageBackground
-                source={{ uri: card.image }}
-                style={styles.cardBg}
-                imageStyle={styles.cardBgImage}
-              >
-                <View style={styles.cardOverlay}>
-                  <View>
-                    <Text style={styles.quickCardTitle}>{card.title}</Text>
-                    <Text style={styles.quickCardSub}>{card.sub}</Text>
-                  </View>
-                  <View style={styles.cardArrowBox}>
-                    <Feather name="arrow-right" size={12} color="#C9A84C" />
-                  </View>
-                </View>
-              </ImageBackground>
+              <Feather name={cat.icon as any} size={11} color="#C9A84C" />
+              <Text style={s.pillText}>{cat.label}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
 
-        {/* Categories */}
-        {searchQuery.length === 0 && (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Browse by Category</Text>
-            <View style={styles.sectionDivider} />
-          </View>
-        )}
+        {/* Primary actions */}
+        <View style={s.actionsSection}>
 
-        <View style={styles.categoriesCard}>
-          {filteredCategories.map((cat, index) => (
-            <View key={cat.id}>
-              <TouchableOpacity
-                style={styles.categoryRow}
-                onPress={() => router.push(`/swipe?category=${cat.id}` as any)}
-                activeOpacity={0.75}
-              >
-                <View style={styles.categoryIconBox}>
-                  <Feather
-                    name={cat.icon as any}
-                    size={16}
-                    color="#C9A84C"
-                  />
-                </View>
-                <View style={styles.categoryText}>
-                  <Text style={styles.categoryLabel}>{cat.label}</Text>
-                  <Text style={styles.categorySub}>{cat.sub}</Text>
-                </View>
-                <Feather name="chevron-right" size={16} color="#C9A84C" />
-              </TouchableOpacity>
-              {index < filteredCategories.length - 1 && (
-                <View style={styles.rowDivider} />
-              )}
+          {/* Discover Vendors — primary CTA */}
+          <TouchableOpacity style={s.primaryCard} onPress={() => router.push('/swipe' as any)} activeOpacity={0.85}>
+            <View style={s.primaryIconBox}>
+              <Feather name="search" size={18} color="#C9A84C" />
             </View>
-          ))}
+            <View style={s.primaryTextWrap}>
+              <Text style={s.primaryTitle}>Discover Vendors</Text>
+              <Text style={s.primarySub}>Swipe through India's finest wedding professionals</Text>
+            </View>
+            <Feather name="arrow-right" size={16} color="#C9A84C" />
+          </TouchableOpacity>
+
+          {/* Destination Weddings */}
+          <TouchableOpacity style={s.secondaryCard} onPress={() => router.push('/destination-weddings' as any)} activeOpacity={0.85}>
+            <View style={s.secondaryIconBox}>
+              <Feather name="map-pin" size={16} color="#C9A84C" />
+            </View>
+            <View style={s.secondaryTextWrap}>
+              <Text style={s.secondaryTitle}>Destination Weddings</Text>
+              <Text style={s.secondarySub}>Udaipur, Goa, Jaipur, Mussoorie</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#C9A84C" />
+          </TouchableOpacity>
+
+          {/* Curated For You */}
+          <TouchableOpacity style={s.secondaryCard} onPress={() => router.push('/curated-suggestions' as any)} activeOpacity={0.85}>
+            <View style={s.secondaryIconBox}>
+              <Feather name="zap" size={16} color="#C9A84C" />
+            </View>
+            <View style={s.secondaryTextWrap}>
+              <Text style={s.secondaryTitle}>Curated For You</Text>
+              <Text style={s.secondarySub}>Smart vendor combinations within your budget</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#C9A84C" />
+          </TouchableOpacity>
+
         </View>
 
-        {/* Bottom padding for nav */}
-        <View style={{ height: 100 }} />
+        {/* Explore */}
+        <View style={s.exploreSection}>
+          <Text style={s.exploreLabel}>E X P L O R E</Text>
+          <View style={s.exploreGrid}>
+            {[
+              { title: 'Get Inspired', sub: 'Venues, decor, ideas', route: '/get-inspired', icon: 'compass' },
+              { title: 'Look Book', sub: 'Designers, MUAs', route: '/look-book', icon: 'book-open' },
+              { title: 'Spotlight', sub: 'Top vendors this month', route: '/spotlight', icon: 'award' },
+              { title: 'Special Offers', sub: 'Exclusive deals', route: '/special-offers', icon: 'gift' },
+            ].map(item => (
+              <TouchableOpacity
+                key={item.title}
+                style={s.exploreCard}
+                onPress={() => router.push(item.route as any)}
+                activeOpacity={0.85}
+              >
+                <View style={s.exploreIconBox}>
+                  <Feather name={item.icon as any} size={15} color="#C9A84C" />
+                </View>
+                <Text style={s.exploreTitle}>{item.title}</Text>
+                <Text style={s.exploreSub}>{item.sub}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Bottom Nav */}
       <BottomNav />
-
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F0E8',
-    paddingTop: 60,
-  },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
 
   // Header
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 24,
-    marginBottom: 24,
-  },
-  headerLeft: {
-    flex: 1,
-    gap: 6,
-  },
-  greeting: {
-    fontSize: 28,
-    color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_400Regular',
-    letterSpacing: 0.3,
-  },
-  countdownRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 2,
-  },
-  countdownNumber: {
-    fontSize: 22,
-    color: '#C9A84C',
-    fontFamily: 'PlayfairDisplay_600SemiBold',
-    letterSpacing: 0.5,
-  },
-  countdownLabel: {
-    fontSize: 13,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-    letterSpacing: 0.2,
-  },
-  subGreeting: {
-    fontSize: 13,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-    letterSpacing: 0.2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2C2420',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    color: '#C9A84C',
-    fontSize: 15,
-    fontFamily: 'DMSans_500Medium',
-  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 24, marginBottom: 20 },
+  headerLeft: { flex: 1, gap: 6 },
+  greeting: { fontSize: 28, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
+  countdownRow: { flexDirection: 'row', alignItems: 'baseline', gap: 2 },
+  countdownNumber: { fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_600SemiBold', letterSpacing: 0.5 },
+  countdownLabel: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
+  subGreeting: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
+  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: '#C9A84C', fontSize: 15, fontFamily: 'DMSans_500Medium' },
 
-  // Scroll
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 20 },
 
-  // Search
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    marginBottom: 24,
-    gap: 10,
-    shadowColor: '#2C2420',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#2C2420',
-    fontFamily: 'DMSans_400Regular',
-  },
+  // Quote
+  quoteWrap: { paddingHorizontal: 40, marginBottom: 28, alignItems: 'center', gap: 14 },
+  quoteDivider: { width: 28, height: 1, backgroundColor: '#C9A84C', opacity: 0.4 },
+  quoteText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'PlayfairDisplay_400Regular', textAlign: 'center', lineHeight: 22, fontStyle: 'italic' },
 
-  // Featured cards
-  cardGrid: {
-    paddingHorizontal: 24,
-    gap: 14,
-    marginBottom: 32,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  quickCard: {
-    width: (width - 62) / 2,
-    height: (width - 62) / 2,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  // First card is full width — editorial anchor
-  quickCardFull: {
-    width: '100%',
-    height: CARD_SIZE * 1.1,
-  },
-  cardBg: {
-    width: '100%',
-    height: '100%',
-  },
-  cardBgImage: {
-    borderRadius: 16,
-  },
-  cardOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(20,12,4,0.42)',
-    borderRadius: 16,
-    padding: 16,
-    justifyContent: 'space-between',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  quickCardTitle: {
-    fontSize: 16,
-    color: '#F5F0E8',
-    fontFamily: 'PlayfairDisplay_400Regular',
-    letterSpacing: 0.3,
-  },
-  quickCardSub: {
-    fontSize: 11,
-    color: 'rgba(245,240,232,0.75)',
-    fontFamily: 'DMSans_300Light',
-    letterSpacing: 0.2,
-    marginTop: 3,
-  },
-  cardArrowBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.4)',
-  },
+  // Pills
+  pillsScroll: { marginBottom: 28 },
+  pillsContent: { paddingHorizontal: 24, gap: 8 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 50, borderWidth: 1, borderColor: '#E8E0D5', backgroundColor: '#FFFFFF' },
+  pillText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', letterSpacing: 0.2 },
 
-  // Categories section header
-  sectionHeader: {
-    paddingHorizontal: 24,
-    marginBottom: 20,
-    gap: 10,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_500Medium',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-  },
-  sectionDivider: {
-    height: 1,
-    backgroundColor: '#E8E0D5',
-  },
+  // Primary actions
+  actionsSection: { paddingHorizontal: 24, gap: 12, marginBottom: 32 },
 
-  // Categories as a unified card
-  categoriesCard: {
-    marginHorizontal: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E8E0D5',
-    overflow: 'hidden',
-    shadowColor: '#2C2420',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
+  primaryCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 16,
+    backgroundColor: '#2C2420', borderRadius: 16, padding: 22,
   },
-  categoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    gap: 14,
+  primaryIconBox: {
+    width: 44, height: 44, borderRadius: 12,
+    backgroundColor: 'rgba(201,168,76,0.15)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  categoryIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#FFF8EC',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E8D9B5',
-  },
-  categoryText: {
-    flex: 1,
-    gap: 3,
-  },
-  categoryLabel: {
-    fontSize: 15,
-    color: '#2C2420',
-    fontFamily: 'PlayfairDisplay_400Regular',
-    letterSpacing: 0.2,
-  },
-  categorySub: {
-    fontSize: 11,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-    letterSpacing: 0.2,
-  },
-  rowDivider: {
-    height: 1,
-    backgroundColor: '#E8E0D5',
-    marginHorizontal: 20,
-  },
+  primaryTextWrap: { flex: 1, gap: 4 },
+  primaryTitle: { fontSize: 16, color: '#F5F0E8', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
+  primarySub: { fontSize: 11, color: 'rgba(245,240,232,0.6)', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
 
-  // Bottom nav
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
-    paddingBottom: 28,
-    borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
-    backgroundColor: '#F5F0E8',
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
+  secondaryCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E8E0D5', padding: 20,
   },
-  navItem: {
-    alignItems: 'center',
-    gap: 4,
+  secondaryIconBox: {
+    width: 40, height: 40, borderRadius: 10,
+    backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5',
+    justifyContent: 'center', alignItems: 'center',
   },
-  navLabel: {
-    fontSize: 11,
-    color: '#8C7B6E',
-    fontFamily: 'DMSans_300Light',
-    letterSpacing: 0.3,
+  secondaryTextWrap: { flex: 1, gap: 3 },
+  secondaryTitle: { fontSize: 15, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.2 },
+  secondarySub: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
+
+  // Explore
+  exploreSection: { paddingHorizontal: 24 },
+  exploreLabel: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 4, textAlign: 'center', marginBottom: 16 },
+  exploreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  exploreCard: {
+    width: (width - 60) / 2, backgroundColor: '#FFFFFF',
+    borderRadius: 16, borderWidth: 1, borderColor: '#E8E0D5', padding: 20, gap: 8,
   },
-  navLabelActive: {
-    color: '#2C2420',
-    fontFamily: 'DMSans_500Medium',
+  exploreIconBox: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 4,
   },
-  navDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#C9A84C',
-  },
+  exploreTitle: { fontSize: 14, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.2 },
+  exploreSub: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2, lineHeight: 16 },
 });
