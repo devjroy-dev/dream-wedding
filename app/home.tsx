@@ -19,7 +19,7 @@ import {
 import BottomNav from '../components/BottomNav';
 
 const { width } = Dimensions.get('window');
-const CARD_SIZE = (width - 60) / 2;
+const CARD_SIZE = (width - 62) / 2;
 
 const CATEGORIES = [
   { id: 'venues',           label: 'Venues',             sub: 'Palaces, farmhouses & luxury hotels',  icon: 'home'       },
@@ -370,8 +370,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   quickCard: {
-    width: (width - 60) / 2,
-    height: (width - 60) / 2,
+    width: (width - 62) / 2,
+    height: (width - 62) / 2,
     borderRadius: 16,
     overflow: 'hidden',
   },

@@ -41,7 +41,48 @@ export default function ProfileScreen() {
       const updated = { ...session, name: editName.trim() };
       await AsyncStorage.setItem('user_session', JSON.stringify(updated));
       if (session?.userId) {
-        try { await updateUser(session.userId, { name: editName.trim() }); } catch (e) {}
+        try { await updateUser(session.userId, { name: editName.trim()   betaTitle: {
+    fontSize: 14,
+    color: '#2C2420',
+    fontFamily: 'PlayfairDisplay_400Regular',
+    letterSpacing: 0.2,
+  },
+  betaDesc: {
+    fontSize: 11,
+    color: '#8C7B6E',
+    fontFamily: 'DMSans_300Light',
+    lineHeight: 16,
+    letterSpacing: 0.2,
+  },
+  betaBadgeLive: {
+    backgroundColor: '#4CAF5015',
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    borderRadius: 50,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  betaBadgeLiveText: {
+    fontSize: 10,
+    color: '#4CAF50',
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.5,
+  },
+  betaBadgeSoon: {
+    backgroundColor: 'rgba(201,168,76,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(201,168,76,0.3)',
+    borderRadius: 50,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  betaBadgeSoonText: {
+    fontSize: 10,
+    color: '#C9A84C',
+    fontFamily: 'DMSans_500Medium',
+    letterSpacing: 0.5,
+  },
+}); } catch (e) {}
       }
       setSession(updated);
       setShowEditModal(false);
@@ -273,6 +314,54 @@ export default function ProfileScreen() {
                 <View style={[styles.toggleThumb, reminders && styles.toggleThumbActive]} />
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+
+        {/* Beta Features */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Beta Features</Text>
+          <View style={styles.listCard}>
+
+            {/* Curated Suggestions — Live */}
+            <TouchableOpacity
+              style={styles.listRow}
+              onPress={() => router.push('/curated-suggestions' as any)}
+            >
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.betaTitle}>Curated Suggestions</Text>
+                <Text style={styles.betaDesc}>Set budgets per vendor category and get smart combinations within your total budget</Text>
+              </View>
+              <View style={styles.betaBadgeLive}>
+                <Text style={styles.betaBadgeLiveText}>Live</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.listDivider} />
+
+            {/* Coming Soon features — greyed out */}
+            {[
+              { title: 'AI Vendor Match', desc: 'AI picks your dream team based on your vibe, budget, and past saves', build: 'Build 2' },
+              { title: 'Co-planner Live Sync', desc: 'Real-time planning with your partner — see changes as they happen', build: 'Build 2' },
+              { title: 'Wedding Website Builder', desc: 'A beautiful shareable website for your guests with RSVP, registry, and timeline', build: 'Build 2' },
+              { title: 'Look-Alike Search', desc: 'Upload a photo you love, find vendors who shoot in that exact style', build: 'Build 2' },
+              { title: 'Smart Checklist', desc: 'AI-generated checklist based on your wedding date, budget, and functions', build: 'Build 3' },
+              { title: 'Vendor Chat', desc: 'In-app messaging with read receipts, image sharing, and voice notes', build: 'Build 3' },
+              { title: 'AR Venue Preview', desc: 'Walk through venues virtually before visiting in person', build: 'Build 3' },
+            ].map((feature, index, arr) => (
+              <View key={feature.title}>
+                <View style={[styles.listRow, { opacity: 0.45 }]}>
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={styles.betaTitle}>{feature.title}</Text>
+                    <Text style={styles.betaDesc}>{feature.desc}</Text>
+                  </View>
+                  <View style={styles.betaBadgeSoon}>
+                    <Text style={styles.betaBadgeSoonText}>{feature.build}</Text>
+                  </View>
+                </View>
+                {index < arr.length - 1 && <View style={styles.listDivider} />}
+              </View>
+            ))}
+
           </View>
         </View>
 

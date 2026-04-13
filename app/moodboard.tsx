@@ -456,17 +456,6 @@ export default function MoodboardScreen() {
       </ScrollView>
 
       {/* Compare floating button */}
-      {comparable && (
-        <TouchableOpacity
-          style={styles.compareBtn}
-          onPress={() => router.push(`/compare?ids=${comparable.ids.join(',')}` as any)}
-          activeOpacity={0.85}
-        >
-          <Feather name="columns" size={14} color="#F5F0E8" />
-          <Text style={styles.compareBtnText}>Compare {comparable.category} ({comparable.ids.length})</Text>
-        </TouchableOpacity>
-      )}
-
       {/* Bottom Nav */}
       <BottomNav />
 
