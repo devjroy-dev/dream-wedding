@@ -1144,17 +1144,7 @@ export default function VendorDashboard() {
                   {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                 </div>
               </div>
-              <button onClick={() => setIsLive(!isLive)} style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                background: isLive ? 'rgba(22,163,74,0.08)' : '#F9FAFB',
-                border: `1px solid ${isLive ? 'rgba(22,163,74,0.2)' : 'var(--card-border)'}`,
-                borderRadius: '6px', padding: '8px 14px', cursor: 'pointer',
-              }}>
-                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#16A34A' : '#9CA3AF' }} />
-                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, color: isLive ? '#16A34A' : '#9CA3AF' }}>
-                  {isLive ? 'Live on Platform' : 'Hidden'}
-                </span>
-              </button>
+
             </div>
 
             {/* Key metrics */}
@@ -1244,9 +1234,10 @@ export default function VendorDashboard() {
                 ].map(a => (
                   <button key={a.label} onClick={() => a.tab === 'overview' ? setActiveTab('overview') : setActiveTab(a.tab)} style={{
                     fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
-                    color: 'var(--text-secondary)', background: '#F9FAFB',
-                    border: '1px solid var(--card-border)', borderRadius: '6px',
-                    padding: '8px 14px', cursor: 'pointer', transition: 'all 0.15s',
+                    color: '#fff', background: 'var(--dark)',
+                    border: 'none', borderRadius: '6px',
+                    padding: '9px 16px', cursor: 'pointer', transition: 'all 0.15s',
+                    letterSpacing: '0.1px',
                   }}>
                     {a.label}
                   </button>
@@ -1254,25 +1245,21 @@ export default function VendorDashboard() {
               </div>
             </div>
 
-            {/* Spotlight Score — small, at bottom */}
-            <div className="card" style={{ padding: '16px 20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Star size={13} color="var(--gold)" />
-                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Spotlight Score</span>
-                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>2,847</span>
-                  <span className="badge-gold">#3 This Month</span>
-                </div>
-                <div style={{ display: 'flex', gap: '20px' }}>
-                  {[{ n: '140', l: 'Saves' }, { n: '57', l: 'Enquiries' }, { n: '12', l: 'Bookings' }].map(s => (
-                    <div key={s.l} style={{ textAlign: 'center' }}>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.n}</div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{s.l}</div>
-                    </div>
-                  ))}
-                </div>
+            {/* Spotlight Score — minimal stat bar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: '#FAFAFA', border: '1px solid var(--card-border)', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase' }}>Spotlight Score</span>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>2,847</span>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--gold)', background: 'rgba(201,168,76,0.1)', padding: '2px 8px', borderRadius: '4px' }}>#3 This Month</span>
               </div>
-              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>Refreshes 1st of every month. Earned, not bought.</div>
+              <div style={{ display: 'flex', gap: '24px' }}>
+                {[{ n: '140', l: 'Saves' }, { n: '57', l: 'Enquiries' }, { n: '12', l: 'Bookings' }].map(s => (
+                  <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.n}</span>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{s.l}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
           </div>
