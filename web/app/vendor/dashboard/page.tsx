@@ -1233,7 +1233,7 @@ export default function VendorDashboard() {
                   { label: 'Block Date', tab: 'calendar' },
                   { label: 'Generate Web Login Code', tab: 'overview' },
                 ].map(a => (
-                  <button key={a.label} onClick={() => a.tab === 'overview' ? setShowCodeModal(true) : setActiveTab(a.tab)} style={{
+                  <button key={a.label} onClick={() => a.tab === 'overview' ? setActiveTab('overview') : setActiveTab(a.tab)} style={{
                     fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
                     color: 'var(--text-secondary)', background: '#F9FAFB',
                     border: '1px solid var(--card-border)', borderRadius: '6px',
