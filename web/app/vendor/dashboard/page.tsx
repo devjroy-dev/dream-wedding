@@ -694,7 +694,14 @@ export default function VendorDashboard() {
   };
 
   const handleAddClient = async () => {
-    if (!clientName || !clientPhone) { toast.error('Please fill name and phone'); return; };
+    if (!clientName || !clientPhone) { toast.error('Please fill name and phone'); return; }
+    if (clientDate) {
+      const duplicate = clients.find((c: any) => c.wedding_date === clientDate);
+      if (duplicate) {
+        toast.error(`⚠️ ${duplicate.name} is already booked on ${clientDate}`);
+        return;
+      }
+    }
     try {
       const res = await fetch(`${API}/vendor-clients`, {
         method: 'POST',
