@@ -298,6 +298,10 @@ export default function VendorDashboard() {
   const [clientDate, setClientDate] = useState('November 20, 2026');
   const [clientNotes, setClientNotes] = useState('');
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [editClientData, setEditClientData] = useState<any>({});
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [editInvoiceData, setEditInvoiceData] = useState<any>({});
   const [noteText, setNoteText] = useState('');
 
   // Team form
@@ -359,6 +363,38 @@ export default function VendorDashboard() {
       if (activeTab === 'tax') loadTDS();
     }
   }, [activeTab, vendorData]);
+
+  const handleSaveClientEdit = async (id: string) => {
+    try {
+      const res = await fetch(`${API}/vendor-clients/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editClientData),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Client updated');
+        setEditingClientId(null);
+        loadClients();
+      } else { toast.error('Could not update client'); }
+    } catch (e) { toast.error('Could not update client'); }
+  };
+
+  const handleSaveInvoiceEdit = async (id: string) => {
+    try {
+      const res = await fetch(`${API}/invoices/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editInvoiceData),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Invoice updated');
+        setEditingInvoiceId(null);
+        loadInvoices();
+      } else { toast.error('Could not update invoice'); }
+    } catch (e) { toast.error('Could not update invoice'); }
+  };
 
   const handleDelete = async (type:string, id:string) => {
     const endpoints: Record<string, string> = {
@@ -1468,6 +1504,9 @@ export default function VendorDashboard() {
                       >
                         {inv.status === 'paid' ? '✓ Paid' : 'Mark Paid'}
                       </button>
+                      <button onClick={() => { setEditingInvoiceId(inv.id); setEditInvoiceData({ client_name: inv.client_name, amount: inv.amount, description: inv.description }); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Edit">
+                        <Edit2 size={14} />
+                      </button>
                       <button onClick={() => setConfirmDelete({ type: 'invoice', id: inv.id, name: `Invoice ${inv.invoice_number}` })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Delete">
                         <Trash2 size={14} />
                       </button>
@@ -2076,11 +2115,44 @@ export default function VendorDashboard() {
                           }}>
                           {client.invited ? 'Invited ✓' : 'Send Invite'}
                         </a>
+                        <button onClick={() => { setEditingClientId(client.id); setEditClientData({ name: client.name, phone: client.phone, wedding_date: client.wedding_date, status: client.status, notes: client.notes }); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Edit">
+                          <Edit2 size={14} />
+                        </button>
                         <button onClick={() => setConfirmDelete({ type: 'client', id: client.id, name: client.name })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Delete">
                           <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
+                    {editingClientId === client.id && (
+                      <div style={{ marginTop: '12px', padding: '16px', background: '#F9FAFB', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Name</label>
+                            <input style={{ ...inp, fontSize: '13px' }} value={editClientData.name || ''} onChange={e => setEditClientData((p:any) => ({ ...p, name: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Phone</label>
+                            <input style={{ ...inp, fontSize: '13px' }} value={editClientData.phone || ''} onChange={e => setEditClientData((p:any) => ({ ...p, phone: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Wedding Date</label>
+                            <input style={{ ...inp, fontSize: '13px' }} value={editClientData.wedding_date || ''} onChange={e => setEditClientData((p:any) => ({ ...p, wedding_date: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Status</label>
+                            <select style={{ ...inp, fontSize: '13px' }} value={editClientData.status || 'upcoming'} onChange={e => setEditClientData((p:any) => ({ ...p, status: e.target.value }))}>
+                              <option value="upcoming">Upcoming</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => setEditingClientId(null)} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--dark)', background: '#E5E7EB', border: 'none', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
+                          <button onClick={() => handleSaveClientEdit(client.id)} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 600, color: '#fff', background: 'var(--dark)', border: 'none', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer' }}>Save Changes</button>
+                        </div>
+                      </div>
+                    )}
                     {editingNoteId === client.id ? (
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                         <textarea
