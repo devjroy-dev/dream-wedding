@@ -1169,7 +1169,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   headerLeft: { flex: 1, gap: 5 },
   title: {

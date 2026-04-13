@@ -267,14 +267,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 24,
-    marginBottom: 20,
+    marginBottom: 24,
   },
   headerLeft: {
     flex: 1,
     gap: 6,
   },
   greeting: {
-    fontSize: 24,
+    fontSize: 28,
     color: '#2C2420',
     fontFamily: 'PlayfairDisplay_400Regular',
     letterSpacing: 0.3,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     borderColor: '#E8E0D5',
     paddingHorizontal: 14,
     paddingVertical: 11,
-    marginBottom: 20,
+    marginBottom: 24,
     gap: 10,
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 1 },
@@ -364,8 +364,8 @@ const styles = StyleSheet.create({
   // Featured cards
   cardGrid: {
     paddingHorizontal: 24,
-    gap: 12,
-    marginBottom: 28,
+    gap: 14,
+    marginBottom: 32,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
   // Categories section header
   sectionHeader: {
     paddingHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 20,
     gap: 10,
   },
   sectionTitle: {
@@ -455,8 +455,8 @@ const styles = StyleSheet.create({
   categoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
     gap: 14,
   },
   categoryIconBox: {
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   rowDivider: {
     height: 1,
     backgroundColor: '#E8E0D5',
-    marginHorizontal: 18,
+    marginHorizontal: 20,
   },
 
   // Bottom nav

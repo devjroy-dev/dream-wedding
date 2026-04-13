@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 24,
-    marginBottom: 20,
+    marginBottom: 24,
   },
   headerLeft: {
     gap: 4,
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
   // Filter pills
   filterScroll: {
     maxHeight: 44,
-    marginBottom: 16,
+    marginBottom: 20,
   },
   filterContent: {
     paddingHorizontal: 24,
@@ -621,8 +621,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 16,
+    marginBottom: 20,
+    padding: 18,
     backgroundColor: '#FFF8EC',
     borderRadius: 12,
     borderWidth: 1,
