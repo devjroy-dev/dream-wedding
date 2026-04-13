@@ -262,6 +262,7 @@ export default function VendorDashboard() {
 
   // Form states
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{type:string, id:string, name:string} | null>(null);
   const [showContractForm, setShowContractForm] = useState(false);
   const [showClientForm, setShowClientForm] = useState(false);
   const [showTeamForm, setShowTeamForm] = useState(false);
@@ -358,6 +359,37 @@ export default function VendorDashboard() {
       if (activeTab === 'tax') loadTDS();
     }
   }, [activeTab, vendorData]);
+
+  const handleDelete = async (type:string, id:string) => {
+    const endpoints: Record<string, string> = {
+      invoice: 'invoices',
+      contract: 'contracts',
+      client: 'vendor-clients',
+      expense: 'expenses',
+      payment: 'payment-schedules',
+      team: 'team',
+      tds: 'tds',
+    };
+    const endpoint = endpoints[type];
+    if (!endpoint) return;
+    try {
+      const res = await fetch(`${API}/${endpoint}/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Deleted successfully');
+        setConfirmDelete(null);
+        if (type === 'invoice') loadInvoices();
+        if (type === 'contract') loadContracts();
+        if (type === 'client') loadClients();
+        if (type === 'expense') loadExpenses();
+        if (type === 'payment') loadPayments();
+        if (type === 'team') loadTeam();
+        if (type === 'tds') loadTDS();
+      } else {
+        toast.error('Could not delete. Try again.');
+      }
+    } catch (e) { toast.error('Could not delete. Try again.'); }
+  };
 
   const loadInitialData = async () => {
     try {
@@ -1436,6 +1468,9 @@ export default function VendorDashboard() {
                       >
                         {inv.status === 'paid' ? '✓ Paid' : 'Mark Paid'}
                       </button>
+                      <button onClick={() => setConfirmDelete({ type: 'invoice', id: inv.id, name: `Invoice ${inv.invoice_number}` })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Delete">
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                 ))
@@ -2038,6 +2073,9 @@ export default function VendorDashboard() {
                           }}>
                           {client.invited ? 'Invited ✓' : 'Send Invite'}
                         </a>
+                        <button onClick={() => setConfirmDelete({ type: 'client', id: client.id, name: client.name })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: '4px' }} title="Delete">
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </div>
                     {editingNoteId === client.id ? (
@@ -2981,6 +3019,19 @@ export default function VendorDashboard() {
             </div>
           </div>
         )}
+      {/* Delete Confirmation Dialog */}
+      {confirmDelete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: '12px', padding: '32px', maxWidth: '400px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 600, color: 'var(--dark)', marginBottom: '8px' }}>Delete {confirmDelete.name}?</div>
+            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', marginBottom: '24px', lineHeight: 1.6 }}>This action cannot be undone.</div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDelete(null)} style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)', background: '#F3F4F6', border: 'none', borderRadius: '6px', padding: '10px 20px', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => handleDelete(confirmDelete.type, confirmDelete.id)} style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: '#fff', background: '#DC2626', border: 'none', borderRadius: '6px', padding: '10px 20px', cursor: 'pointer' }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Toast notifications */}
       <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {toasts.map(t => (
