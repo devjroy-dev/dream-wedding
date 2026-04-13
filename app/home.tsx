@@ -17,6 +17,7 @@ import {
   DMSans_500Medium,
 } from '@expo-google-fonts/dm-sans';
 import BottomNav from '../components/BottomNav';
+import { registerForPushNotifications, savePushToken } from '../services/notifications';
 
 const { width } = Dimensions.get('window');
 const CARD_SIZE = (width - 62) / 2;
@@ -101,6 +102,10 @@ export default function HomeScreen() {
       if (session) {
         const parsed = JSON.parse(session);
         if (parsed.name) setUserName(parsed.name.split(' ')[0]);
+        // Register push token
+        registerForPushNotifications().then(token => {
+          if (token && parsed.userId) savePushToken(token, parsed.userId);
+        });
         if (parsed.wedding_date) {
           const days = Math.ceil(
             (new Date(parsed.wedding_date).getTime() - Date.now()) /

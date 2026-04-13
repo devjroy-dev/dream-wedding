@@ -1489,6 +1489,173 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   }
 });
 
+
+// ==================
+// PUSH NOTIFICATIONS — Expo Push API
+// ==================
+
+// Store vendor push tokens
+app.post('/api/vendors/push-token', async (req, res) => {
+  try {
+    const { vendorId, token, platform } = req.body;
+    const { data, error } = await supabase
+      .from('vendors')
+      .update({ push_token: token, push_platform: platform })
+      .eq('id', vendorId)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send push notification helper
+async function sendPushNotification(expoPushToken, title, body, data = {}) {
+  if (!expoPushToken) return;
+  try {
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: expoPushToken,
+        sound: 'default',
+        title,
+        body,
+        data,
+      }),
+    });
+  } catch (e) {
+    console.log('Push notification error:', e);
+  }
+}
+
+// Notify vendor on new enquiry
+app.post('/api/notify/new-enquiry', async (req, res) => {
+  try {
+    const { vendorId, coupleName, category } = req.body;
+    const { data: vendor } = await supabase
+      .from('vendors')
+      .select('push_token, name')
+      .eq('id', vendorId)
+      .single();
+    if (vendor?.push_token) {
+      await sendPushNotification(
+        vendor.push_token,
+        'New Enquiry',
+        coupleName + ' is interested in your ' + (category || 'services'),
+        { type: 'new_enquiry', vendorId }
+      );
+    }
+    // Also save to notifications table
+    await supabase.from('notifications').insert([{
+      user_id: vendorId,
+      title: 'New Enquiry',
+      message: coupleName + ' is interested in your ' + (category || 'services'),
+      type: 'enquiry',
+      read: false,
+    }]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Notify couple when vendor replies
+app.post('/api/notify/vendor-reply', async (req, res) => {
+  try {
+    const { userId, vendorName } = req.body;
+    const { data: user } = await supabase
+      .from('users')
+      .select('push_token')
+      .eq('id', userId)
+      .single();
+    if (user?.push_token) {
+      await sendPushNotification(
+        user.push_token,
+        'Vendor Reply',
+        vendorName + ' has responded to your enquiry',
+        { type: 'vendor_reply', userId }
+      );
+    }
+    await supabase.from('notifications').insert([{
+      user_id: userId,
+      title: 'Vendor Reply',
+      message: vendorName + ' has responded to your enquiry',
+      type: 'message',
+      read: false,
+    }]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Notify vendor on payment received
+app.post('/api/notify/payment-received', async (req, res) => {
+  try {
+    const { vendorId, coupleName, amount } = req.body;
+    const { data: vendor } = await supabase
+      .from('vendors')
+      .select('push_token')
+      .eq('id', vendorId)
+      .single();
+    if (vendor?.push_token) {
+      await sendPushNotification(
+        vendor.push_token,
+        'Payment Received',
+        'Rs.' + (amount || 0).toLocaleString('en-IN') + ' received from ' + coupleName,
+        { type: 'payment', vendorId }
+      );
+    }
+    await supabase.from('notifications').insert([{
+      user_id: vendorId,
+      title: 'Payment Received',
+      message: 'Rs.' + (amount || 0).toLocaleString('en-IN') + ' received from ' + coupleName,
+      type: 'payment',
+      read: false,
+    }]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Notify couple on booking confirmation
+app.post('/api/notify/booking-confirmed', async (req, res) => {
+  try {
+    const { userId, vendorName, eventDate } = req.body;
+    const { data: user } = await supabase
+      .from('users')
+      .select('push_token')
+      .eq('id', userId)
+      .single();
+    if (user?.push_token) {
+      await sendPushNotification(
+        user.push_token,
+        'Booking Confirmed',
+        vendorName + ' has confirmed your booking' + (eventDate ? ' for ' + eventDate : ''),
+        { type: 'booking_confirmed', userId }
+      );
+    }
+    await supabase.from('notifications').insert([{
+      user_id: userId,
+      title: 'Booking Confirmed',
+      message: vendorName + ' has confirmed your booking' + (eventDate ? ' for ' + eventDate : ''),
+      type: 'booking',
+      read: false,
+    }]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);

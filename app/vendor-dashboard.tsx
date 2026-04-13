@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { blockDate, getBenchmark, getBlockedDates, getInvoices, getLeads, getVendorBookings, unblockDate } from '../services/api';
 import { uploadImage } from '../services/cloudinary';
+import { registerForPushNotifications } from '../services/notifications';
 import { generateInvoiceNumber, generateInvoicePDF } from '../services/invoice';
 
 const { width } = Dimensions.get('window');
