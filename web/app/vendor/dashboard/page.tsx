@@ -1125,73 +1125,150 @@ export default function VendorDashboard() {
         {activeTab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-            {/* Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
-              <StatCard num="2,847" label="Spotlight Score" />
-              <StatCard num={`Rs.${(totalRevenue / 100000).toFixed(1)}L`} label="Total Revenue" />
-              <StatCard num={String(confirmedBookings.length)} label="Confirmed Bookings" />
-              <StatCard num={String(clients.length)} label="Clients" />
+            {/* Greeting */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {vendorData?.name?.split(' ')[0] || 'Dev'}
+                </div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>
+                  {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </div>
+              </div>
+              <button onClick={() => setIsLive(!isLive)} style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                background: isLive ? 'rgba(22,163,74,0.08)' : '#F9FAFB',
+                border: `1px solid ${isLive ? 'rgba(22,163,74,0.2)' : 'var(--card-border)'}`,
+                borderRadius: '6px', padding: '8px 14px', cursor: 'pointer',
+              }}>
+                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#16A34A' : '#9CA3AF' }} />
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, color: isLive ? '#16A34A' : '#9CA3AF' }}>
+                  {isLive ? 'Live on Platform' : 'Hidden'}
+                </span>
+              </button>
             </div>
 
-            {/* Spotlight */}
-            <div className="card-dark" style={{ padding: '28px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Star size={14} color="var(--gold)" />
-                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--cream)' }}>
-                    Spotlight Score
-                  </span>
+            {/* Key metrics */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+              {[
+                { label: 'Total Revenue', value: `Rs.${(totalRevenue/100000).toFixed(1)}L`, sub: 'All time invoiced' },
+                { label: 'Outstanding', value: `Rs.${paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).reduce((sum:number, i:any) => sum + parseInt(i.amount||0), 0).toLocaleString('en-IN')}`, sub: 'Unpaid instalments' },
+                { label: 'Active Clients', value: String(clients.filter((c:any) => c.status === 'upcoming').length), sub: 'Upcoming weddings' },
+                { label: 'Pending Enquiries', value: String(inquiries.filter((i:any) => i.status === 'pending').length), sub: 'Awaiting response' },
+              ].map(stat => (
+                <div key={stat.label} className="card" style={{ padding: '20px 24px' }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '26px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>{stat.sub}</div>
                 </div>
-                <span className="badge-gold">#3 This Month</span>
-              </div>
-              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '56px', fontWeight: 300, color: 'var(--gold)', marginBottom: '20px', lineHeight: 1 }}>
-                2,847
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1px', background: 'rgba(255,255,255,0.06)', borderRadius: '8px', overflow: 'hidden' }}>
-                {[
-                  { num: '140', label: 'Saves × 3' },
-                  { num: '57', label: 'Enquiries × 5' },
-                  { num: '12', label: 'Bookings × 10' },
-                ].map(s => (
-                  <div key={s.label} style={{ padding: '16px', textAlign: 'center', background: 'rgba(255,255,255,0.02)' }}>
-                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', fontWeight: 300, color: 'var(--cream)', marginBottom: '4px' }}>{s.num}</div>
-                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 300, color: 'var(--grey)', letterSpacing: '0.5px' }}>{s.label}</div>
+              ))}
+            </div>
+
+            {/* Two column — upcoming events + outstanding payments */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+              {/* Upcoming events */}
+              <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Upcoming Weddings</span>
+                  <button onClick={() => setActiveTab('calendar')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>View calendar →</button>
+                </div>
+                {clients.filter((c:any) => c.status === 'upcoming').slice(0, 4).map((client:any, idx:number, arr:any[]) => (
+                  <div key={client.id} style={{ padding: '14px 20px', borderBottom: idx < arr.length - 1 ? '1px solid var(--card-border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{client.name}</div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{client.wedding_date}</div>
+                    </div>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: '#16A34A', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(22,163,74,0.15)' }}>Upcoming</span>
                   </div>
                 ))}
+                {clients.filter((c:any) => c.status === 'upcoming').length === 0 && (
+                  <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>No upcoming weddings</div>
+                    <button onClick={() => setActiveTab('clients')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-primary)', background: 'none', border: 'none', cursor: 'pointer', marginTop: '8px', textDecoration: 'underline' }}>Add a client →</button>
+                  </div>
+                )}
               </div>
-              <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 300, color: 'rgba(140,123,110,0.5)', marginTop: '14px', fontStyle: 'italic' }}>
-                Refreshes 1st of every month. Earned, not bought.
-              </p>
+
+              {/* Outstanding payments */}
+              <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Outstanding Payments</span>
+                  <button onClick={() => setActiveTab('outstanding')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>View all →</button>
+                </div>
+                {paymentSchedules.flatMap((s:any) =>
+                  (s.instalments||[]).filter((i:any) => !i.paid).map((inst:any, idx:number) => ({
+                    client: s.client_name, phone: s.client_phone, label: inst.label, amount: parseInt(inst.amount||0), due: inst.due_date,
+                    overdue: inst.due_date && new Date(inst.due_date) < new Date()
+                  }))
+                ).slice(0, 4).map((item:any, idx:number, arr:any[]) => (
+                  <div key={idx} style={{ padding: '14px 20px', borderBottom: idx < arr.length - 1 ? '1px solid var(--card-border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{item.client}</div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{item.label} · Due {item.due}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: item.overdue ? '#DC2626' : 'var(--text-primary)' }}>Rs.{item.amount.toLocaleString('en-IN')}</div>
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: item.overdue ? '#DC2626' : '#D97706', background: item.overdue ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.08)', padding: '2px 6px', borderRadius: '3px' }}>{item.overdue ? 'OVERDUE' : 'DUE'}</span>
+                    </div>
+                  </div>
+                ))}
+                {paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).length === 0 && (
+                  <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>All payments received</div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Quick actions */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
-              {[
-                { label: 'Create Invoice', icon: FileText, tab: 'invoices' },
-                { label: 'Generate Contract', icon: FileText, tab: 'contracts' },
-                { label: 'Add Client', icon: Users, tab: 'clients' },
-                { label: 'Block Date', icon: Calendar, tab: 'calendar' },
-                { label: 'Add Expense', icon: MinusCircle, tab: 'expenses' },
-                { label: 'Edit Profile', icon: Edit2, tab: 'settings' },
-              ].map(a => {
-                const Icon = a.icon;
-                return (
-                  <button key={a.label} onClick={() => setActiveTab(a.tab)} style={{
-                    ...greyBtn,
-                    justifyContent: 'center',
-                    padding: '16px',
-                    width: '100%',
-                    borderRadius: '10px',
+            {/* Quick actions — minimal text links */}
+            <div className="card" style={{ padding: '16px 20px' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '14px' }}>Quick Actions</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'New Invoice', tab: 'invoices' },
+                  { label: 'New Contract', tab: 'contracts' },
+                  { label: 'Add Client', tab: 'clients' },
+                  { label: 'Log Expense', tab: 'expenses' },
+                  { label: 'Block Date', tab: 'calendar' },
+                  { label: 'Generate Web Login Code', tab: 'overview' },
+                ].map(a => (
+                  <button key={a.label} onClick={() => a.tab === 'overview' ? setShowCodeModal(true) : setActiveTab(a.tab)} style={{
+                    fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
+                    color: 'var(--text-secondary)', background: '#F9FAFB',
+                    border: '1px solid var(--card-border)', borderRadius: '6px',
+                    padding: '8px 14px', cursor: 'pointer', transition: 'all 0.15s',
                   }}>
-                    <Icon size={14} />
-                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px' }}>{a.label}</span>
+                    {a.label}
                   </button>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+
+            {/* Spotlight Score — small, at bottom */}
+            <div className="card" style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Star size={13} color="var(--gold)" />
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Spotlight Score</span>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>2,847</span>
+                  <span className="badge-gold">#3 This Month</span>
+                </div>
+                <div style={{ display: 'flex', gap: '20px' }}>
+                  {[{ n: '140', l: 'Saves' }, { n: '57', l: 'Enquiries' }, { n: '12', l: 'Bookings' }].map(s => (
+                    <div key={s.l} style={{ textAlign: 'center' }}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.n}</div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>Refreshes 1st of every month. Earned, not bought.</div>
             </div>
 
           </div>
         )}
+
 
         {/* ════ INVOICES ════ */}
         {activeTab === 'invoices' && (
