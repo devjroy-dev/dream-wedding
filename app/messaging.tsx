@@ -4,6 +4,7 @@ import {
   Dimensions, ScrollView, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { joinConversation, sendSocketMessage, onReceiveMessage, offReceiveMessage } from '../services/socket';
 import { getMessages, getUserBookings } from '../services/api';
@@ -85,7 +86,11 @@ export default function MessagingScreen() {
     onReceiveMessage((msg) => {
       setMessages(prev => [...prev, msg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-    });
+      quickReplyScroll: { maxHeight: 44, borderTopWidth: 1, borderTopColor: '#E8E0D5' },
+  quickReplyContent: { paddingHorizontal: 16, paddingVertical: 8, gap: 8, alignItems: 'center' },
+  quickReplyChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50, borderWidth: 1, borderColor: '#E8D9B5', backgroundColor: '#FFF8EC' },
+  quickReplyText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_400Regular' },
+});
 
     return () => offReceiveMessage();
   }, [activeConversation, userId]);
@@ -96,6 +101,12 @@ export default function MessagingScreen() {
     setNewMessage('');
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
+
+  const QUICK_REPLIES = [
+    { label: 'Availability', msg: 'Hi! Thank you for reaching out. Could you please confirm your wedding date and venue city so I can check my availability?' },
+    { label: 'Packages', msg: 'Thank you for your interest! I have multiple packages. I would love to set up a quick call to understand your vision. When are you free this week?' },
+    { label: 'Confirm', msg: 'Wonderful — I am available on your date! To secure your booking, the next step is confirming through the app. Looking forward to it!' },
+  ];
 
   if (activeConversation) {
     return (
@@ -139,6 +150,19 @@ export default function MessagingScreen() {
                 {new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </Text>
             </View>
+          ))}
+        </ScrollView>
+
+        {/* Quick reply templates */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickReplyScroll} contentContainerStyle={styles.quickReplyContent}>
+          {QUICK_REPLIES.map((qr, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={styles.quickReplyChip}
+              onPress={() => setNewMessage(qr.msg)}
+            >
+              <Text style={styles.quickReplyText}>{qr.label}</Text>
+            </TouchableOpacity>
           ))}
         </ScrollView>
 
