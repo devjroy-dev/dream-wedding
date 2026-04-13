@@ -435,7 +435,7 @@ export default function MoodboardScreen() {
           { label: 'Moodboard', icon: 'heart',          route: null           },
           { label: 'Messages',  icon: 'message-circle', route: '/messaging'   },
           { label: 'Planner',   icon: 'calendar',       route: '/bts-planner' },
-          { label: 'Spotlight', icon: 'star',           route: '/spotlight'   },
+          { label: 'Profile',   icon: 'user',           route: '/profile'     },
         ].map((item, index) => {
           const isActive = index === 1; // Moodboard is active
           return (

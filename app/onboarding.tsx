@@ -34,12 +34,12 @@ const FUNCTIONS: { id: string; label: string; icon: keyof typeof Feather.glyphMa
 ];
 
 const BUDGETS = [
+  { id: '500000',   label: '₹5L – ₹10L',   sub: 'Intimate celebration' },
+  { id: '1000000',  label: '₹10L – ₹25L',  sub: 'Classic wedding'      },
   { id: '2500000',  label: '₹25L – ₹50L',  sub: 'Premium celebration'  },
   { id: '5000000',  label: '₹50L – ₹1Cr',  sub: 'Grand affair'         },
-  { id: '1000000',  label: '₹10L – ₹25L',  sub: 'Classic wedding'      },
   { id: '10000000', label: '₹1Cr – ₹5Cr',  sub: 'Luxury & destination' },
   { id: '50000000', label: '₹5Cr+',         sub: 'Ultra luxury'         },
-  { id: '500000',   label: '₹5L – ₹10L',   sub: 'Intimate celebration' },
 ];
 
 const QUARTERS = [

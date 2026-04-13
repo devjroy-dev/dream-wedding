@@ -253,7 +253,7 @@ export default function HomeScreen() {
           { label: 'Moodboard', icon: 'heart',          route: '/moodboard'   },
           { label: 'Messages',  icon: 'message-circle', route: '/messaging'   },
           { label: 'Planner',   icon: 'calendar',       route: '/bts-planner' },
-          { label: 'Spotlight', icon: 'star',           route: '/spotlight'   },
+          { label: 'Profile',   icon: 'user',           route: '/profile'     },
         ].map((item, index) => {
           const isActive = index === 0;
           return (

@@ -350,7 +350,7 @@ export default function SpotlightScreen() {
           { label: 'Moodboard', icon: 'heart',          route: '/moodboard'   },
           { label: 'Messages',  icon: 'message-circle', route: '/messaging'   },
           { label: 'Planner',   icon: 'calendar',       route: '/bts-planner' },
-          { label: 'Spotlight', icon: 'star',           route: null           },
+          { label: 'Profile',   icon: 'user',           route: '/profile'     },
         ].map((item, index) => {
           const isActive = index === 4;
           return (
