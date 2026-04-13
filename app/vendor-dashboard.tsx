@@ -174,6 +174,12 @@ export default function VendorDashboardScreen() {
   const [newClientName, setNewClientName] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
   const [newClientDate, setNewClientDate] = useState('');
+  const [newClientEmail, setNewClientEmail] = useState('');
+  const [newClientCity, setNewClientCity] = useState('');
+  const [newClientVenue, setNewClientVenue] = useState('');
+  const [newClientPackage, setNewClientPackage] = useState('');
+  const [newClientAmount, setNewClientAmount] = useState('');
+  const [newClientNotes, setNewClientNotes] = useState('');
   const [clientsLoading, setClientsLoading] = useState(false);
 
   // Promo state
@@ -994,16 +1000,23 @@ export default function VendorDashboardScreen() {
           name: newClientName,
           phone: newClientPhone,
           wedding_date: newClientDate,
+          email: newClientEmail || undefined,
+          city: newClientCity || undefined,
+          venue: newClientVenue || undefined,
+          package_name: newClientPackage || undefined,
+          total_amount: newClientAmount ? parseInt(newClientAmount) : undefined,
+          notes: newClientNotes || undefined,
           status: 'upcoming',
           invited: false,
+          source: 'app',
         }),
       });
       const data = await res.json();
       if (data.success) {
         setClients(prev => [data.data, ...prev]);
-        setNewClientName('');
-        setNewClientPhone('');
-        setNewClientDate('');
+        setNewClientName(''); setNewClientPhone(''); setNewClientDate('');
+        setNewClientEmail(''); setNewClientCity(''); setNewClientVenue('');
+        setNewClientPackage(''); setNewClientAmount(''); setNewClientNotes('');
         setShowAddClient(false);
         Alert.alert('Client Added!', `${newClientName} added. Tap Send Invite to invite them via WhatsApp.`);
       }
@@ -1204,6 +1217,12 @@ export default function VendorDashboardScreen() {
             <TextInput style={styles.modalInput} placeholder="Couple names (e.g. Priya & Rahul)" placeholderTextColor="#8C7B6E" value={newClientName} onChangeText={setNewClientName} />
             <TextInput style={styles.modalInput} placeholder="Phone number (10 digits)" placeholderTextColor="#8C7B6E" value={newClientPhone} onChangeText={setNewClientPhone} keyboardType="phone-pad" maxLength={10} />
             <TextInput style={styles.modalInput} placeholder="Wedding date (e.g. March 15, 2026)" placeholderTextColor="#8C7B6E" value={newClientDate} onChangeText={setNewClientDate} />
+            <TextInput style={styles.modalInput} placeholder="Email (optional)" placeholderTextColor="#8C7B6E" value={newClientEmail} onChangeText={setNewClientEmail} keyboardType="email-address" autoCapitalize="none" />
+            <TextInput style={styles.modalInput} placeholder="Wedding city (optional)" placeholderTextColor="#8C7B6E" value={newClientCity} onChangeText={setNewClientCity} />
+            <TextInput style={styles.modalInput} placeholder="Venue (optional)" placeholderTextColor="#8C7B6E" value={newClientVenue} onChangeText={setNewClientVenue} />
+            <TextInput style={styles.modalInput} placeholder="Package selected (optional)" placeholderTextColor="#8C7B6E" value={newClientPackage} onChangeText={setNewClientPackage} />
+            <TextInput style={styles.modalInput} placeholder="Total amount (optional)" placeholderTextColor="#8C7B6E" value={newClientAmount} onChangeText={setNewClientAmount} keyboardType="numeric" />
+            <TextInput style={styles.modalInput} placeholder="Notes (optional)" placeholderTextColor="#8C7B6E" value={newClientNotes} onChangeText={setNewClientNotes} multiline />
             <TouchableOpacity style={styles.modalBtn} onPress={handleAddClient}>
               <Text style={styles.modalBtnText}>ADD CLIENT</Text>
             </TouchableOpacity>
@@ -1821,7 +1840,10 @@ export default function VendorDashboardScreen() {
                     <View style={styles.clientInfo}>
                       <Text style={styles.clientName}>{client.name}</Text>
                       <Text style={styles.clientPhone}>{client.phone}</Text>
-                      <Text style={styles.clientDate}>{client.wedding_date}</Text>
+                      <Text style={styles.clientDate}>{client.wedding_date}{client.city ? ` · ${client.city}` : ''}</Text>
+                      {client.venue ? <Text style={styles.clientDate}>{client.venue}</Text> : null}
+                      {client.package_name ? <Text style={styles.clientDate}>{client.package_name}{client.total_amount ? ` · Rs.${client.total_amount.toLocaleString('en-IN')}` : ''}</Text> : null}
+                      {client.notes ? <Text style={[styles.clientDate, { fontStyle: 'italic' }]} numberOfLines={1}>{client.notes}</Text> : null}
                     </View>
                     <TouchableOpacity
                       style={[styles.whatsappBtn, client.invited && styles.whatsappBtnDone]}
