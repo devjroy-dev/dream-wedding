@@ -276,7 +276,9 @@ export default function VendorDashboard() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API}/vendors/4f78ee18-5728-4b80-a4db-f362ed117e4f`);
+      const session = JSON.parse(localStorage.getItem('vendor_session') || '{}');
+      const vendorId = session.vendorId || '4f78ee18-5728-4b80-a4db-f362ed117e4f';
+      const res = await fetch(`${API}/vendors/${vendorId}`);
       const data = await res.json();
       if (data.success && data.data) {
         const vendor = data.data;
