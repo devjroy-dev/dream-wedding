@@ -2722,8 +2722,7 @@ export default function VendorDashboard() {
                       onClick={() => {
                         const headers = item.fields.join(',');
                         const rows = item.data.map((d: any) => item.fields.map(f => `"${d[f] || ''}"`).join(','));
-                        const csv = [headers, ...rows].join('
-');
+                        const csv = [headers, ...rows].join('\n');
                         const blob = new Blob([csv], { type: 'text/csv' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
