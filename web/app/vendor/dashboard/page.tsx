@@ -370,6 +370,9 @@ export default function VendorDashboard() {
         setEditVibes(vendor.vibe_tags || []);
         loadBookings(vendor.id);
         loadInvoices(vendor.id);
+        loadClients(vendor.id);
+        loadPayments(vendor.id);
+        loadExpenses(vendor.id);
       }
     } catch (e) {} finally { setLoading(false); }
   };
@@ -410,9 +413,11 @@ export default function VendorDashboard() {
     } catch (e) {}
   };
 
-  const loadClients = async () => {
+  const loadClients = async (id?: string) => {
+    const vid = id || vendorData?.id;
+    if (!vid) return;
     try {
-      const res = await fetch(`${API}/vendor-clients/${vendorData.id}`);
+      const res = await fetch(`${API}/vendor-clients/${vid}`);
       const data = await res.json();
       if (data.success) setClients(data.data || []);
     } catch (e) {}
@@ -426,17 +431,21 @@ export default function VendorDashboard() {
     } catch (e) {}
   };
 
-  const loadExpenses = async () => {
+  const loadExpenses = async (id?: string) => {
+    const vid = id || vendorData?.id;
+    if (!vid) return;
     try {
-      const res = await fetch(`${API}/expenses/${vendorData.id}`);
+      const res = await fetch(`${API}/expenses/${vid}`);
       const data = await res.json();
       if (data.success) setExpenses(data.data || []);
     } catch (e) {}
   };
 
-  const loadPayments = async () => {
+  const loadPayments = async (id?: string) => {
+    const vid = id || vendorData?.id;
+    if (!vid) return;
     try {
-      const res = await fetch(`${API}/payment-schedules/${vendorData.id}`);
+      const res = await fetch(`${API}/payment-schedules/${vid}`);
       const data = await res.json();
       if (data.success) setPaymentSchedules(data.data || []);
     } catch (e) {}
