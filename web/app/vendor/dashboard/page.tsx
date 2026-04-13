@@ -1161,13 +1161,13 @@ export default function VendorDashboard() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
               {[
                 { label: 'Total Revenue', value: `Rs.${(totalRevenue/100000).toFixed(1)}L`, sub: 'All time invoiced' },
-                { label: 'Outstanding', value: `Rs.${paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).reduce((sum:number, i:any) => sum + parseInt(i.amount||0), 0).toLocaleString('en-IN')}`, sub: 'Unpaid instalments' },
+                { label: 'Outstanding', value: `Rs.${(paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).reduce((sum:number, i:any) => sum + parseInt(i.amount||0), 0)/100000).toFixed(1)}L`, sub: 'Unpaid instalments' },
                 { label: 'Active Clients', value: String(clients.filter((c:any) => c.status === 'upcoming').length), sub: 'Upcoming weddings' },
                 { label: 'Pending Enquiries', value: String(pendingBookings.filter((b:any) => b.status === 'pending').length), sub: 'Awaiting response' },
               ].map(stat => (
-                <div key={stat.label} className="card" style={{ padding: '20px 24px' }}>
+                <div key={stat.label} className="card" style={{ padding: '20px 24px', minHeight: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
-                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '26px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '28px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>{stat.sub}</div>
                 </div>
               ))}
