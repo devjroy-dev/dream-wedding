@@ -186,48 +186,48 @@ export default function VendorDashboard() {
   const [showEditProfile, setShowEditProfile] = useState(false);
 
   // Invoice form
-  const [invClient, setInvClient] = useState('');
-  const [invPhone, setInvPhone] = useState('');
-  const [invAmount, setInvAmount] = useState('');
-  const [invDesc, setInvDesc] = useState('');
+  const [invClient, setInvClient] = useState('Aisha & Kabir Malhotra');
+  const [invPhone, setInvPhone] = useState('9871234560');
+  const [invAmount, setInvAmount] = useState('300000');
+  const [invDesc, setInvDesc] = useState('Wedding Photography — 3 Day Coverage');
   const [invTDS, setInvTDS] = useState(false);
   const [invTDSByClient, setInvTDSByClient] = useState(false);
 
   // Contract form
-  const [conClient, setConClient] = useState('');
-  const [conPhone, setConPhone] = useState('');
+  const [conClient, setConClient] = useState('Aisha & Kabir Malhotra');
+  const [conPhone, setConPhone] = useState('9871234560');
   const [conEventType, setConEventType] = useState('Wedding');
-  const [conDate, setConDate] = useState('');
-  const [conVenue, setConVenue] = useState('');
-  const [conServices, setConServices] = useState('');
-  const [conDeliverables, setConDeliverables] = useState('');
-  const [conTotal, setConTotal] = useState('');
-  const [conAdvance, setConAdvance] = useState('');
+  const [conDate, setConDate] = useState('June 15, 2026');
+  const [conVenue, setConVenue] = useState('The Leela Palace, Delhi NCR');
+  const [conServices, setConServices] = useState('Full wedding photography — 2 days including Sangeet and Wedding. Candid + editorial style.');
+  const [conDeliverables, setConDeliverables] = useState('600+ edited photos, 2 highlight reels, online gallery within 45 days');
+  const [conTotal, setConTotal] = useState('300000');
+  const [conAdvance, setConAdvance] = useState('150000');
   const [conCancellation, setConCancellation] = useState('Token amount is non-refundable. Balance refundable if cancelled 30+ days before event.');
 
   // Client form
-  const [clientName, setClientName] = useState('');
-  const [clientPhone, setClientPhone] = useState('');
-  const [clientDate, setClientDate] = useState('');
+  const [clientName, setClientName] = useState('Zara & Ayaan Khan');
+  const [clientPhone, setClientPhone] = useState('9867543210');
+  const [clientDate, setClientDate] = useState('November 20, 2026');
   const [clientNotes, setClientNotes] = useState('');
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
 
   // Team form
-  const [memberName, setMemberName] = useState('');
-  const [memberPhone, setMemberPhone] = useState('');
-  const [memberRole, setMemberRole] = useState('');
+  const [memberName, setMemberName] = useState('Rahul Sharma');
+  const [memberPhone, setMemberPhone] = useState('9812345670');
+  const [memberRole, setMemberRole] = useState('Second Shooter');
 
   // Expense form
-  const [expDesc, setExpDesc] = useState('');
-  const [expAmount, setExpAmount] = useState('');
+  const [expDesc, setExpDesc] = useState('Travel to Jaipur for destination wedding');
+  const [expAmount, setExpAmount] = useState('18500');
   const [expCategory, setExpCategory] = useState('Travel');
-  const [expClient, setExpClient] = useState('');
+  const [expClient, setExpClient] = useState('Aisha & Kabir Malhotra');
 
   // Payment form
-  const [payClient, setPayClient] = useState('');
-  const [payPhone, setPayPhone] = useState('');
-  const [payTotal, setPayTotal] = useState('');
+  const [payClient, setPayClient] = useState('Aisha & Kabir Malhotra');
+  const [payPhone, setPayPhone] = useState('9871234560');
+  const [payTotal, setPayTotal] = useState('300000');
   const [payInstalments, setPayInstalments] = useState([
     { label: 'Token', amount: '', due_date: '', paid: false },
     { label: 'Advance', amount: '', due_date: '', paid: false },
@@ -235,10 +235,10 @@ export default function VendorDashboard() {
   ]);
 
   // TDS form
-  const [tdsAmount, setTdsAmount] = useState('');
-  const [tdsClient, setTdsClient] = useState('');
+  const [tdsAmount, setTdsAmount] = useState('250000');
+  const [tdsClient, setTdsClient] = useState('Meera & Dev Khanna');
   const [tdsBy, setTdsBy] = useState<'client' | 'self'>('client');
-  const [tdsChallan, setTdsChallan] = useState('');
+  const [tdsChallan, setTdsChallan] = useState('CHL2026042');
 
   // Profile edit
   const [editName, setEditName] = useState('');
