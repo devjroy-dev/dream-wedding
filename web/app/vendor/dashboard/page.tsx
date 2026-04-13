@@ -174,6 +174,69 @@ export default function VendorDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [comingSoonTab, setComingSoonTab] = useState<any>(null);
   const [vendorData, setVendorData] = useState<any>(null);
+  const [packages, setPackages] = useState<any[]>([
+    { id: '1', name: 'Silver', price: 80000, inclusions: ['1 day coverage', '300 edited photos', 'Online gallery'] },
+    { id: '2', name: 'Gold', price: 150000, inclusions: ['2 day coverage', '600 edited photos', 'Highlight reel', 'Online gallery'] },
+    { id: '3', name: 'Platinum', price: 300000, inclusions: ['3 day coverage', '1000+ edited photos', '2 highlight reels', 'Album', 'Online gallery'] },
+  ]);
+  const [newPkgName, setNewPkgName] = useState('');
+  const [newPkgPrice, setNewPkgPrice] = useState('');
+  const [newPkgInclusions, setNewPkgInclusions] = useState('');
+  const [cashEntries, setCashEntries] = useState<any[]>([]);
+  const [cashClient, setCashClient] = useState('Aisha & Kabir Malhotra');
+  const [cashAmount, setCashAmount] = useState('50000');
+  const [cashNote, setCashNote] = useState('Token payment received');
+  const [deliveryItems, setDeliveryItems] = useState<any[]>([
+    { id: '1', client: 'Priya & Rahul Sharma', stage: 'editing', stages: ['shoot_done', 'editing', 'first_cut', 'feedback', 'final_edit', 'delivered'] },
+    { id: '2', client: 'Ananya & Vikram Singh', stage: 'first_cut', stages: ['shoot_done', 'editing', 'first_cut', 'feedback', 'final_edit', 'delivered'] },
+    { id: '3', client: 'Sneha & Arjun Kapoor', stage: 'delivered', stages: ['shoot_done', 'editing', 'first_cut', 'feedback', 'final_edit', 'delivered'] },
+  ]);
+  const [checklists, setChecklists] = useState<any[]>([
+    { id: '1', client: 'Priya & Rahul Sharma', items: [
+      { text: 'Timeline call done', done: true },
+      { text: 'Shot list shared with client', done: true },
+      { text: 'Venue recce completed', done: false },
+      { text: 'Second shooter briefed', done: false },
+      { text: 'Equipment packed and checked', done: false },
+      { text: 'Outfit details confirmed with bride', done: true },
+      { text: 'Hotel/travel booked', done: false },
+    ]},
+    { id: '2', client: 'Ananya & Vikram Singh', items: [
+      { text: 'Timeline call done', done: true },
+      { text: 'Shot list shared with client', done: false },
+      { text: 'Venue recce completed', done: true },
+      { text: 'Second shooter briefed', done: false },
+      { text: 'Equipment packed and checked', done: false },
+      { text: 'Outfit details confirmed with bride', done: false },
+      { text: 'Hotel/travel booked', done: true },
+    ]},
+  ]);
+  const [runsheet, setRunsheet] = useState<any[]>([
+    { id: '1', time: '07:00 AM', task: 'Arrive at venue — setup and lighting check', assignee: 'Full team' },
+    { id: '2', time: '08:00 AM', task: 'Bridal prep begins — makeup and getting ready shots', assignee: 'Dev + Rahul' },
+    { id: '3', time: '10:30 AM', task: 'Baraat arrival — full team on ground', assignee: 'Full team' },
+    { id: '4', time: '12:00 PM', task: 'Jaimala ceremony', assignee: 'Dev' },
+    { id: '5', time: '01:00 PM', task: 'Pheras — continuous coverage, no breaks', assignee: 'Dev + Vikram' },
+    { id: '6', time: '03:00 PM', task: 'Family portraits — designated area', assignee: 'Rahul' },
+    { id: '7', time: '04:00 PM', task: 'Couple portraits — golden hour', assignee: 'Dev' },
+    { id: '8', time: '06:00 PM', task: 'Reception begins — candid coverage', assignee: 'Full team' },
+    { id: '9', time: '09:00 PM', task: 'Wrap up — backup all cards before leaving venue', assignee: 'Dev' },
+  ]);
+  const [newRunItem, setNewRunItem] = useState({ time: '', task: '', assignee: '' });
+  const [equipment, setEquipment] = useState<any[]>([
+    { id: '1', item: 'Camera Body 1 (Sony A7IV)', checked: true },
+    { id: '2', item: 'Camera Body 2 (Backup)', checked: true },
+    { id: '3', item: '24-70mm f/2.8 lens', checked: false },
+    { id: '4', item: '85mm f/1.4 portrait lens', checked: false },
+    { id: '5', item: 'Drone (DJI Mini 3 Pro)', checked: true },
+    { id: '6', item: 'Drone batteries x4', checked: false },
+    { id: '7', item: 'SD cards x8 (formatted)', checked: false },
+    { id: '8', item: 'Camera batteries x6 (charged)', checked: true },
+    { id: '9', item: 'External flash x2', checked: false },
+    { id: '10', item: 'Light stands x2', checked: false },
+    { id: '11', item: 'Laptop + hard drive for backup', checked: true },
+    { id: '12', item: 'Charger cables and adapters', checked: false },
+  ]);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(true);
 
