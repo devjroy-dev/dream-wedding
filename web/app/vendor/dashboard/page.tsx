@@ -2388,12 +2388,7 @@ export default function VendorDashboard() {
                       </div>
                     ))}
                   </div>
-                  <a href={`https://wa.me/?text=${encodeURIComponent(`*${pkg.name} Package — Rs.${parseInt(pkg.price).toLocaleString('en-IN')}*
-
-${pkg.inclusions.map((i: string) => `✓ ${i}`).join('
-')}
-
-— ${vendor?.name || 'The Dream Wedding'}`)}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '16px', background: '#25D36615', border: '1px solid #25D36640', borderRadius: '8px', padding: '10px', color: '#25D366', fontFamily: 'DM Sans, sans-serif', fontSize: '12px', fontWeight: 500, textDecoration: 'none' }}>
+                  <a href={'https://wa.me/?text=' + encodeURIComponent('*' + pkg.name + ' Package — Rs.' + parseInt(pkg.price).toLocaleString('en-IN') + '*\n\n' + pkg.inclusions.map((i) => String.fromCharCode(10003) + ' ' + i).join('\n') + '\n\n\u2014 ' + (vendor?.name || 'The Dream Wedding'))} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '16px', background: '#25D36615', border: '1px solid #25D36640', borderRadius: '8px', padding: '10px', color: '#25D366', fontFamily: 'DM Sans, sans-serif', fontSize: '12px', fontWeight: 500, textDecoration: 'none' }}>
                     Share via WhatsApp
                   </a>
                 </div>
