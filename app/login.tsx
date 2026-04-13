@@ -133,6 +133,15 @@ export default function LoginScreen() {
     }
   };
 
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ fontSize: 12, color: '#8C7B6E', letterSpacing: 14, textTransform: 'uppercase' }}>T H E</Text>
+        <Text style={{ fontSize: 42, color: '#2C2420', letterSpacing: 1, marginTop: 12 }}>Dream Wedding</Text>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
