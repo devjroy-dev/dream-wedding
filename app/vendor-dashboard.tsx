@@ -20,7 +20,7 @@ import {
 import { blockDate, getBenchmark, getBlockedDates, getInvoices, getLeads, getVendorBookings, unblockDate } from '../services/api';
 import { uploadImage } from '../services/cloudinary';
 import { registerForPushNotifications } from '../services/notifications';
-import { generateInvoiceNumber, generateInvoicePDF } from '../services/invoice';
+import { generateInvoiceNumber, generateInvoicePDF, generateContractPDF } from '../services/invoice';
 
 const { width } = Dimensions.get('window');
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
@@ -620,10 +620,26 @@ export default function VendorDashboardScreen() {
     }
   };
 
-  const handleShareContract = (contract: any) => {
-    const vendorName = vendorSession?.vendorName || 'Your Vendor';
-    const message = 'Hi ' + contract.client_name + '! Here are your contract details for ' + (contract.event_type || 'your event') + ' on ' + (contract.event_date || 'TBD') + '.\n\nTotal: Rs.' + (contract.total_amount || 0).toLocaleString('en-IN') + '\nAdvance: Rs.' + (contract.advance_amount || 0).toLocaleString('en-IN') + '\nVenue: ' + (contract.venue || 'TBD') + '\n\n— ' + vendorName + ', The Dream Wedding';
-    Linking.openURL('whatsapp://send?phone=91' + (contract.client_phone || '') + '&text=' + encodeURIComponent(message));
+  const handleShareContract = async (contract: any) => {
+    try {
+      await generateContractPDF({
+        vendorName: vendorSession?.vendorName || 'Vendor',
+        vendorPhone: vendorSession?.phone || '',
+        vendorCity: vendorSession?.city || '',
+        clientName: contract.client_name || 'Client',
+        clientPhone: contract.client_phone || '',
+        eventType: contract.event_type || 'Wedding',
+        eventDate: contract.event_date || 'TBD',
+        venue: contract.venue || '',
+        services: contract.services || '',
+        totalAmount: contract.total_amount || 0,
+        advanceAmount: contract.advance_amount || 0,
+        deliverables: contract.deliverables || '',
+        cancellationTerms: contract.cancellation_terms || 'Token amount is non-refundable. Balance refundable if cancelled 30+ days before event.',
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not generate contract PDF.');
+    }
   };
 
   const handleMarkInstalmentPaid = async (scheduleId: string, instalmentIndex: number) => {

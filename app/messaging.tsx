@@ -86,11 +86,7 @@ export default function MessagingScreen() {
     onReceiveMessage((msg) => {
       setMessages(prev => [...prev, msg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-      quickReplyScroll: { maxHeight: 44, borderTopWidth: 1, borderTopColor: '#E8E0D5' },
-  quickReplyContent: { paddingHorizontal: 16, paddingVertical: 8, gap: 8, alignItems: 'center' },
-  quickReplyChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50, borderWidth: 1, borderColor: '#E8D9B5', backgroundColor: '#FFF8EC' },
-  quickReplyText: { fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_400Regular' },
-});
+    });
 
     return () => offReceiveMessage();
   }, [activeConversation, userId]);
@@ -286,5 +282,9 @@ const styles = StyleSheet.create({
   convLastMessage: { fontSize: 13, color: '#8C7B6E' },
   unreadBadge: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
   unreadBadgeText: { fontSize: 10, color: '#C9A84C', fontWeight: '700' },
+  quickReplyScroll: { maxHeight: 44, borderTopWidth: 1, borderTopColor: '#E8E0D5' },
+  quickReplyContent: { paddingHorizontal: 16, paddingVertical: 8, gap: 8, alignItems: 'center' },
+  quickReplyChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 50, borderWidth: 1, borderColor: '#E8D9B5', backgroundColor: '#FFF8EC' },
+  quickReplyText: { fontSize: 12, color: '#C9A84C' },
   convDivider: { height: 1, backgroundColor: '#E8E0D5', marginHorizontal: 24 },
 });

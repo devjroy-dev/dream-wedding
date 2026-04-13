@@ -134,3 +134,203 @@ export const generateInvoiceNumber = (): string => {
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `DW${year}${month}${random}`;
 };
+
+
+export interface ContractData {
+  vendorName: string;
+  vendorPhone: string;
+  vendorCity: string;
+  clientName: string;
+  clientPhone: string;
+  eventType: string;
+  eventDate: string;
+  venue: string;
+  services: string;
+  totalAmount: number;
+  advanceAmount: number;
+  deliverables: string;
+  cancellationTerms: string;
+}
+
+export const generateContractPDF = async (data: ContractData): Promise<void> => {
+  const balance = data.totalAmount - data.advanceAmount;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #2C2420; background: #fff; font-size: 13px; line-height: 1.8; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; border-bottom: 2px solid #2C2420; padding-bottom: 20px; }
+        .brand { font-size: 22px; letter-spacing: 6px; color: #2C2420; font-weight: 300; }
+        .brand-sub { font-size: 10px; color: #8C7B6E; letter-spacing: 2px; margin-top: 4px; }
+        .doc-type { font-size: 11px; color: #C9A84C; letter-spacing: 2px; text-align: right; text-transform: uppercase; }
+        .doc-date { font-size: 12px; color: #8C7B6E; text-align: right; margin-top: 4px; }
+        h2 { font-size: 11px; color: #8C7B6E; letter-spacing: 2px; text-transform: uppercase; margin: 28px 0 12px; }
+        .parties { display: flex; justify-content: space-between; margin-bottom: 24px; }
+        .party { width: 45%; }
+        .party-label { font-size: 10px; color: #8C7B6E; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+        .party-name { font-size: 15px; font-weight: 500; color: #2C2420; }
+        .party-detail { font-size: 12px; color: #8C7B6E; }
+        .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F5F0E8; }
+        .detail-label { color: #8C7B6E; font-size: 12px; }
+        .detail-value { color: #2C2420; font-weight: 500; }
+        .amount-box { background: #FFF8EC; border: 1px solid #E8D9B5; border-radius: 8px; padding: 16px 20px; margin: 20px 0; display: flex; justify-content: space-between; }
+        .amount-item { text-align: center; }
+        .amount-num { font-size: 18px; color: #C9A84C; font-weight: 500; }
+        .amount-label { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+        .terms { background: #F5F0E8; border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 12px; color: #8C7B6E; line-height: 1.8; }
+        .signature { display: flex; justify-content: space-between; margin-top: 48px; }
+        .sig-box { width: 40%; border-top: 1px solid #E8E0D5; padding-top: 12px; }
+        .sig-label { font-size: 10px; color: #8C7B6E; letter-spacing: 1px; text-transform: uppercase; }
+        .sig-name { font-size: 14px; color: #2C2420; font-weight: 500; margin-top: 4px; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #E8E0D5; font-size: 10px; color: #8C7B6E; text-align: center; line-height: 1.8; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="brand">DREAMWEDDING</div>
+          <div class="brand-sub">INDIA'S PREMIUM WEDDING PLATFORM</div>
+        </div>
+        <div>
+          <div class="doc-type">Service Agreement</div>
+          <div class="doc-date">${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        </div>
+      </div>
+
+      <div class="parties">
+        <div class="party">
+          <div class="party-label">Service Provider</div>
+          <div class="party-name">${data.vendorName}</div>
+          <div class="party-detail">${data.vendorCity} · ${data.vendorPhone}</div>
+        </div>
+        <div class="party">
+          <div class="party-label">Client</div>
+          <div class="party-name">${data.clientName}</div>
+          <div class="party-detail">${data.clientPhone}</div>
+        </div>
+      </div>
+
+      <h2>Event Details</h2>
+      <div class="detail-row"><span class="detail-label">Event Type</span><span class="detail-value">${data.eventType}</span></div>
+      <div class="detail-row"><span class="detail-label">Event Date</span><span class="detail-value">${data.eventDate}</span></div>
+      <div class="detail-row"><span class="detail-label">Venue</span><span class="detail-value">${data.venue || 'To be confirmed'}</span></div>
+
+      <h2>Services</h2>
+      <p>${data.services || 'As discussed and agreed upon by both parties.'}</p>
+
+      <h2>Deliverables</h2>
+      <p>${data.deliverables || 'As per the selected package.'}</p>
+
+      <div class="amount-box">
+        <div class="amount-item">
+          <div class="amount-num">Rs.${data.totalAmount.toLocaleString('en-IN')}</div>
+          <div class="amount-label">Total Fee</div>
+        </div>
+        <div class="amount-item">
+          <div class="amount-num">Rs.${data.advanceAmount.toLocaleString('en-IN')}</div>
+          <div class="amount-label">Advance / Token</div>
+        </div>
+        <div class="amount-item">
+          <div class="amount-num">Rs.${balance.toLocaleString('en-IN')}</div>
+          <div class="amount-label">Balance Due</div>
+        </div>
+      </div>
+
+      <h2>Cancellation Policy</h2>
+      <div class="terms">${data.cancellationTerms || 'Token amount is non-refundable. Balance refundable if cancelled 30+ days before event.'}</div>
+
+      <div class="signature">
+        <div class="sig-box">
+          <div class="sig-label">Service Provider</div>
+          <div class="sig-name">${data.vendorName}</div>
+        </div>
+        <div class="sig-box">
+          <div class="sig-label">Client</div>
+          <div class="sig-name">${data.clientName}</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Generated by The Dream Wedding · thedreamwedding.in<br>
+        This is a digitally generated agreement facilitated through the platform.
+      </div>
+    </body>
+    </html>
+  `;
+
+  const { uri } = await Print.printToFileAsync({ html });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/pdf',
+    dialogTitle: 'Contract — ' + data.clientName,
+    UTI: 'com.adobe.pdf',
+  });
+};
+
+export interface PaymentReceiptData {
+  vendorName: string;
+  clientName: string;
+  amount: number;
+  label: string;
+  date: string;
+  totalDeal: number;
+}
+
+export const generatePaymentReceiptPDF = async (data: PaymentReceiptData): Promise<void> => {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #2C2420; background: #fff; }
+        .header { text-align: center; margin-bottom: 40px; border-bottom: 1px solid #E8E0D5; padding-bottom: 24px; }
+        .brand { font-size: 20px; letter-spacing: 6px; color: #2C2420; font-weight: 300; }
+        .brand-sub { font-size: 10px; color: #8C7B6E; letter-spacing: 2px; margin-top: 4px; }
+        .receipt-label { font-size: 12px; color: #C9A84C; letter-spacing: 2px; margin-top: 16px; text-transform: uppercase; }
+        .amount-big { font-size: 36px; color: #C9A84C; font-weight: 300; text-align: center; margin: 32px 0 8px; }
+        .amount-label { font-size: 12px; color: #8C7B6E; text-align: center; letter-spacing: 1px; text-transform: uppercase; }
+        .details { max-width: 400px; margin: 32px auto; }
+        .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F5F0E8; font-size: 14px; }
+        .row-label { color: #8C7B6E; }
+        .row-value { color: #2C2420; font-weight: 500; }
+        .check { text-align: center; margin: 32px 0; font-size: 48px; color: #4CAF50; }
+        .footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid #E8E0D5; font-size: 10px; color: #8C7B6E; text-align: center; line-height: 1.8; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="brand">DREAMWEDDING</div>
+        <div class="brand-sub">INDIA'S PREMIUM WEDDING PLATFORM</div>
+        <div class="receipt-label">Payment Receipt</div>
+      </div>
+
+      <div class="check">&#10003;</div>
+      <div class="amount-big">Rs.${data.amount.toLocaleString('en-IN')}</div>
+      <div class="amount-label">${data.label} Payment Received</div>
+
+      <div class="details">
+        <div class="row"><span class="row-label">Vendor</span><span class="row-value">${data.vendorName}</span></div>
+        <div class="row"><span class="row-label">Client</span><span class="row-value">${data.clientName}</span></div>
+        <div class="row"><span class="row-label">Payment Type</span><span class="row-value">${data.label}</span></div>
+        <div class="row"><span class="row-label">Date</span><span class="row-value">${data.date}</span></div>
+        <div class="row"><span class="row-label">Total Deal Value</span><span class="row-value">Rs.${data.totalDeal.toLocaleString('en-IN')}</span></div>
+      </div>
+
+      <div class="footer">
+        Generated by The Dream Wedding · thedreamwedding.in<br>
+        This is a computer generated receipt and does not require a physical signature.
+      </div>
+    </body>
+    </html>
+  `;
+
+  const { uri } = await Print.printToFileAsync({ html });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/pdf',
+    dialogTitle: 'Receipt — ' + data.clientName,
+    UTI: 'com.adobe.pdf',
+  });
+};
