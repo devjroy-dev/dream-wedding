@@ -1679,6 +1679,7 @@ export default function VendorDashboard() {
                       </div>
                     </div>
                   )}
+                  </div>
                 ))
               )}
             </div>
@@ -1962,12 +1963,12 @@ export default function VendorDashboard() {
                 </div>
               ) : (
                 expenses.map((exp, i) => (
-                  <div key={exp.id} style={{
+                  <div key={exp.id} style={{ borderBottom: i < expenses.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     padding: '16px 24px',
-                    borderBottom: i < expenses.length - 1 ? '1px solid var(--border)' : 'none',
                   }}>
                     <div>
                       <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, color: 'var(--dark)', marginBottom: '3px' }}>{exp.description}</div>
@@ -2001,6 +2002,7 @@ export default function VendorDashboard() {
                       </div>
                     </div>
                   )}
+                  </div>
                 ))
               )}
             </div>
@@ -2548,8 +2550,6 @@ export default function VendorDashboard() {
             </div>
           </div>
         )}
-
-      </main>
 
         {/* ════ OUTSTANDING PAYMENTS ════ */}
         {activeTab === 'outstanding' && (
@@ -3224,6 +3224,7 @@ export default function VendorDashboard() {
             </div>
           </div>
         )}
+      </main>
       {/* Delete Confirmation Dialog */}
       {confirmDelete && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
