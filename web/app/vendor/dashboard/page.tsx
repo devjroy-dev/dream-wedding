@@ -1154,7 +1154,7 @@ export default function VendorDashboard() {
                 { label: 'Total Revenue', value: `Rs.${(totalRevenue/100000).toFixed(1)}L`, sub: 'All time invoiced' },
                 { label: 'Outstanding', value: `Rs.${paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).reduce((sum:number, i:any) => sum + parseInt(i.amount||0), 0).toLocaleString('en-IN')}`, sub: 'Unpaid instalments' },
                 { label: 'Active Clients', value: String(clients.filter((c:any) => c.status === 'upcoming').length), sub: 'Upcoming weddings' },
-                { label: 'Pending Enquiries', value: String(inquiries.filter((i:any) => i.status === 'pending').length), sub: 'Awaiting response' },
+                { label: 'Pending Enquiries', value: String(pendingBookings.filter((b:any) => b.status === 'pending').length), sub: 'Awaiting response' },
               ].map(stat => (
                 <div key={stat.label} className="card" style={{ padding: '20px 24px' }}>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
