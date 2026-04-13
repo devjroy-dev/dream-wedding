@@ -491,7 +491,13 @@ export default function VendorDashboard() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const session = JSON.parse(localStorage.getItem('vendor_session') || '{}');
+      let session = {};
+      try { session = JSON.parse(localStorage.getItem('vendor_session') || '{}'); } catch(e) {}
+      const urlParams = new URLSearchParams(window.location.search);
+      const isDemo = urlParams.get('demo') === '1';
+      if (isDemo && !session.vendorId) {
+        session = { vendorId: '20792c76-b265-4063-a356-133ea1c6933b', vendorName: 'Dev Roy Productions', category: 'content-creators', city: 'Delhi NCR', plan: 'premium' };
+      }
       const vendorId = session.vendorId || '4f78ee18-5728-4b80-a4db-f362ed117e4f';
       const res = await fetch(`${API}/vendors/${vendorId}`);
       const data = await res.json();
