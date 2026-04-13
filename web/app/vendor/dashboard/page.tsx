@@ -17,28 +17,29 @@ const API = 'https://dream-wedding-production-89ae.up.railway.app/api';
 // ── Sidebar tabs ────────────────────────────────────────────────
 const ACTIVE_TABS = [
   { id: 'overview', label: 'Overview', icon: Grid },
-  { id: 'inquiries', label: 'Inquiries', icon: MessageCircle },
-  { id: 'calendar', label: 'Calendar', icon: Calendar },
-  { id: 'invoices', label: 'Invoices', icon: FileText },
-  { id: 'contracts', label: 'Contracts', icon: FileText },
-  { id: 'payments', label: 'Payment Schedules', icon: CreditCard },
-  { id: 'expenses', label: 'Expense Tracker', icon: MinusCircle },
-  { id: 'tax', label: 'Tax & Finance', icon: Percent },
   { id: 'clients', label: 'Clients', icon: Users },
-  { id: 'team', label: 'My Team', icon: Users },
+  { id: 'inquiries', label: 'Inquiries', icon: MessageCircle },
+  { id: 'invoices', label: 'Invoices', icon: FileText },
+  { id: 'payments', label: 'Payment Schedules', icon: CreditCard },
   { id: 'outstanding', label: 'Outstanding Payments', icon: DollarSign },
+  { id: 'calendar', label: 'Calendar', icon: Calendar },
+  { id: 'contracts', label: 'Contracts', icon: FileText },
+  { id: 'expenses', label: 'Expense Tracker', icon: MinusCircle },
   { id: 'profit', label: 'Profit per Booking', icon: Target },
+  { id: 'packages', label: 'Package Builder', icon: Package },
   { id: 'timeline', label: 'Client Timeline', icon: Activity },
   { id: 'delivery', label: 'Delivery Tracker', icon: Truck },
   { id: 'forecast', label: 'Revenue Forecast', icon: TrendingUp },
-  { id: 'packages', label: 'Package Builder', icon: Package },
-  { id: 'advancetax', label: 'Advance Tax', icon: BookOpen },
-  { id: 'cash', label: 'Cash Payments', icon: DollarSign },
-  { id: 'checklist', label: 'Pre-Wedding Checklist', icon: CheckSquare },
-  { id: 'availability', label: 'Availability Calendar', icon: Calendar },
   { id: 'runsheet', label: 'Day-of Runsheet', icon: List },
+  { id: 'checklist', label: 'Pre-Wedding Checklist', icon: CheckSquare },
   { id: 'equipment', label: 'Equipment Checklist', icon: Tool },
+  { id: 'cash', label: 'Cash Payments', icon: DollarSign },
+  { id: 'tax', label: 'Tax & Finance', icon: Percent },
+  { id: 'advancetax', label: 'Advance Tax', icon: BookOpen },
+  { id: 'referral', label: 'Referral Tracker', icon: Gift },
+  { id: 'availability', label: 'Availability Calendar', icon: Calendar },
   { id: 'csvimport', label: 'Import / Export', icon: Upload },
+  { id: 'team', label: 'My Team', icon: Users },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -2875,6 +2876,97 @@ export default function VendorDashboard() {
           </div>
         )}
 
+
+        {activeTab === 'referral' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div>
+              <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)', marginBottom: '4px' }}>Referral Tracker</h2>
+              <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)' }}>Every 10 past clients who join and send an enquiry earns you 10% off your subscription. Up to 50% off.</p>
+            </div>
+
+            {/* Discount progress */}
+            <div className="card" style={{ padding: '28px 32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '8px' }}>Current Discount Earned</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '40px', fontWeight: 700, color: 'var(--dark)', letterSpacing: '-1px' }}>10% <span style={{ fontSize: '16px', fontWeight: 400, color: 'var(--grey)' }}>off subscription</span></div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Next milestone</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)' }}>20% off at 20 clients</div>
+                </div>
+              </div>
+              {/* Progress bar */}
+              <div style={{ background: '#F3F4F6', borderRadius: '4px', height: '6px', marginBottom: '10px' }}>
+                <div style={{ background: 'var(--gold)', borderRadius: '4px', height: '6px', width: '20%' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>2 of 10 clients joined & sent enquiry</span>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>8 more to next tier</span>
+              </div>
+            </div>
+
+            {/* Milestone tiers */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+              {[
+                { clients: 10, discount: '10%', reached: true },
+                { clients: 20, discount: '20%', reached: false },
+                { clients: 30, discount: '30%', reached: false },
+                { clients: 40, discount: '40%', reached: false },
+                { clients: 50, discount: '50%', reached: false },
+              ].map(tier => (
+                <div key={tier.clients} className="card" style={{ padding: '20px', textAlign: 'center', border: tier.reached ? '1px solid var(--gold)' : '1px solid var(--card-border)', background: tier.reached ? 'rgba(201,168,76,0.04)' : '#fff' }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', fontWeight: 700, color: tier.reached ? 'var(--gold)' : 'var(--text-muted)', marginBottom: '4px' }}>{tier.discount}</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{tier.clients} clients</div>
+                  {tier.reached && <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 600, color: 'var(--gold)', marginTop: '6px', letterSpacing: '0.5px' }}>EARNED</div>}
+                </div>
+              ))}
+            </div>
+
+            {/* Past clients list */}
+            <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Past Clients Status</span>
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{clients.length} total clients</span>
+              </div>
+              {clients.length === 0 ? (
+                <div style={{ padding: '32px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px' }}>No clients added yet</div>
+                  <button onClick={() => setActiveTab('clients')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--dark)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Add your first client →</button>
+                </div>
+              ) : clients.map((client: any, idx: number) => (
+                <div key={client.id} style={{ padding: '14px 20px', borderBottom: idx < clients.length - 1 ? '1px solid var(--card-border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{client.name}</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{client.phone}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {client.invited ? (
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: '#16A34A', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: '4px' }}>Joined</span>
+                    ) : (
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', background: '#F3F4F6', padding: '3px 8px', borderRadius: '4px' }}>Not joined</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Invite CTA */}
+            <div style={{ background: '#0F1117', borderRadius: '10px', padding: '28px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>Invite your past clients to The Dream Wedding</div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Share your unique link. Every couple who joins and enquires counts toward your discount.</div>
+              </div>
+              <button onClick={() => {
+                const link = `https://thedreamwedding.in/join?ref=${vendorData?.id || ''}`;
+                navigator.clipboard.writeText(link);
+                alert('Invite link copied! Share it on WhatsApp with your past clients.');
+              }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 600, color: '#0F1117', background: 'var(--gold)', border: 'none', borderRadius: '6px', padding: '10px 20px', cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: '24px' }}>
+                Copy Invite Link
+              </button>
+            </div>
+          </div>
+        )}
       {/* Coming Soon Modal */}
       <ComingSoonModal tab={comingSoonTab} onClose={() => setComingSoonTab(null)} />
 
