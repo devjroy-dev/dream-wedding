@@ -13,39 +13,84 @@ import { createOrGetUser } from '../services/api';
 import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
 import { DMSans_300Light, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 
-const { height } = Dimensions.get('window');
+const { height, width } = Dimensions.get('window');
 
 GoogleSignin.configure({
   webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
   offlineAccess: true,
 });
 
-export default function LoginScreen() { const router = useRouter();
+export default function LoginScreen() {
+  const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
-  const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoTranslate = useRef(new Animated.Value(20)).current;
-  const dividerWidth = useRef(new Animated.Value(0)).current;
-  const taglineOpacity = useRef(new Animated.Value(0)).current;
-  const buttonsTranslate = useRef(new Animated.Value(60)).current;
-  const buttonsOpacity = useRef(new Animated.Value(0)).current;
 
-  useFonts({ PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold, DMSans_300Light, DMSans_400Regular, DMSans_500Medium });
+  // Animation values — everything starts invisible
+  const theOpacity = useRef(new Animated.Value(0)).current;
+  const theTranslate = useRef(new Animated.Value(8)).current;
+  const mainOpacity = useRef(new Animated.Value(0)).current;
+  const mainTranslate = useRef(new Animated.Value(24)).current;
+  const dividerWidth = useRef(new Animated.Value(0)).current;
+  const dividerOpacity = useRef(new Animated.Value(0)).current;
+  const tagline1Opacity = useRef(new Animated.Value(0)).current;
+  const tagline2Opacity = useRef(new Animated.Value(0)).current;
+  const buttonsOpacity = useRef(new Animated.Value(0)).current;
+  const buttonsTranslate = useRef(new Animated.Value(40)).current;
+  const vendorOpacity = useRef(new Animated.Value(0)).current;
+
+  const [fontsLoaded] = useFonts({
+    PlayfairDisplay_400Regular,
+    PlayfairDisplay_600SemiBold,
+    DMSans_300Light,
+    DMSans_400Regular,
+    DMSans_500Medium,
+  });
 
   useEffect(() => {
+    if (!fontsLoaded) return;
+
+    // Cinematic reveal sequence
     Animated.sequence([
+      // Beat 1: "THE" whispers in
+      Animated.delay(200),
       Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(logoTranslate, { toValue: 0, duration: 900, useNativeDriver: true }),
+        Animated.timing(theOpacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(theTranslate, { toValue: 0, duration: 700, useNativeDriver: true }),
       ]),
-      Animated.timing(dividerWidth, { toValue: 40, duration: 400, useNativeDriver: false }),
-      Animated.timing(taglineOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+
+      // Beat 2: "Dream Wedding" rises up
+      Animated.delay(150),
+      Animated.parallel([
+        Animated.timing(mainOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(mainTranslate, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ]),
+
+      // Beat 3: Gold divider draws across
+      Animated.delay(200),
+      Animated.parallel([
+        Animated.timing(dividerOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(dividerWidth, { toValue: 48, duration: 600, useNativeDriver: false }),
+      ]),
+
+      // Beat 4: First tagline line fades in
       Animated.delay(300),
+      Animated.timing(tagline1Opacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+
+      // Beat 5: Second tagline line (the gold punch)
+      Animated.delay(200),
+      Animated.timing(tagline2Opacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+
+      // Beat 6: Buttons rise
+      Animated.delay(400),
       Animated.parallel([
-        Animated.timing(buttonsOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(buttonsTranslate, { toValue: 0, duration: 600, useNativeDriver: true }),
+        Animated.timing(buttonsOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(buttonsTranslate, { toValue: 0, duration: 500, useNativeDriver: true }),
       ]),
+
+      // Beat 7: Vendor link fades in last
+      Animated.delay(200),
+      Animated.timing(vendorOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
     ]).start();
-  }, []);
+  }, [fontsLoaded]);
 
   const handleGoogleLogin = async () => {
     try {
@@ -89,80 +134,238 @@ export default function LoginScreen() { const router = useRouter();
     }
   };
 
+  // Don't render until fonts are ready — prevents system font flash
+  if (!fontsLoaded) {
+    return <View style={s.loadingScreen} />;
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={styles.logoSection}>
-          <Animated.View style={[styles.logoInner, { opacity: logoOpacity, transform: [{ translateY: logoTranslate }] }]}>
-            <Text style={styles.logoThe}>THE</Text>
-            <Text style={styles.logoMain}>Dream Wedding</Text>
-            <Animated.View style={[styles.logoDivider, { width: dividerWidth }]} />
-            <Animated.View style={[styles.taglineWrap, { opacity: taglineOpacity }]}>
-              <Animated.Text style={styles.logoTagline}>Not just happily married.</Animated.Text>
-              <Animated.Text style={styles.logoTaglineBold}>Getting married happily.</Animated.Text>
-            </Animated.View>
-          </Animated.View>
-        </View>
-        <Animated.View style={[styles.bottomSection, { opacity: buttonsOpacity, transform: [{ translateY: buttonsTranslate }] }]}>
-          <View style={styles.buttons}>
-            <TouchableOpacity style={styles.socialButton} onPress={handleGoogleLogin} disabled={googleLoading}>
-              {googleLoading ? <ActivityIndicator color="#2C2420" /> : (
-                <View style={styles.socialButtonInner}>
-                  <View style={styles.googleIconBox}><Text style={styles.googleIconG}>G</Text></View>
-                  <Text style={styles.socialButtonText}>Continue with Google</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.socialButton, styles.appleButton]} onPress={() => {}} activeOpacity={0.8}>
-              <View style={styles.socialButtonInner}>
-                <View style={styles.appleIconBox}><Text style={styles.appleIconText}>A</Text></View>
-                <Text style={styles.appleButtonText}>Continue with Apple</Text>
-              </View>
-            </TouchableOpacity>
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-            <TouchableOpacity style={styles.phoneButton} onPress={() => router.push('/otp')}>
-              <Text style={styles.phoneButtonText}>Continue with Phone Number</Text>
-            </TouchableOpacity>
+      <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+        {/* Logo section — vertically centered */}
+        <View style={s.logoSection}>
+
+          {/* THE */}
+          <Animated.Text style={[s.logoThe, { opacity: theOpacity, transform: [{ translateY: theTranslate }] }]}>
+            T H E
+          </Animated.Text>
+
+          {/* Dream Wedding */}
+          <Animated.Text style={[s.logoMain, { opacity: mainOpacity, transform: [{ translateY: mainTranslate }] }]}>
+            Dream Wedding
+          </Animated.Text>
+
+          {/* Gold divider */}
+          <Animated.View style={[s.divider, { width: dividerWidth, opacity: dividerOpacity }]} />
+
+          {/* Tagline — two lines, second in gold */}
+          <View style={s.taglineWrap}>
+            <Animated.Text style={[s.tagline, { opacity: tagline1Opacity }]}>
+              Not just happily married.
+            </Animated.Text>
+            <Animated.Text style={[s.taglineGold, { opacity: tagline2Opacity }]}>
+              Getting married happily.
+            </Animated.Text>
           </View>
-          <TouchableOpacity style={styles.vendorRow} onPress={() => router.push('/vendor-login')}>
-            <Text style={styles.vendorLink}>Vendor? Sign in here</Text>
+
+        </View>
+
+        {/* Buttons section */}
+        <Animated.View style={[s.buttonSection, { opacity: buttonsOpacity, transform: [{ translateY: buttonsTranslate }] }]}>
+
+          <TouchableOpacity style={s.googleBtn} onPress={handleGoogleLogin} disabled={googleLoading} activeOpacity={0.85}>
+            {googleLoading ? <ActivityIndicator color="#2C2420" /> : (
+              <View style={s.btnInner}>
+                <Text style={s.googleG}>G</Text>
+                <Text style={s.btnLabel}>Continue with Google</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={s.appleBtn} onPress={() => {}} activeOpacity={0.85}>
+            <View style={s.btnInner}>
+              <Text style={s.appleA}>A</Text>
+              <Text style={s.appleBtnLabel}>Continue with Apple</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={s.orRow}>
+            <View style={s.orLine} />
+            <Text style={s.orText}>or</Text>
+            <View style={s.orLine} />
+          </View>
+
+          <TouchableOpacity style={s.phoneBtn} onPress={() => router.push('/otp')} activeOpacity={0.85}>
+            <Text style={s.phoneBtnLabel}>Continue with Phone Number</Text>
+          </TouchableOpacity>
+
+        </Animated.View>
+
+        {/* Vendor link — last to appear */}
+        <Animated.View style={[s.vendorWrap, { opacity: vendorOpacity }]}>
+          <TouchableOpacity onPress={() => router.push('/vendor-login')}>
+            <Text style={s.vendorLink}>Vendor? Sign in here</Text>
           </TouchableOpacity>
         </Animated.View>
+
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#F5F0E8', paddingHorizontal: 28, paddingBottom: 48, paddingTop: 60 },
-  logoSection: { flex: 1, minHeight: height * 0.45, justifyContent: 'center', alignItems: 'center' },
-  logoInner: { alignItems: 'center', gap: 10 },
-  logoThe: { fontSize: 13, color: '#8C7B6E', letterSpacing: 12, textTransform: 'uppercase' },
-  logoMain: { fontSize: 48, color: '#2C2420', letterSpacing: 1, textAlign: 'center', fontWeight: '300' },
-  logoDivider: { height: 1, backgroundColor: '#C9A84C', marginVertical: 10 },
-  taglineWrap: { alignItems: 'center', gap: 6 },
-  logoTagline: { fontSize: 15, color: '#2C2420', letterSpacing: 0.5, fontFamily: 'PlayfairDisplay_400Regular' },
-  logoTaglineBold: { fontSize: 15, color: '#C9A84C', letterSpacing: 0.5, fontFamily: 'PlayfairDisplay_400Regular' },
-  bottomSection: { gap: 20 },
-  buttons: { gap: 12 },
-  socialButton: { width: '100%', borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 15, alignItems: 'center', backgroundColor: '#FFFFFF', elevation: 1 },
-  socialButtonInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  socialButtonText: { color: '#2C2420', fontSize: 14, letterSpacing: 0.3 },
-  googleIconBox: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
-  googleIconG: { fontSize: 16, fontWeight: '700', color: '#4285F4' },
-  appleButton: { backgroundColor: '#000000', borderColor: '#000000' },
-  appleIconBox: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
-  appleIconText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.5 },
-  appleButtonText: { color: '#FFFFFF', fontSize: 14, letterSpacing: 0.3 },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 2 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#E8E0D5' },
-  dividerText: { color: '#8C7B6E', fontSize: 12 },
-  phoneButton: { width: '100%', backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 15, alignItems: 'center' },
-  phoneButtonText: { color: '#F5F0E8', fontSize: 14, letterSpacing: 0.8 },
-  vendorRow: { alignItems: 'center', paddingTop: 4 },
-  vendorLink: { color: '#5C4A3A', fontSize: 13, textAlign: 'center', letterSpacing: 0.3, textDecorationLine: 'underline' },
+const s = StyleSheet.create({
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: '#F5F0E8',
+  },
+  container: {
+    flexGrow: 1,
+    backgroundColor: '#F5F0E8',
+    paddingHorizontal: 32,
+    paddingBottom: 44,
+    paddingTop: 60,
+  },
+
+  // Logo section
+  logoSection: {
+    flex: 1,
+    minHeight: height * 0.46,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 0,
+  },
+  logoThe: {
+    fontFamily: 'DMSans_300Light',
+    fontSize: 12,
+    color: '#8C7B6E',
+    letterSpacing: 14,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  logoMain: {
+    fontFamily: 'PlayfairDisplay_400Regular',
+    fontSize: 42,
+    color: '#2C2420',
+    letterSpacing: 1,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#C9A84C',
+    marginBottom: 18,
+  },
+  taglineWrap: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  tagline: {
+    fontFamily: 'PlayfairDisplay_400Regular',
+    fontSize: 14,
+    color: '#2C2420',
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+  taglineGold: {
+    fontFamily: 'PlayfairDisplay_400Regular',
+    fontSize: 14,
+    color: '#C9A84C',
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+
+  // Button section
+  buttonSection: {
+    gap: 12,
+  },
+  googleBtn: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E8E0D5',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  appleBtn: {
+    width: '100%',
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  btnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  btnLabel: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 14,
+    color: '#2C2420',
+    letterSpacing: 0.3,
+  },
+  googleG: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  appleA: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  appleBtnLabel: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 14,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginVertical: 4,
+  },
+  orLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E8E0D5',
+  },
+  orText: {
+    fontFamily: 'DMSans_300Light',
+    fontSize: 12,
+    color: '#8C7B6E',
+    letterSpacing: 0.5,
+  },
+  phoneBtn: {
+    width: '100%',
+    backgroundColor: '#2C2420',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  phoneBtnLabel: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 14,
+    color: '#F5F0E8',
+    letterSpacing: 0.5,
+  },
+
+  // Vendor link
+  vendorWrap: {
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  vendorLink: {
+    fontFamily: 'DMSans_300Light',
+    fontSize: 13,
+    color: '#8C7B6E',
+    letterSpacing: 0.3,
+    textDecorationLine: 'underline',
+    textDecorationColor: '#C4B8AC',
+  },
 });
