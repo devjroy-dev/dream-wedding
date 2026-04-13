@@ -26,7 +26,6 @@ const ACTIVE_TABS = [
   { id: 'tax', label: 'Tax & Finance', icon: Percent },
   { id: 'clients', label: 'Clients', icon: Users },
   { id: 'team', label: 'My Team', icon: Users },
-  { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'outstanding', label: 'Outstanding Payments', icon: DollarSign },
   { id: 'profit', label: 'Profit per Booking', icon: Target },
   { id: 'timeline', label: 'Client Timeline', icon: Activity },
@@ -40,6 +39,7 @@ const ACTIVE_TABS = [
   { id: 'runsheet', label: 'Day-of Runsheet', icon: List },
   { id: 'equipment', label: 'Equipment Checklist', icon: Tool },
   { id: 'csvimport', label: 'Import / Export', icon: Upload },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 const COMING_SOON_TABS = [
