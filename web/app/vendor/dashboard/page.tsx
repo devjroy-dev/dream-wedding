@@ -2403,8 +2403,7 @@ export default function VendorDashboard() {
               <textarea style={{ ...inp, width: '100%', height: '80px', resize: 'vertical', boxSizing: 'border-box' }} placeholder="Inclusions (one per line)" value={newPkgInclusions} onChange={e => setNewPkgInclusions(e.target.value)} />
               <button style={{ ...goldBtn, marginTop: '12px' }} onClick={() => {
                 if (!newPkgName || !newPkgPrice) return;
-                setPackages(prev => [...prev, { id: Date.now().toString(), name: newPkgName, price: newPkgPrice, inclusions: newPkgInclusions.split('
-').filter(Boolean) }]);
+                setPackages(prev => [...prev, { id: Date.now().toString(), name: newPkgName, price: newPkgPrice, inclusions: newPkgInclusions.split('\n').filter(Boolean) }]);
                 setNewPkgName(''); setNewPkgPrice(''); setNewPkgInclusions('');
               }}>
                 <Plus size={14} /> Add Package
