@@ -43,3 +43,4 @@ app-example
 /android
 web/.env.local
 .env.local
+.vercel
