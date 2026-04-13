@@ -1418,3 +1418,36 @@ const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
+
+// DELETE routes for missing entities
+app.delete('/api/invoices/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_invoices').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/contracts/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_contracts').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/payment-schedules/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_payment_schedules').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/tds/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_tds_ledger').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
