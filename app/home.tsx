@@ -256,16 +256,17 @@ const s = StyleSheet.create({
 
   primaryCard: {
     flexDirection: 'row', alignItems: 'center', gap: 16,
-    backgroundColor: '#2C2420', borderRadius: 16, padding: 22,
+    backgroundColor: '#FFFBF3', borderRadius: 16, padding: 22,
+    borderWidth: 1, borderColor: '#E8D9B5',
   },
   primaryIconBox: {
     width: 44, height: 44, borderRadius: 12,
-    backgroundColor: 'rgba(201,168,76,0.15)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)',
+    backgroundColor: '#C9A84C', borderWidth: 0, borderColor: 'transparent',
     justifyContent: 'center', alignItems: 'center',
   },
   primaryTextWrap: { flex: 1, gap: 4 },
-  primaryTitle: { fontSize: 16, color: '#F5F0E8', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
-  primarySub: { fontSize: 11, color: 'rgba(245,240,232,0.6)', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
+  primaryTitle: { fontSize: 16, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 },
+  primarySub: { fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
 
   secondaryCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
