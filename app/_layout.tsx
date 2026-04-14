@@ -1,13 +1,42 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, View, Text } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
 import { DMSans_300Light, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import * as SplashScreen from 'expo-splash-screen';
 
 SplashScreen.preventAutoHideAsync();
+
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean; error: any}> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', padding: 32 }}>
+          <Text style={{ fontSize: 22, color: '#2C2420', marginBottom: 12 }}>Something went wrong</Text>
+          <ScrollView style={{ maxHeight: 300, backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+            <Text style={{ fontSize: 12, color: '#8C7B6E', fontFamily: 'monospace' }}>{String(this.state.error)}</Text>
+          </ScrollView>
+          <TouchableOpacity
+            style={{ backgroundColor: '#2C2420', borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}
+            onPress={() => this.setState({ hasError: false, error: null })}
+          >
+            <Text style={{ color: '#F5F0E8', fontSize: 14, letterSpacing: 1 }}>TRY AGAIN</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const AUTH_SCREENS = ['login', 'otp', 'user-type', 'vendor-login', 'vendor-onboarding'];
 
@@ -102,7 +131,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       <StatusBar style="dark" />
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }}>
@@ -139,6 +168,6 @@ export default function RootLayout() {
           <Stack.Screen name="access-gate" />
         </Stack>
       </AuthGate>
-    </>
+    </ErrorBoundary>
   );
 }
