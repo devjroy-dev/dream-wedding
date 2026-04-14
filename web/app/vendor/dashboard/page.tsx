@@ -485,7 +485,7 @@ export default function VendorDashboard() {
   const [contractFilter, setContractFilter] = useState('all');
   const [expenseFilter, setExpenseFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ 'Overview': true, 'Daily Operations': true, 'Finance': false, 'Planning': false, 'Growth': false, 'Account': false });
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ 'Overview': true, 'Daily Operations': true, 'Finance': false, 'Planning': false, 'Growth': false, 'Account': true, 'Essential Tools': true, 'Signature': false, 'Deluxe Suite': true, 'Client Management': true, 'Calendar & Planning': false, 'Team & Packages': false, 'Coming Soon': false });
 
   // Data states
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -795,15 +795,17 @@ export default function VendorDashboard() {
         try {
           const webSession = JSON.parse(localStorage.getItem('vendor_web_session') || '{}');
           if (webSession.tier && ['essential', 'signature', 'prestige'].includes(webSession.tier)) {
-            setVendorTier(webSession.tier);
+            setVendorTier(webSession.tier as any);
           }
         } catch(e) {}
-        try {
-          const tierRes = await fetch(`${API}/subscriptions/${vendor.id}`);
-          const tierData = await tierRes.json();
-          if (tierData.success && tierData.data?.tier) setVendorTier(tierData.data.tier);
-          if (tierData.success && tierData.data?.founding_badge) setFoundingBadge(true);
-        } catch(e) {}
+        if (!isDemo) {
+          try {
+            const tierRes = await fetch(`${API}/subscriptions/${vendor.id}`);
+            const tierData = await tierRes.json();
+            if (tierData.success && tierData.data?.tier) setVendorTier(tierData.data.tier as any);
+            if (tierData.success && tierData.data?.founding_badge) setFoundingBadge(true);
+          } catch(e) {}
+        }
       }
     } catch (e) {} finally { setLoading(false); }
   };
