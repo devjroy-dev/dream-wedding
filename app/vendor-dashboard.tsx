@@ -1767,11 +1767,81 @@ export default function VendorDashboardScreen() {
             </>
           )}
 
-          {/* ── SIGNATURE: Business Pulse + Tool Grid ── */}
+
+          {/* ── SIGNATURE: Morning Briefing ── */}
           {vendorTier === 'signature' && (
             <>
               <BusinessPulseCard invoices={invoices} expenses={expenses} referralStats={referralStats} />
-              <Text style={styles.sectionLabel}>YOUR TOOLS</Text>
+
+              {/* Quick Actions */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {[
+                  { icon: 'file-text', label: 'Invoice', onPress: () => setActiveTab('Invoices') },
+                  { icon: 'dollar-sign', label: 'Reminder', onPress: () => {
+                    const overdue = paymentSchedules.filter((s: any) => (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date()));
+                    if (overdue.length === 0) { Alert.alert('All Clear', 'No overdue payments.'); return; }
+                    const c = overdue[0];
+                    Linking.openURL('whatsapp://send?phone=91' + (c.client_phone || '') + '&text=' + encodeURIComponent('Hi ' + (c.client_name || '') + '! Gentle reminder about your pending payment. Please let me know if you need details.'));
+                  }},
+                  { icon: 'message-circle', label: 'Broadcast', onPress: () => setActiveTab('WhatsApp') },
+                  { icon: 'calendar', label: 'Block Date', onPress: () => openDatePicker('blockDate', '') },
+                  { icon: 'trending-down', label: 'Expense', onPress: () => setActiveTab('Expenses') },
+                  { icon: 'share-2', label: 'Referrals', onPress: () => setActiveTab('Referral') },
+                ].map((a, i) => (
+                  <TouchableOpacity key={i} onPress={a.onPress} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#EDE8E0' }}>
+                    <Feather name={a.icon as any} size={13} color="#C9A84C" />
+                    <Text style={{ fontSize: 11, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>{a.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Pending Payments Alert */}
+              {paymentSchedules.filter((s: any) => (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date())).length > 0 && (
+                <View style={{ backgroundColor: '#FEF2F2', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#FECACA', gap: 8 }}>
+                  <Text style={{ fontSize: 10, color: '#E57373', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 }}>OVERDUE PAYMENTS</Text>
+                  {paymentSchedules.filter((s: any) => (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date())).slice(0, 3).map((sched: any) => (
+                    <View key={sched.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', flex: 1 }}>{sched.client_name}</Text>
+                      <Text style={{ fontSize: 13, color: '#E57373', fontFamily: 'DMSans_500Medium' }}>{'₹'}{(sched.total_amount || 0).toLocaleString('en-IN')}</Text>
+                      <TouchableOpacity onPress={() => Linking.openURL('whatsapp://send?phone=91' + (sched.client_phone || '') + '&text=' + encodeURIComponent('Hi ' + (sched.client_name || '') + '! Gentle reminder about your pending payment.'))} style={{ backgroundColor: '#25D366', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}><Feather name="message-circle" size={10} color="#FFFFFF" /></TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* This Week's Bookings */}
+              <Text style={styles.sectionLabel}>THIS WEEK</Text>
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#EDE8E0', gap: 10 }}>
+                {bookings.filter((b: any) => b.status === 'confirmed').length > 0 ? (
+                  bookings.filter((b: any) => b.status === 'confirmed').slice(0, 4).map((b: any) => (
+                    <View key={b.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#FFF8EC', justifyContent: 'center', alignItems: 'center' }}><Feather name="calendar" size={14} color="#C9A84C" /></View>
+                      <View style={{ flex: 1 }}><Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{b.users?.name || 'Client'}</Text><Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{b.event_date || 'Date TBD'}</Text></View>
+                      <View style={{ backgroundColor: '#4CAF5015', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3 }}><Text style={{ fontSize: 9, color: '#4CAF50', fontFamily: 'DMSans_500Medium' }}>Confirmed</Text></View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>No confirmed bookings yet</Text>
+                )}
+              </View>
+
+              {/* Lead Pipeline Summary */}
+              <Text style={styles.sectionLabel}>LEADS</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[
+                  { n: leads.filter((l: any) => l.stage === 'New Inquiry').length, l: 'New', c: '#C9A84C' },
+                  { n: leads.filter((l: any) => l.stage === 'Quoted').length, l: 'Quoted', c: '#8C7B6E' },
+                  { n: bookings.filter((b: any) => b.status === 'confirmed').length, l: 'Confirmed', c: '#4CAF50' },
+                ].map((s, i) => (
+                  <View key={i} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#EDE8E0' }}>
+                    <Text style={{ fontSize: 20, color: s.c, fontFamily: 'PlayfairDisplay_400Regular' }}>{s.n}</Text>
+                    <Text style={{ fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{s.l}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Tools Grid */}
+              <Text style={styles.sectionLabel}>TOOLS</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                 {ESSENTIAL_TOOLS.map(tool => (
                   <ToolGridItem key={tool.id} icon={tool.icon} label={tool.label} onPress={() => setActiveTab(tool.tab)} badge={tool.id === 'inquiries' ? pendingBookings.length : undefined} />
@@ -1786,12 +1856,12 @@ export default function VendorDashboardScreen() {
             </>
           )}
 
-          {/* ── ESSENTIAL: Clean Tool Grid ── */}
+          {/* ── ESSENTIAL: Personal Assistant ── */}
           {vendorTier === 'essential' && (
             <>
-              {/* Onboarding checklist for new vendors */}
+              {/* Onboarding checklist */}
               {!checklistDismissed && (
-                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E8E0D5', padding: 20, gap: 12 }}>
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#EDE8E0', padding: 20, gap: 12 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View style={{ gap: 4 }}>
                       <Text style={{ fontSize: 16, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.2 }}>Complete your profile</Text>
@@ -1815,7 +1885,59 @@ export default function VendorDashboardScreen() {
                 </View>
               )}
 
-              <Text style={styles.sectionLabel}>YOUR TOOLS</Text>
+              {/* Next Event Card */}
+              {bookings.filter((b: any) => b.status === 'confirmed').length > 0 && (
+                <View style={{ backgroundColor: '#2C2420', borderRadius: 16, padding: 20, gap: 8 }}>
+                  <Text style={{ fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 }}>NEXT EVENT</Text>
+                  <Text style={{ fontSize: 18, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' }}>{bookings.filter((b: any) => b.status === 'confirmed')[0]?.users?.name || 'Client'}</Text>
+                  <Text style={{ fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{bookings.filter((b: any) => b.status === 'confirmed')[0]?.event_date || 'Date TBD'}</Text>
+                </View>
+              )}
+
+              {/* Outstanding Money */}
+              {invoices.filter((i: any) => i.status !== 'paid').length > 0 && (
+                <View style={{ backgroundColor: '#FFF8EC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E8D9B5', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium', letterSpacing: 1.5 }}>MONEY OWED TO YOU</Text>
+                    <Text style={{ fontSize: 18, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' }}>{'₹'}{invoices.filter((i: any) => i.status !== 'paid').reduce((s: number, i: any) => s + (i.amount || 0), 0).toLocaleString('en-IN')}</Text>
+                  </View>
+                  {invoices.filter((i: any) => i.status !== 'paid').slice(0, 3).map((inv: any) => (
+                    <View key={inv.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', flex: 1 }}>{inv.client_name}</Text>
+                      <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_500Medium' }}>{'₹'}{(inv.amount || 0).toLocaleString('en-IN')}</Text>
+                      <TouchableOpacity onPress={() => Linking.openURL('whatsapp://send?phone=91' + (inv.client_phone || '') + '&text=' + encodeURIComponent('Hi ' + (inv.client_name || '') + '! This is a reminder regarding invoice ' + (inv.invoice_number || '') + ' for Rs.' + (inv.amount || 0).toLocaleString('en-IN') + '. Please let me know once done!'))} style={{ backgroundColor: '#25D366', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}><Feather name="message-circle" size={10} color="#FFFFFF" /></TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* New Enquiries Count */}
+              {pendingBookings.length > 0 && (
+                <TouchableOpacity onPress={() => setActiveTab('Inquiries')} style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#C9A84C', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#FFF8EC', justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 16, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' }}>{pendingBookings.length}</Text></View>
+                  <View style={{ flex: 1 }}><Text style={{ fontSize: 14, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>New enquir{pendingBookings.length > 1 ? 'ies' : 'y'} waiting</Text><Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>Respond within 48 hours</Text></View>
+                  <Feather name="chevron-right" size={16} color="#C9A84C" />
+                </TouchableOpacity>
+              )}
+
+              {/* Quick Actions */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity onPress={() => setActiveTab('Invoices')} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#EDE8E0' }}>
+                  <Feather name="file-text" size={18} color="#C9A84C" />
+                  <Text style={{ fontSize: 11, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>Invoice</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => openDatePicker('blockDate', '')} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#EDE8E0' }}>
+                  <Feather name="calendar" size={18} color="#C9A84C" />
+                  <Text style={{ fontSize: 11, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>Block Date</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowAddClient(true)} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#EDE8E0' }}>
+                  <Feather name="user-plus" size={18} color="#C9A84C" />
+                  <Text style={{ fontSize: 11, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>Add Client</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Tools */}
+              <Text style={styles.sectionLabel}>ALL TOOLS</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                 {ESSENTIAL_TOOLS.map(tool => (
                   <ToolGridItem key={tool.id} icon={tool.icon} label={tool.label} onPress={() => setActiveTab(tool.tab)} badge={tool.id === 'inquiries' ? pendingBookings.length : undefined} />
