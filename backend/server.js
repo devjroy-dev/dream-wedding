@@ -1323,6 +1323,119 @@ app.get('/api/vendor-logins/:firebaseUID', async (req, res) => {
 // ACCESS CODES — Invite Only Gate
 // ==================
 
+// ==================
+// TIER-BASED VENDOR ONBOARDING
+// ==================
+
+app.post('/api/tier-codes/generate', async (req, res) => {
+  try {
+    const { tier, vendor_name, created_by, note } = req.body;
+    if (!tier || !['signature', 'prestige'].includes(tier)) {
+      return res.status(400).json({ success: false, error: 'Tier must be signature or prestige' });
+    }
+    const prefix = tier === 'prestige' ? 'PRE' : 'SIG';
+    const code = prefix + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    // Trial ends: 3 months from now OR Aug 1 2026, whichever is earlier
+    const threeMonths = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    const aug1 = new Date('2026-08-01T00:00:00Z');
+    const trial_end = threeMonths < aug1 ? threeMonths : aug1;
+
+    const { data, error } = await supabase.from('access_codes').insert([{
+      code, type: 'vendor_tier_trial', tier, vendor_name: vendor_name || '',
+      expires_at: trial_end.toISOString(),
+      created_by: created_by || 'admin', note: note || `${tier} trial for ${vendor_name || 'vendor'}`,
+      used: false, used_count: 0,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/tier-codes/redeem', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ success: false, error: 'Code required' });
+
+    const { data: codeData, error: codeErr } = await supabase
+      .from('access_codes')
+      .select('*')
+      .eq('code', code.toUpperCase().trim())
+      .eq('type', 'vendor_tier_trial')
+      .single();
+
+    if (codeErr || !codeData) return res.json({ success: false, error: 'Invalid code' });
+    if (codeData.expires_at && new Date(codeData.expires_at) < new Date()) {
+      return res.json({ success: false, error: 'Code expired' });
+    }
+
+    // Create vendor record if vendor_name exists
+    const vendorName = codeData.vendor_name || 'New Vendor';
+    const { data: vendor, error: vendorErr } = await supabase.from('vendors').insert([{
+      name: vendorName,
+      category: 'photographers',
+      city: 'Delhi NCR',
+      subscription_active: true,
+    }]).select().single();
+
+    if (vendorErr) throw vendorErr;
+
+    // Create subscription record
+    const threeMonths = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    const aug1 = new Date('2026-08-01T00:00:00Z');
+    const trial_end = threeMonths < aug1 ? threeMonths : aug1;
+
+    await supabase.from('vendor_subscriptions').insert([{
+      vendor_id: vendor.id,
+      tier: codeData.tier || 'essential',
+      status: 'trial',
+      trial_start_date: new Date().toISOString(),
+      trial_end_date: trial_end.toISOString(),
+      activated_by_code: code.toUpperCase().trim(),
+      is_founding_vendor: true,
+      founding_badge: true,
+    }]);
+
+    // Mark code as used
+    await supabase.from('access_codes').update({ used: true, used_count: (codeData.used_count || 0) + 1 }).eq('id', codeData.id);
+
+    res.json({
+      success: true,
+      data: {
+        id: vendor.id,
+        name: vendor.name,
+        category: vendor.category,
+        city: vendor.city,
+        tier: codeData.tier,
+        trial_end: trial_end.toISOString(),
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/tier-codes', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('access_codes').select('*').eq('type', 'vendor_tier_trial').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/subscriptions/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_subscriptions').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false }).limit(1).single();
+    if (error) return res.json({ success: true, data: { tier: 'essential', status: 'active' } });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.json({ success: true, data: { tier: 'essential', status: 'active' } });
+  }
+});
+
 app.post('/api/access-codes/generate', async (req, res) => {
   try {
     const { type, created_by, note } = req.body;

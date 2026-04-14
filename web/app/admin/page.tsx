@@ -10,7 +10,13 @@ const CODE_TYPES = [
   { value: 'couple_demo', label: 'Couple Demo — 24hr', desc: 'For couple demos', color: '#2196F3' },
 ];
 
-const PLANS = ['basic', 'premium', 'elite', 'founding'];
+const PLANS = ['essential', 'signature', 'prestige'];
+
+const TIER_INFO: Record<string, { label: string; rec: string; color: string }> = {
+  essential: { label: 'Essential', rec: 'Recommended for Solo Vendors', color: '#8C7B6E' },
+  signature: { label: 'Signature', rec: 'Recommended for Established Businesses', color: '#C9A84C' },
+  prestige: { label: 'Prestige', rec: 'Invite Only', color: '#2C2420' },
+};
 
 const TABS = [
   { id: 'dashboard', label: '📊 Dashboard' },
@@ -58,6 +64,11 @@ export default function AdminPage() {
   const [note, setNote] = useState('');
   const [newCode, setNewCode] = useState<any>(null);
   const [copied, setCopied] = useState('');
+  const [tierVendorName, setTierVendorName] = useState('');
+  const [tierNote, setTierNote] = useState('');
+  const [tierGenerating, setTierGenerating] = useState(false);
+  const [tierNewCode, setTierNewCode] = useState<any>(null);
+  const [tierCodes, setTierCodes] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
@@ -70,12 +81,14 @@ export default function AdminPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [codesRes, vendorsRes] = await Promise.all([
+      const [codesRes, vendorsRes, tierCodesRes] = await Promise.all([
         fetch(`${API}/api/access-codes`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API}/api/vendors`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API}/api/tier-codes`).then(r => r.json()).catch(() => ({ success: false })),
       ]);
       if (codesRes.success) setCodes(codesRes.data || []);
       if (vendorsRes.success) setVendors(vendorsRes.data || []);
+      if (tierCodesRes.success) setTierCodes(tierCodesRes.data || []);
     } catch (e) {}
     setLoading(false);
   }, []);
@@ -96,6 +109,20 @@ export default function AdminPage() {
       if (data.success) { setNewCode(data.data); setNote(''); loadAll(); }
       else alert('Failed to generate code');
     } catch (e) { alert('Network error'); } finally { setGenerating(false); }
+  };
+
+  const generateTierCode = async (tier: 'signature' | 'prestige') => {
+    if (!tierVendorName.trim()) { alert('Enter vendor name'); return; }
+    setTierGenerating(true); setTierNewCode(null);
+    try {
+      const res = await fetch(`${API}/api/tier-codes/generate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier, vendor_name: tierVendorName, note: tierNote || `${tier} trial for ${tierVendorName}` }),
+      });
+      const data = await res.json();
+      if (data.success) { setTierNewCode(data.data); setTierVendorName(''); setTierNote(''); loadAll(); }
+      else alert('Failed to generate code');
+    } catch (e) { alert('Network error'); } finally { setTierGenerating(false); }
   };
 
   const copyCode = (code: string) => {
@@ -232,6 +259,67 @@ export default function AdminPage() {
 
         {/* ACCESS CODES */}
         {activeTab === 'codes' && (<>
+          {/* Tier-Based Vendor Onboarding */}
+          <div style={{ ...s.cardPad, border: '2px solid #C9A84C', background: 'linear-gradient(135deg, #FFFDF7, #FFF8EC)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 2, color: '#C9A84C', textTransform: 'uppercase' }}>Vendor Onboarding</span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 500, color: '#2C2420', marginBottom: 4 }}>Generate Tier Trial Code</div>
+            <div style={{ fontSize: 12, color: '#8C7B6E', marginBottom: 20, lineHeight: 1.6 }}>Create a code for a vendor. They enter it at the login page to access their dashboard. Trial: 3 months or Aug 1, 2026.</div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              <input placeholder="Vendor name (required)" value={tierVendorName} onChange={e => setTierVendorName(e.target.value)} style={{ ...s.input, flex: 1 }} />
+              <input placeholder="Note (optional)" value={tierNote} onChange={e => setTierNote(e.target.value)} style={{ ...s.input, flex: 1 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => generateTierCode('signature')} disabled={tierGenerating} style={{ flex: 1, padding: '14px 24px', background: '#C9A84C', color: '#fff', border: 'none', borderRadius: 9, cursor: tierGenerating ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
+                {tierGenerating ? 'Generating...' : 'Generate Signature Code'}
+              </button>
+              <button onClick={() => generateTierCode('prestige')} disabled={tierGenerating} style={{ flex: 1, padding: '14px 24px', background: '#2C2420', color: '#C9A84C', border: 'none', borderRadius: 9, cursor: tierGenerating ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
+                {tierGenerating ? 'Generating...' : 'Generate Prestige Code'}
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <div style={{ fontSize: 11, color: '#8C7B6E' }}>Signature = Essential + GST, Payment Shield, exports, analytics</div>
+              <div style={{ fontSize: 11, color: '#8C7B6E' }}>|</div>
+              <div style={{ fontSize: 11, color: '#8C7B6E' }}>Prestige = Everything + Deluxe Suite (team, tasks, procurement)</div>
+            </div>
+            {tierNewCode && (
+              <div style={{ marginTop: 16, background: '#2C2420', borderRadius: 10, padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 10, color: '#8C7B6E', letterSpacing: 2, marginBottom: 4 }}>VENDOR TRIAL CODE — {(tierNewCode.tier || '').toUpperCase()}</div>
+                  <div style={{ fontSize: 26, color: '#C9A84C', letterSpacing: 4, fontWeight: 300 }}>{tierNewCode.code}</div>
+                  <div style={{ fontSize: 11, color: '#8C7B6E', marginTop: 4 }}>For: {tierNewCode.vendor_name || 'Vendor'} · Expires {tierNewCode.expires_at ? new Date(tierNewCode.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}</div>
+                </div>
+                <button onClick={() => copyCode(tierNewCode.code)} style={{ background: copied === tierNewCode.code ? '#4CAF50' : '#C9A84C', color: '#2C2420', border: 'none', borderRadius: 8, padding: '12px 20px', cursor: 'pointer', fontWeight: 500 }}>
+                  {copied === tierNewCode.code ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            )}
+            {tierCodes.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: '#2C2420', marginBottom: 8 }}>Recent Tier Codes ({tierCodes.length})</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {tierCodes.slice(0, 10).map((tc: any) => {
+                    const expired = tc.expires_at && new Date(tc.expires_at) < new Date();
+                    return (
+                      <div key={tc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 8, background: expired ? '#FFF5F5' : '#fff', border: '1px solid #E8E0D5' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 13, letterSpacing: 2, color: '#2C2420' }}>{tc.code}</span>
+                          <span style={s.pill(tc.tier === 'prestige' ? '#2C242015' : '#C9A84C15', tc.tier === 'prestige' ? '#2C2420' : '#C9A84C')}>{tc.tier}</span>
+                          <span style={{ fontSize: 12, color: '#8C7B6E' }}>{tc.vendor_name || ''}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, color: expired ? '#E57373' : '#8C7B6E' }}>{tc.used ? 'Used' : 'Unused'}</span>
+                          <button onClick={() => copyCode(tc.code)} style={s.btnSm(copied === tc.code ? '#4CAF50' : '#fff', copied === tc.code ? '#fff' : '#2C2420', '#E8E0D5')}>{copied === tc.code ? 'Copied!' : 'Copy'}</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={s.cardPad}>
             <div style={{ fontSize: 16, fontWeight: 500, color: '#2C2420', marginBottom: 18 }}>Generate New Code</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
