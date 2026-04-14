@@ -127,6 +127,23 @@ export default function HomeScreen() {
           <View style={s.quoteDivider} />
         </View>
 
+        {/* Wedding date urgency — contextual nudge */}
+        {daysToGo && daysToGo <= 120 && daysToGo > 0 && (
+          <View style={{ marginHorizontal: 24, marginBottom: 16, backgroundColor: '#FFF8EC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E8D9B5', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#C9A84C15', justifyContent: 'center', alignItems: 'center' }}>
+              <Feather name="clock" size={16} color="#C9A84C" />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>
+                {daysToGo <= 30 ? 'Your wedding is very soon!' : daysToGo <= 60 ? 'Time to finalize vendors' : 'Start booking now'}
+              </Text>
+              <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>
+                {daysToGo <= 30 ? 'Couples at this stage have 4-6 vendors confirmed' : daysToGo <= 60 ? 'Popular vendors fill up 2-3 months ahead' : 'Most couples book vendors 3-4 months before'}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Category pills */}
         <ScrollView
           horizontal

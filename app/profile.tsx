@@ -19,6 +19,9 @@ export default function ProfileScreen() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [coupleTier, setCoupleTier] = useState<'free' | 'premium' | 'elite'>('free');
+  const [tokenBalance, setTokenBalance] = useState(0);
+  const [showTierModal, setShowTierModal] = useState(false);
 
   useEffect(() => {
     loadSession();
@@ -32,6 +35,10 @@ export default function ProfileScreen() {
         setSession(parsed);
         setEditName(parsed.name || '');
       }
+      const tier = await AsyncStorage.getItem('tdw_couple_tier');
+      if (tier) setCoupleTier(tier as any);
+      const tokens = await AsyncStorage.getItem('tdw_token_balance');
+      if (tokens !== null) setTokenBalance(parseInt(tokens));
     } catch (e) {}
     finally { setLoading(false); }
   };
@@ -109,6 +116,122 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
 
+
+      {/* Tier Selection Modal */}
+      <Modal visible={showTierModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxHeight: '85%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={styles.modalTitle}>Choose Your Plan</Text>
+                <TouchableOpacity onPress={() => setShowTierModal(false)}><Feather name="x" size={20} color="#8C7B6E" /></TouchableOpacity>
+              </View>
+              <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 20, marginBottom: 20 }}>Every plan includes the full swipe experience, moodboard, and BTS planner</Text>
+
+              {/* Mehendi — Free */}
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: coupleTier === 'free' ? '#C9A84C' : '#EDE8E0', gap: 12, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontSize: 18, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' }}>Basic</Text>
+                    <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>Start your journey</Text>
+                  </View>
+                  <Text style={{ fontSize: 20, color: '#2C2420', fontFamily: 'PlayfairDisplay_600SemiBold' }}>Free</Text>
+                </View>
+                <View style={{ gap: 6 }}>
+                  {['3 tokens to unlock vendors', 'Blind swipe discovery', 'Moodboard & BTS planner', 'Wedding website builder'].map(f => (
+                    <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Feather name="check" size={11} color="#4CAF50" />
+                      <Text style={{ fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{f}</Text>
+                    </View>
+                  ))}
+                </View>
+                {coupleTier === 'free' && (
+                  <View style={{ backgroundColor: '#4CAF5015', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: '#4CAF50', fontFamily: 'DMSans_500Medium' }}>Current Plan</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Sangeet — Premium */}
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: coupleTier === 'premium' ? '#C9A84C' : '#EDE8E0', gap: 12, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontSize: 18, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular' }}>Gold</Text>
+                    <Text style={{ fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Most Popular</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 20, color: '#2C2420', fontFamily: 'PlayfairDisplay_600SemiBold' }}>Rs.999</Text>
+                    <Text style={{ fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>one-time</Text>
+                  </View>
+                </View>
+                <View style={{ gap: 6 }}>
+                  {['15 tokens to unlock vendors', 'Smart vendor matching', 'Priority enquiry badge', 'Curated For You combinations', 'Everything in Mehendi'].map(f => (
+                    <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Feather name="check" size={11} color="#C9A84C" />
+                      <Text style={{ fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{f}</Text>
+                    </View>
+                  ))}
+                </View>
+                {coupleTier === 'premium' ? (
+                  <View style={{ backgroundColor: '#C9A84C15', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Current Plan</Text>
+                  </View>
+                ) : coupleTier === 'free' ? (
+                  <TouchableOpacity style={{ backgroundColor: '#C9A84C', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={async () => {
+                    setCoupleTier('premium'); setTokenBalance(15);
+                    await AsyncStorage.setItem('tdw_couple_tier', 'premium');
+                    await AsyncStorage.setItem('tdw_token_balance', '15');
+                    setShowTierModal(false);
+                    Alert.alert('Welcome to Gold!', 'You now have 15 tokens and access to smart matching. Razorpay payment integration coming soon.');
+                  }}>
+                    <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium', letterSpacing: 1 }}>UPGRADE TO GOLD</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              {/* Shaadi — Elite */}
+              <View style={{ backgroundColor: '#2C2420', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: coupleTier === 'elite' ? '#C9A84C' : 'rgba(201,168,76,0.3)', gap: 12, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontSize: 18, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' }}>Platinum</Text>
+                    <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>The complete experience</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 20, color: '#C9A84C', fontFamily: 'PlayfairDisplay_600SemiBold' }}>Rs.2,999</Text>
+                    <Text style={{ fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>one-time</Text>
+                  </View>
+                </View>
+                <View style={{ gap: 6 }}>
+                  {['Unlimited tokens', 'Couture vendor access', 'Book luxury appointments', 'Vendor availability checker', 'Co-planner live sync', 'Everything in Sangeet'].map(f => (
+                    <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Feather name="check" size={11} color="#C9A84C" />
+                      <Text style={{ fontSize: 12, color: '#F5F0E8', fontFamily: 'DMSans_400Regular' }}>{f}</Text>
+                    </View>
+                  ))}
+                </View>
+                {coupleTier === 'elite' ? (
+                  <View style={{ backgroundColor: 'rgba(201,168,76,0.15)', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Current Plan</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={{ backgroundColor: '#C9A84C', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={async () => {
+                    setCoupleTier('elite'); setTokenBalance(9999);
+                    await AsyncStorage.setItem('tdw_couple_tier', 'elite');
+                    await AsyncStorage.setItem('tdw_token_balance', '9999');
+                    setShowTierModal(false);
+                    Alert.alert('Welcome to Platinum!', 'You now have unlimited tokens, Couture access, and the full planning experience. Razorpay payment integration coming soon.');
+                  }}>
+                    <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium', letterSpacing: 1 }}>UPGRADE TO PLATINUM</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <Text style={{ fontSize: 10, color: '#B8ADA4', fontFamily: 'DMSans_300Light', textAlign: 'center', marginTop: 4 }}>Secured by Razorpay · Payments launching soon</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Edit Name Modal */}
       <Modal visible={showEditModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -166,16 +289,24 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Subscription */}
-        <View style={styles.subscriptionCard}>
-          <View>
-            <Text style={styles.subscriptionPlan}>Premium Plan</Text>
-            <Text style={styles.subscriptionDetail}>Unlimited vendor access</Text>
+        {/* Subscription Tier */}
+        <TouchableOpacity style={styles.subscriptionCard} onPress={() => setShowTierModal(true)} activeOpacity={0.85}>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={styles.subscriptionPlan}>
+              {coupleTier === 'elite' ? 'Platinum Plan' : coupleTier === 'premium' ? 'Gold Plan' : 'Basic Plan'}
+            </Text>
+            <Text style={styles.subscriptionDetail}>
+              {coupleTier === 'elite' ? 'Unlimited tokens · Couture access' : coupleTier === 'premium' ? '15 tokens · Smart matching' : 'Free · 3 tokens'}
+            </Text>
           </View>
-          <View style={styles.subscriptionBadge}>
-            <Text style={styles.subscriptionBadgeText}>Active</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ backgroundColor: '#FFF8EC', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#E8D9B5', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Feather name="zap" size={10} color="#C9A84C" />
+              <Text style={{ fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>{coupleTier === 'elite' ? 'Unlimited' : tokenBalance}</Text>
+            </View>
+            {coupleTier === 'free' && <Text style={{ fontSize: 12, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Upgrade</Text>}
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Wedding countdown prominent */}
         {daysUntil !== null && (

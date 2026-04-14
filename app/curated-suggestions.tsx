@@ -34,8 +34,41 @@ const formatAmount = (amount: number): string => {
   return `₹${amount}`;
 };
 
+function CouturePremiumGate({ onUpgrade }: { onUpgrade: () => void }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+      <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFF8EC', borderWidth: 1, borderColor: '#E8D9B5', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
+        <Feather name="zap" size={24} color="#C9A84C" />
+      </View>
+      <Text style={{ fontSize: 22, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', textAlign: 'center', marginBottom: 8 }}>Gold Plan Required</Text>
+      <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>Smart vendor matching and curated combinations are available with the Gold plan (Rs.999)</Text>
+      <TouchableOpacity style={{ backgroundColor: '#C9A84C', borderRadius: 10, paddingVertical: 14, paddingHorizontal: 32, flexDirection: 'row', alignItems: 'center', gap: 8 }} onPress={onUpgrade}>
+        <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_500Medium', letterSpacing: 1 }}>UPGRADE TO GOLD</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function CuratedSuggestionsScreen() {
   const router = useRouter();
+  const [coupleTier, setCoupleTier] = useState<'free' | 'premium' | 'elite'>('free');
+  const [tierLoaded, setTierLoaded] = useState(false);
+
+  useState(() => {
+    AsyncStorage.getItem('tdw_couple_tier').then(t => {
+      if (t) setCoupleTier(t as any);
+      setTierLoaded(true);
+    }).catch(() => setTierLoaded(true));
+  });
+
+  if (tierLoaded && coupleTier === 'free') {
+    return <CouturePremiumGate onUpgrade={async () => {
+      setCoupleTier('premium');
+      await AsyncStorage.setItem('tdw_couple_tier', 'premium');
+      await AsyncStorage.setItem('tdw_token_balance', '15');
+      Alert.alert('Welcome to Gold!', 'You now have 15 tokens and access to smart matching.');
+    }} />;
+  }
   const [mode, setMode] = useState<'category' | 'total' | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [categoryBudgets, setCategoryBudgets] = useState<BudgetEntry[]>([]);

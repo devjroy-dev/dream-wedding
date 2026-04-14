@@ -299,10 +299,10 @@ export default function LuxuryBrowseScreen() {
     if (coupleTier !== 'elite') {
       Alert.alert(
         'Elite Access',
-        'Booking appointments with Couture vendors is an Elite feature. Upgrade to Elite (Rs.2,999) to access India\'s most distinguished wedding professionals.',
+        'Booking appointments with Couture vendors requires the Platinum plan (Rs.2,999). Upgrade to unlock India\'s most distinguished wedding professionals.',
         [
           { text: 'Not Now', style: 'cancel' },
-          { text: 'Upgrade to Elite', onPress: () => Alert.alert('Coming Soon', 'Elite subscriptions launching soon. You will be notified.') },
+          { text: 'Upgrade to Platinum', onPress: () => Alert.alert('Coming Soon', 'Elite subscriptions launching soon. You will be notified.') },
         ]
       );
       return;
