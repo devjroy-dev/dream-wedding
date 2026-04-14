@@ -71,6 +71,8 @@ export default function SwipeScreen() {
   const [tokenBalance, setTokenBalance] = useState(3); // 3 free tokens to start
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [pendingRevealVendor, setPendingRevealVendor] = useState<any>(null);
+  const [unlockedVendors, setUnlockedVendors] = useState<string[]>([]);
+  const [coupleTier, setCoupleTier] = useState<'free' | 'premium' | 'elite'>('free');
 
   // Swipe position — useNativeDriver: false required for x/y interpolation
   const position = useRef(new Animated.ValueXY()).current;
@@ -91,9 +93,13 @@ export default function SwipeScreen() {
         const parsed = JSON.parse(session);
         setUserId(parsed.userId || parsed.uid || null);
         if (parsed.budget) setUserBudget(parsed.budget);
-        // Load token balance
+        // Load token balance + unlocked vendors + couple tier
         const storedTokens = await AsyncStorage.getItem('tdw_token_balance');
         if (storedTokens !== null) setTokenBalance(parseInt(storedTokens));
+        const storedUnlocked = await AsyncStorage.getItem('tdw_unlocked_vendors');
+        if (storedUnlocked) setUnlockedVendors(JSON.parse(storedUnlocked));
+        const storedTier = await AsyncStorage.getItem('tdw_couple_tier');
+        if (storedTier) setCoupleTier(storedTier as any);
         const sCity = parsed.city || parsed.wedding_city || '';
         const sBudget = parsed.budget ? String(parsed.budget) : '';
         setSessionCity(sCity);
@@ -533,7 +539,12 @@ export default function SwipeScreen() {
           {...panResponder.panHandlers}
         >
           <Image
-            source={{ uri: vendor.portfolio_images?.[0] || '' }}
+            source={{ uri: (() => {
+              const heroes = vendor.swipe_heroes?.length > 0 ? vendor.swipe_heroes : vendor.portfolio_images;
+              if (!heroes || heroes.length === 0) return '';
+              const seed = vendor.id ? vendor.id.charCodeAt(0) + currentIndex : currentIndex;
+              return heroes[seed % heroes.length];
+            })() }}
             style={styles.cardImage}
             resizeMode="cover"
           />
@@ -590,7 +601,7 @@ export default function SwipeScreen() {
               </View>
             ) : (
               <View style={styles.vendorInfo}>
-                <Text style={styles.vendorName}>{vendor.name}</Text>
+                <Text style={styles.vendorName}>{unlockedVendors.includes(vendor.id) ? vendor.name : vendor.name}</Text>
                 <TouchableOpacity
                   onPress={() => Alert.alert(
                     'Social Proof Signals — Build 2',
@@ -610,7 +621,11 @@ export default function SwipeScreen() {
                 </View>
                 <View style={styles.vendorBottom}>
                   <Text style={styles.vendorPrice}>
-                    {formatPrice(vendor.starting_price)} onwards
+                    {unlockedVendors.includes(vendor.id) ? formatPrice(vendor.starting_price) + ' onwards' :
+                      vendor.starting_price >= 1000000 ? 'Rs.10L+' :
+                      vendor.starting_price >= 500000 ? 'Rs.5-10L' :
+                      vendor.starting_price >= 300000 ? 'Rs.3-5L' :
+                      vendor.starting_price >= 100000 ? 'Rs.1-3L' : 'Under Rs.1L'}
                   </Text>
                   <View style={styles.vibeTags}>
                     {vendor.vibe_tags?.slice(0, 2).map((v: string) => (
@@ -642,10 +657,21 @@ export default function SwipeScreen() {
         {/* Profile — medium, dark with gold icon */}
         <TouchableOpacity
           style={styles.profileBtn}
-          onPress={() => router.push(`/vendor-profile?id=${vendor.id}` as any)}
+          onPress={() => {
+            const isUnlocked = !blindMode || unlockedVendors.includes(vendor.id);
+            if (isUnlocked) {
+              router.push(`/vendor-profile?id=${vendor.id}` as any);
+            } else {
+              Alert.alert(
+                'Profile Locked',
+                'In blind mode, use a token to unlock this vendor\'s full profile. Save their card first, then unlock.',
+                [{ text: 'Got it' }]
+              );
+            }
+          }}
           activeOpacity={0.8}
         >
-          <Feather name="eye" size={16} color="#C9A84C" />
+          <Feather name={blindMode && !unlockedVendors.includes(vendor.id) ? "lock" : "eye"} size={16} color="#C9A84C" />
         </TouchableOpacity>
 
         {/* Save — largest, gold fill */}
@@ -683,6 +709,9 @@ export default function SwipeScreen() {
                   setTokenBalance(newBalance);
                   await AsyncStorage.setItem('tdw_token_balance', String(newBalance));
                   if (pendingRevealVendor) {
+                    const newUnlocked = [...unlockedVendors, pendingRevealVendor.id];
+                    setUnlockedVendors(newUnlocked);
+                    await AsyncStorage.setItem('tdw_unlocked_vendors', JSON.stringify(newUnlocked));
                     setRevealName(pendingRevealVendor.name);
                     setTimeout(() => setRevealName(null), 4000);
                   }

@@ -644,6 +644,7 @@ export default function VendorDashboardScreen() {
   const [invoiceTDSApplicable, setInvoiceTDSApplicable] = useState(false);
   const [invoiceTDSDeductedByClient, setInvoiceTDSDeductedByClient] = useState(false);
   const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
+  const [swipeHeroes, setSwipeHeroes] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // Clients state
@@ -1147,9 +1148,49 @@ export default function VendorDashboardScreen() {
   const handleImageUpload = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Permission needed', 'Please allow access to your photo library.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.8 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.85 });
     if (!result.canceled) {
-      try { setUploadingImage(true); const url = await uploadImage(result.assets[0].uri); setPortfolioImages(prev => [...prev, url]); Alert.alert('Uploaded!', 'Photo added to your portfolio.'); }
+      const asset = result.assets[0];
+      // Resolution check — minimum 1080px on shortest side
+      const minDim = Math.min(asset.width || 0, asset.height || 0);
+      if (minDim > 0 && minDim < 1080) {
+        Alert.alert(
+          'Higher Resolution Needed',
+          'For the best presentation of your work, please upload photos with a minimum resolution of 1080px. This photo is ' + minDim + 'px on the shortest side.',
+          [
+            { text: 'Upload Anyway', onPress: async () => {
+              try { setUploadingImage(true); const url = await uploadImage(asset.uri); setPortfolioImages(prev => [...prev, url]); Alert.alert('Uploaded', 'Photo added. Consider replacing with a higher resolution version for best results.'); }
+              catch { Alert.alert('Upload failed', 'Please try again.'); }
+              finally { setUploadingImage(false); }
+            }},
+            { text: 'Choose Another', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+      try {
+        setUploadingImage(true);
+        const url = await uploadImage(asset.uri);
+        setPortfolioImages(prev => [...prev, url]);
+        // Ask if this should be a swipe hero
+        Alert.alert(
+          'Swipe-Worthy?',
+          'Should this photo appear in the swipe deck? Mark your best work as swipe-worthy so couples see your strongest images first.',
+          [
+            { text: 'Portfolio Only', style: 'cancel' },
+            { text: 'Mark as Swipe-Worthy', onPress: () => {
+              setSwipeHeroes(prev => [...prev, url]);
+              // Save to backend
+              if (vendorSession?.vendorId) {
+                fetch(API + '/api/vendors/' + vendorSession.vendorId, {
+                  method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ swipe_heroes: [...swipeHeroes, url] }),
+                }).catch(() => {});
+              }
+            }},
+          ]
+        );
+      }
       catch { Alert.alert('Upload failed', 'Please try again.'); }
       finally { setUploadingImage(false); }
     }

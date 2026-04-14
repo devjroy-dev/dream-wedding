@@ -249,6 +249,7 @@ export default function LuxuryBrowseScreen() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [userSession, setUserSession] = useState<any>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [coupleTier, setCoupleTier] = useState<'free' | 'premium' | 'elite'>('free');
 
   useEffect(() => {
     loadUserSession();
@@ -259,6 +260,8 @@ export default function LuxuryBrowseScreen() {
     try {
       const stored = await AsyncStorage.getItem('user_session');
       if (stored) setUserSession(JSON.parse(stored));
+      const tier = await AsyncStorage.getItem('tdw_couple_tier');
+      if (tier) setCoupleTier(tier as any);
     } catch (e) {}
   };
 
@@ -291,6 +294,17 @@ export default function LuxuryBrowseScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign In', onPress: () => router.push('/login') },
       ]);
+      return;
+    }
+    if (coupleTier !== 'elite') {
+      Alert.alert(
+        'Elite Access',
+        'Booking appointments with Couture vendors is an Elite feature. Upgrade to Elite (Rs.2,999) to access India\'s most distinguished wedding professionals.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Upgrade to Elite', onPress: () => Alert.alert('Coming Soon', 'Elite subscriptions launching soon. You will be notified.') },
+        ]
+      );
       return;
     }
     setShowAppointment(true);
