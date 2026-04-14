@@ -6,8 +6,17 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+
+let GoogleSignin: any = null;
+let statusCodes: any = {};
+try {
+  const gsi = require('@react-native-google-signin/google-signin');
+  GoogleSignin = gsi.GoogleSignin;
+  statusCodes = gsi.statusCodes;
+} catch (e) {
+  console.warn('Google Sign-In native module not available:', e);
+}
 import { auth } from '../services/firebase';
 import { createOrGetUser } from '../services/api';
 import { PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
@@ -21,10 +30,12 @@ export default function LoginScreen() {
 
   useEffect(() => {
     try {
-      GoogleSignin.configure({
-        webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
-        offlineAccess: true,
-      });
+      if (GoogleSignin) {
+        GoogleSignin.configure({
+          webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
+          offlineAccess: true,
+        });
+      }
     } catch (e) {
       console.warn('GoogleSignin.configure failed:', e);
     }

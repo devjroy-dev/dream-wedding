@@ -6,7 +6,15 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+let GoogleSignin: any = null;
+let statusCodes: any = {};
+try {
+  const gsi = require('@react-native-google-signin/google-signin');
+  GoogleSignin = gsi.GoogleSignin;
+  statusCodes = gsi.statusCodes;
+} catch (e) {
+  console.warn('Google Sign-In native module not available:', e);
+}
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../services/firebase';
 
@@ -37,10 +45,12 @@ export default function VendorLoginScreen() {
 
   useEffect(() => {
     try {
-      GoogleSignin.configure({
-        webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
-        offlineAccess: true,
-      });
+      if (GoogleSignin) {
+        GoogleSignin.configure({
+          webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
+          offlineAccess: true,
+        });
+      }
     } catch (e) {
       console.warn('GoogleSignin.configure failed:', e);
     }
