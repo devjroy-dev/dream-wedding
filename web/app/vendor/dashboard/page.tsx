@@ -1655,15 +1655,32 @@ export default function VendorDashboard() {
             }}>
               {vendorData?.name || 'Your Business'}
             </h1>
-            <p style={{
-              fontFamily: 'Inter, sans-serif',
-              fontSize: '13px',
-              fontWeight: 300,
-              color: 'var(--grey)',
-            }}>
-              {vendorData?.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-              {vendorData?.city ? ` · ${vendorData.city}` : ''}
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+              <p style={{
+                fontFamily: 'Inter, sans-serif',
+                fontSize: '13px',
+                fontWeight: 300,
+                color: 'var(--grey)',
+                margin: 0,
+              }}>
+                {vendorData?.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                {vendorData?.city ? ` · ${vendorData.city}` : ''}
+              </p>
+              <span style={{
+                fontFamily: 'Inter, sans-serif',
+                fontSize: '9px',
+                fontWeight: 600,
+                letterSpacing: '1.5px',
+                textTransform: 'uppercase',
+                padding: '3px 10px',
+                borderRadius: '50px',
+                background: vendorTier === 'prestige' ? '#2C2420' : vendorTier === 'signature' ? 'rgba(201,168,76,0.1)' : 'rgba(140,123,110,0.08)',
+                color: vendorTier === 'prestige' ? '#C9A84C' : vendorTier === 'signature' ? '#C9A84C' : '#8C7B6E',
+                border: vendorTier === 'prestige' ? '1px solid rgba(201,168,76,0.3)' : vendorTier === 'signature' ? '1px solid rgba(201,168,76,0.25)' : '1px solid rgba(140,123,110,0.15)',
+              }}>
+                {vendorTier === 'prestige' ? 'Prestige' : vendorTier === 'signature' ? 'Signature' : 'Essential'}
+              </span>
+            </div>
           </div>
           {pendingBookings.length > 0 && (
             <div style={{
@@ -1840,8 +1857,7 @@ export default function VendorDashboard() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={actionBtnSmall} onClick={() => exportToCSV(invoices, 'TDW_Invoices', [{key:'client_name',label:'Client'},{key:'amount',label:'Amount'},{key:'status',label:'Status'},{key:'invoice_number',label:'Invoice #'}])}><Download size={12} /> Export</button>
-                <button style={actionBtnSmall} onClick={() => handlePrint('Invoices')}><Printer size={12} /> Print</button>
+                {hasTabAccess(vendorTier, 'payments') ? (<><button style={actionBtnSmall} onClick={() => exportToCSV(invoices, 'TDW_Invoices', [{key:'client_name',label:'Client'},{key:'amount',label:'Amount'},{key:'status',label:'Status'},{key:'invoice_number',label:'Invoice #'}])}><Download size={12} /> Export</button><button style={actionBtnSmall} onClick={() => handlePrint('Invoices')}><Printer size={12} /> Print</button></>) : (<button style={{ ...actionBtnSmall, opacity: 0.4, cursor: 'not-allowed' }} title="Upgrade to Signature"><Lock size={10} /> Export</button>)}
                 <button style={goldBtn} onClick={() => setShowInvoiceForm(!showInvoiceForm)}>
                 <Plus size={14} />
                 {showInvoiceForm ? 'Cancel' : 'New Invoice'}
@@ -1870,7 +1886,7 @@ export default function VendorDashboard() {
                     <input style={inp} type="number" placeholder="e.g. 150000" value={invAmount} onChange={e => setInvAmount(e.target.value)} />
                   </div>
                 </div>
-                {invAmount && (
+                {invAmount && hasTabAccess(vendorTier, 'tax') && (
                   <div style={{ background: 'var(--cream)', borderRadius: '8px', padding: '14px 16px', marginBottom: '16px', display: 'flex', gap: '24px' }}>
                     <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', fontWeight: 300 }}>
                       GST (18%): <strong style={{ color: 'var(--dark)' }}>Rs.{(parseInt(invAmount) * 0.18).toLocaleString('en-IN')}</strong>
@@ -1878,6 +1894,11 @@ export default function VendorDashboard() {
                     <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', fontWeight: 300 }}>
                       Total: <strong style={{ color: 'var(--dark)' }}>Rs.{(parseInt(invAmount) * 1.18).toLocaleString('en-IN')}</strong>
                     </span>
+                  </div>
+                )}
+                {invAmount && !hasTabAccess(vendorTier, 'tax') && (
+                  <div style={{ background: 'rgba(140,123,110,0.04)', borderRadius: '8px', padding: '14px 16px', marginBottom: '16px', border: '1px dashed rgba(140,123,110,0.2)' }}>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>GST invoicing available on the Signature plan</span>
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderTop: '1px solid var(--border)', borderBottom: invTDS ? '1px solid var(--border)' : 'none', marginBottom: '16px' }}>
@@ -2222,8 +2243,7 @@ export default function VendorDashboard() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={actionBtnSmall} onClick={() => exportToCSV(paymentSchedules, 'TDW_Payments', [{key:'client_name',label:'Client'},{key:'total_amount',label:'Total'},{key:'client_phone',label:'Phone'}])}><Download size={12} /> Export</button>
-                <button style={actionBtnSmall} onClick={() => handlePrint('Payment Schedules')}><Printer size={12} /> Print</button>
+                {hasTabAccess(vendorTier, 'payments') ? (<><button style={actionBtnSmall} onClick={() => exportToCSV(paymentSchedules, 'TDW_Payments', [{key:'client_name',label:'Client'},{key:'total_amount',label:'Total'},{key:'client_phone',label:'Phone'}])}><Download size={12} /> Export</button><button style={actionBtnSmall} onClick={() => handlePrint('Payment Schedules')}><Printer size={12} /> Print</button></>) : (<button style={{ ...actionBtnSmall, opacity: 0.4, cursor: 'not-allowed' }} title="Upgrade to Signature"><Lock size={10} /> Export</button>)}
                 <button style={goldBtn} onClick={() => setShowPaymentForm(!showPaymentForm)}>
                 <Plus size={14} />
                 {showPaymentForm ? 'Cancel' : 'New Schedule'}
@@ -2463,8 +2483,7 @@ export default function VendorDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)' }}>Tax & Finance</h2>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={actionBtnSmall} onClick={() => exportToCSV(tdsLedger, 'TDW_TDS', [{key:'transaction_type',label:'Type'},{key:'gross_amount',label:'Gross'},{key:'tds_amount',label:'TDS'},{key:'created_at',label:'Date'}])}><Download size={12} /> Export</button>
-                <button style={actionBtnSmall} onClick={() => handlePrint('Tax & Finance')}><Printer size={12} /> Print</button>
+                {hasTabAccess(vendorTier, 'payments') ? (<><button style={actionBtnSmall} onClick={() => exportToCSV(tdsLedger, 'TDW_TDS', [{key:'transaction_type',label:'Type'},{key:'gross_amount',label:'Gross'},{key:'tds_amount',label:'TDS'},{key:'created_at',label:'Date'}])}><Download size={12} /> Export</button><button style={actionBtnSmall} onClick={() => handlePrint('Tax & Finance')}><Printer size={12} /> Print</button></>) : (<button style={{ ...actionBtnSmall, opacity: 0.4, cursor: 'not-allowed' }} title="Upgrade to Signature"><Lock size={10} /> Export</button>)}
                 <button style={goldBtn} onClick={() => setShowTDSForm(!showTDSForm)}>
                 <Plus size={14} />
                 Add TDS Entry
@@ -2611,8 +2630,7 @@ export default function VendorDashboard() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={actionBtnSmall} onClick={() => exportToCSV(clients, 'TDW_Clients', [{key:'name',label:'Name'},{key:'phone',label:'Phone'},{key:'wedding_date',label:'Wedding Date'},{key:'notes',label:'Notes'}])}><Download size={12} /> Export</button>
-                <button style={actionBtnSmall} onClick={() => handlePrint('Clients')}><Printer size={12} /> Print</button>
+                {hasTabAccess(vendorTier, 'payments') ? (<><button style={actionBtnSmall} onClick={() => exportToCSV(clients, 'TDW_Clients', [{key:'name',label:'Name'},{key:'phone',label:'Phone'},{key:'wedding_date',label:'Wedding Date'},{key:'notes',label:'Notes'}])}><Download size={12} /> Export</button><button style={actionBtnSmall} onClick={() => handlePrint('Clients')}><Printer size={12} /> Print</button></>) : (<button style={{ ...actionBtnSmall, opacity: 0.4, cursor: 'not-allowed' }} title="Upgrade to Signature"><Lock size={10} /> Export</button>)}
                 <button style={goldBtn} onClick={() => setShowClientForm(!showClientForm)}>
                 <Plus size={14} />
                 {showClientForm ? 'Cancel' : 'Add Client'}
@@ -2984,12 +3002,67 @@ export default function VendorDashboard() {
               </div>
             </div>
 
-            <div className="card" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 400, color: 'var(--dark)', marginBottom: '4px' }}>Founding Partner Plan</div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 300, color: 'var(--grey)' }}>Rs.2,999/month · Locked forever · Full platform access</div>
+            {/* Subscription Management */}
+            <div className="card" style={{ padding: '32px', border: vendorTier === 'prestige' ? '1px solid rgba(201,168,76,0.3)' : '1px solid var(--card-border)' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Subscription</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: vendorTier === 'prestige' ? '#2C2420' : vendorTier === 'signature' ? 'rgba(201,168,76,0.1)' : 'rgba(140,123,110,0.06)',
+                  }}>
+                    <Award size={22} color={vendorTier === 'prestige' ? '#C9A84C' : vendorTier === 'signature' ? '#C9A84C' : '#8C7B6E'} />
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 500, color: 'var(--dark)' }}>
+                      {vendorTier === 'prestige' ? 'Prestige' : vendorTier === 'signature' ? 'Signature' : 'Essential'}
+                    </div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)', marginTop: '2px' }}>
+                      {vendorTier === 'prestige' ? 'Invite Only' : vendorTier === 'signature' ? 'Recommended for Established Businesses' : 'Recommended for Solo Vendors'}
+                    </div>
+                  </div>
+                </div>
+                <span style={{
+                  fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase',
+                  padding: '6px 14px', borderRadius: '50px',
+                  background: 'rgba(76,175,80,0.08)', color: '#4CAF50',
+                }}>Trial Active</span>
               </div>
-              <span className="badge-gold">Active</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', padding: '16px 0', borderTop: '1px solid var(--card-border)' }}>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '4px' }}>Plan</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: 'var(--dark)' }}>Free Trial</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '4px' }}>Trial Ends</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: 'var(--dark)' }}>
+                    {(() => { try { const s = JSON.parse(localStorage.getItem('vendor_web_session') || '{}'); return s.trialEnd ? new Date(s.trialEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Aug 1, 2026'; } catch(e) { return 'Aug 1, 2026'; } })()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '4px' }}>Status</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#4CAF50' }}>Active</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Verify Account */}
+            <div className="card" style={{ padding: '32px', background: 'linear-gradient(135deg, #FFFDF7, #FFF8EC)', border: '1px solid rgba(201,168,76,0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px' }}>Verify Your Account</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)', lineHeight: 1.6 }}>Link your phone number to secure your account. When the app launches, sign in with the same number.</div>
+                </div>
+                <button onClick={() => { toast.info('Phone verification coming soon. Your account is secure via your login credentials.'); }} style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  background: 'var(--dark)', color: 'var(--cream)',
+                  fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
+                  padding: '12px 24px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  letterSpacing: '0.5px', whiteSpace: 'nowrap',
+                }}>
+                  <Phone size={14} /> Verify with Phone
+                </button>
+              </div>
             </div>
 
             <div style={{ paddingTop: '8px' }}>
