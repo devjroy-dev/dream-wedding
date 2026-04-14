@@ -12,7 +12,6 @@ import {
 } from '../services/api';
 import * as Contacts from 'expo-contacts';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
@@ -120,13 +119,6 @@ export default function BTSPlannerScreen() {
   const [showAddMemory, setShowAddMemory] = useState(false);
   const [newMemoryCaption, setNewMemoryCaption] = useState('');
   const [selectedPrompt, setSelectedPrompt] = useState('');
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   useEffect(() => {
     loadSession();
   }, []);

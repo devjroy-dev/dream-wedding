@@ -10,19 +10,25 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { createOrGetUser } from '../services/api';
-import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
+import { PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
 import { DMSans_300Light, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 
 const { height, width } = Dimensions.get('window');
 
-GoogleSignin.configure({
-  webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
-  offlineAccess: true,
-});
-
 export default function LoginScreen() {
   const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      GoogleSignin.configure({
+        webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
+        offlineAccess: true,
+      });
+    } catch (e) {
+      console.warn('GoogleSignin.configure failed:', e);
+    }
+  }, []);
 
   // Animation values — everything starts invisible
   const theOpacity = useRef(new Animated.Value(0)).current;
@@ -37,13 +43,7 @@ export default function LoginScreen() {
   const buttonsTranslate = useRef(new Animated.Value(40)).current;
   const vendorOpacity = useRef(new Animated.Value(0)).current;
 
-  const [fontsLoaded] = useFonts({
-    PlayfairDisplay_400Regular,
-    PlayfairDisplay_600SemiBold,
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
+
 
   useEffect(() => {
 
@@ -133,14 +133,7 @@ export default function LoginScreen() {
     }
   };
 
-  if (!fontsLoaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ fontSize: 12, color: '#8C7B6E', letterSpacing: 14, textTransform: 'uppercase' }}>T H E</Text>
-        <Text style={{ fontSize: 42, color: '#2C2420', letterSpacing: 1, marginTop: 12 }}>Dream Wedding</Text>
-      </View>
-    );
-  }
+
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>

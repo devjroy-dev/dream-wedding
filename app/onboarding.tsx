@@ -10,7 +10,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { updateUser } from '../services/api';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
@@ -92,13 +91,6 @@ export default function OnboardingScreen() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const cityTypeOpacity = useRef(new Animated.Value(0)).current;
   const cityTypeTranslate = useRef(new Animated.Value(10)).current;
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   const filteredLocations = ALL_LOCATIONS.filter(loc =>
     loc.toLowerCase().includes(locationSearch.toLowerCase())
   );

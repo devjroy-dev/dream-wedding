@@ -8,7 +8,6 @@ import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getVendors } from '../services/api';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
@@ -61,13 +60,6 @@ export default function SpotlightScreen() {
 
   const currentMonth = MONTH_NAMES[new Date().getMonth()];
   const currentYear = new Date().getFullYear();
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   useEffect(() => {
     loadData();
   }, []);

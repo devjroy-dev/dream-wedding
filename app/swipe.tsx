@@ -9,7 +9,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { getVendors, addToMoodboard } from '../services/api';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display';
@@ -70,13 +69,6 @@ export default function SwipeScreen() {
 
   // Swipe position — useNativeDriver: false required for x/y interpolation
   const position = useRef(new Animated.ValueXY()).current;
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   useEffect(() => {
     loadSession();
   }, []);

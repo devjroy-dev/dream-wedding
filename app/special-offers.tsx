@@ -6,7 +6,6 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
@@ -100,13 +99,6 @@ export default function SpecialOffersScreen() {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentIndex, setCurrentIndex] = useState(0);
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   const filtered = activeFilter === 'All'
     ? OFFERS
     : OFFERS.filter(o => o.category === activeFilter);

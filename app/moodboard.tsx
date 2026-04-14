@@ -9,7 +9,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { getMoodboard, removeFromMoodboard } from '../services/api';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display';
@@ -45,34 +44,7 @@ export default function MoodboardScreen() {
   const [userBudgetLabel, setUserBudgetLabel] = useState('your budget');
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-    compareBtn: {
-    position: 'absolute',
-    bottom: 90,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#2C2420',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 50,
-    shadowColor: '#2C2420',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  compareBtnText: {
-    fontSize: 13,
-    color: '#F5F0E8',
-    fontFamily: 'DMSans_500Medium',
-    letterSpacing: 0.3,
-  },
-});
+
 
   useFocusEffect(
     useCallback(() => {

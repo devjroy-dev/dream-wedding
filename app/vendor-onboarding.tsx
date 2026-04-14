@@ -11,7 +11,6 @@ import { Feather } from '@expo/vector-icons';
 import { createVendor } from '../services/api';
 import { uploadMultipleImages } from '../services/cloudinary';
 import {
-  useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
 } from '@expo-google-fonts/playfair-display/index';
@@ -63,13 +62,6 @@ export default function VendorOnboardingScreen() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState('');
   const [panNumber, setPanNumber] = useState('');
-
-  const [fontsLoaded] = useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   const toggleCity = (city: string) => {
     setSelectedCities(prev =>
       prev.includes(city) ? prev.filter(c => c !== city) : [...prev, city]

@@ -6,8 +6,7 @@ import {
 import {
   PlayfairDisplay_400Regular,
   PlayfairDisplay_600SemiBold,
-  useFonts,
-} from '@expo-google-fonts/playfair-display';
+  } from '@expo-google-fonts/playfair-display';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -150,13 +149,6 @@ export default function VendorDashboardScreen() {
   const [clientNotes, setClientNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
-
-  useFonts({
-    DMSans_300Light,
-    DMSans_400Regular,
-    DMSans_500Medium,
-  });
-
   // Tools state
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [showInvoiceHistory, setShowInvoiceHistory] = useState(false);

@@ -2,7 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, Text } from 'react-native';
+import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/index';
+import { DMSans_300Light, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
+import * as SplashScreen from 'expo-splash-screen';
+
+SplashScreen.preventAutoHideAsync();
 
 const AUTH_SCREENS = ['login', 'otp', 'user-type', 'vendor-login', 'vendor-onboarding'];
 
@@ -73,6 +78,29 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    PlayfairDisplay_400Regular,
+    PlayfairDisplay_600SemiBold,
+    DMSans_300Light,
+    DMSans_400Regular,
+    DMSans_500Medium,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError]);
+
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ fontSize: 12, color: '#8C7B6E', letterSpacing: 14, textTransform: 'uppercase' }}>T H E</Text>
+        <Text style={{ fontSize: 42, color: '#2C2420', letterSpacing: 1, marginTop: 12 }}>Dream Wedding</Text>
+      </View>
+    );
+  }
+
   return (
     <>
       <StatusBar style="dark" />
@@ -107,6 +135,8 @@ export default function RootLayout() {
           <Stack.Screen name="destination-weddings" />
           <Stack.Screen name="special-offers" />
           <Stack.Screen name="spotlight" />
+          <Stack.Screen name="curated-suggestions" />
+          <Stack.Screen name="access-gate" />
         </Stack>
       </AuthGate>
     </>

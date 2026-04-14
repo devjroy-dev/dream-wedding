@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, Alert,
@@ -11,11 +11,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../services/firebase';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
-
-GoogleSignin.configure({
-  webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
-  offlineAccess: true,
-});
 
 async function lookupVendor(firebaseUID: string) {
   try {
@@ -39,6 +34,17 @@ async function saveVendorLogin(firebaseUID: string, vendorId: string, email?: st
 export default function VendorLoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
+
+  useEffect(() => {
+    try {
+      GoogleSignin.configure({
+        webClientId: '707007171164-3uphuoa96s37ur6h76dl09854k8tqa16.apps.googleusercontent.com',
+        offlineAccess: true,
+      });
+    } catch (e) {
+      console.warn('GoogleSignin.configure failed:', e);
+    }
+  }, []);
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
