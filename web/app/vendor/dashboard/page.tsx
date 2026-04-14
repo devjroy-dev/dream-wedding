@@ -1494,7 +1494,7 @@ export default function VendorDashboard() {
 
             // Build section rendering helper
             const renderSection = (section: any, opts?: { locked?: boolean; gold?: boolean; collapsed?: boolean }) => {
-              const isOpen = openSections[section.title] !== false;
+              const isOpen = openSections[section.title] === true;
               const filteredTabs = section.tabs.filter((tab: any) => !sidebarSearch || tab.label.toLowerCase().includes(sidebarSearch.toLowerCase()));
               if (sidebarSearch && filteredTabs.length === 0) return null;
               return (
