@@ -1509,7 +1509,7 @@ export default function VendorDashboard() {
                       letterSpacing: '1.5px', textTransform: 'uppercase', flex: 1,
                       color: opts?.gold ? 'rgba(201,168,76,0.7)' : opts?.locked ? 'rgba(140,123,110,0.4)' : 'rgba(140,123,110,0.6)',
                     }}>{section.title}</span>
-                    {opts?.locked && !sidebarCollapsed && <Lock size={8} color="#8C7B6E" />}
+                    {opts?.locked && !sidebarCollapsed && <Lock size={9} color={opts?.gold ? '#B8963A' : '#8C7B6E'} />}
                     {!sidebarCollapsed && <ChevronDown size={10} color="rgba(140,123,110,0.3)" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />}
                   </button>
                   {isOpen && filteredTabs.map((tab: any) => {
@@ -1536,7 +1536,7 @@ export default function VendorDashboard() {
                           fontWeight: isActive ? 500 : 300, flex: 1,
                           color: isActive ? (opts?.gold ? '#C9A84C' : 'var(--gold)') : opts?.gold ? 'rgba(201,168,76,0.5)' : 'var(--grey)',
                         }}>{!sidebarCollapsed && tab.label}</span>
-                        {tabLocked && !sidebarCollapsed && <Lock size={9} color={opts?.gold ? '#C9A84C' : '#8C7B6E'} />}
+                        {tabLocked && !sidebarCollapsed && <Lock size={9} color={opts?.gold ? '#B8963A' : '#8C7B6E'} />}
                         {!tabLocked && opts?.gold && !sidebarCollapsed && <Award size={9} color={isActive ? '#C9A84C' : 'rgba(201,168,76,0.35)'} />}
                       </button>
                     );
