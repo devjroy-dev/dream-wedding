@@ -17,7 +17,7 @@ const categories = [
 const features = [
   { icon: ArrowRight, title: 'Curated Discovery', desc: 'Swipe through handpicked vendors. Every card tells a complete story — portfolio, pricing, vibe. No noise.' },
   { icon: Shield, title: 'Serious Enquiries Only', desc: 'Every enquiry is backed by a Rs.999 commitment. No tyre-kickers. Only couples who mean business reach your inbox.' },
-  { icon: Lock, title: 'Secure Booking Token', desc: 'Confirm bookings with a Rs.10,000 token through secure escrow. Your date is locked the moment both parties confirm.' },
+  { icon: Lock, title: 'Payment Shield', desc: 'Vendor\'s final payment is secured before the wedding day. Cash or digital settlement — vendor chooses, couple commits. Protected by TDW.' },
   { icon: CheckCircle, title: 'Verified Vendors Only', desc: 'Every vendor is personally vetted. Premium portfolios. Real reviews from app-confirmed bookings only.' },
 ];
 

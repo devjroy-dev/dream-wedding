@@ -402,7 +402,7 @@ export default function AdminPage() {
               ))}
             </div>
             <div style={{ fontSize: 13, color: '#8C7B6E' }}>
-              Contact details are shared automatically when a booking is confirmed and escrow is released. This is communicated to users at the point of filtering.
+              Contact details are shared automatically when a booking is confirmed. Payment Shield protects the vendor's final payment before the wedding day.
             </div>
             <div style={{ marginTop: 16 }}>
               <a href="https://supabase.com/dashboard" target="_blank" style={{ display: 'inline-block', padding: '10px 20px', background: '#1C1C1C', borderRadius: 9, textDecoration: 'none', color: '#4CAF50', fontWeight: 500, fontSize: 13 }}>View All Messages in Supabase →</a>

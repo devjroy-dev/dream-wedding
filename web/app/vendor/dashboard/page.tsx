@@ -9,7 +9,7 @@ import {
   Edit2, Phone, Lock, Activity, Zap, Image, Percent,
   MinusCircle, Share2, List, Package, Target,
   DollarSign, BookOpen, Tool, Truck, Coffee,
-  Navigation, Upload, ArrowDownCircle
+  Navigation, Upload, ArrowDownCircle, Shield
 } from 'react-feather';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app/api';
@@ -36,6 +36,7 @@ const SIDEBAR_SECTIONS = [
     { id: 'tax', label: 'Tax & Finance', icon: Percent },
     { id: 'advancetax', label: 'Advance Tax', icon: BookOpen },
     { id: 'forecast', label: 'Revenue Forecast', icon: TrendingUp },
+    { id: 'paymentshield', label: 'Payment Shield', icon: Shield },
   ]},
   { title: 'Planning', tabs: [
     { id: 'contracts', label: 'Contracts', icon: FileText },
@@ -2418,7 +2419,7 @@ export default function VendorDashboard() {
                           Booked: {new Date(booking.created_at).toLocaleDateString('en-IN')}
                         </div>
                       </div>
-                      <span className="badge-gold">In Escrow</span>
+                      <span className="badge-gold">Payment Shield Active</span>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button style={{ ...greyBtn, flex: 1, justifyContent: 'center' }}>
