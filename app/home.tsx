@@ -161,6 +161,30 @@ export default function HomeScreen() {
             <Feather name="arrow-right" size={16} color="#C9A84C" />
           </TouchableOpacity>
 
+          {/* Luxury / Curated — editorial entry */}
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 16,
+              backgroundColor: '#2C2420', borderRadius: 16, padding: 20,
+              borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)',
+            }}
+            onPress={() => router.push('/luxury-browse' as any)}
+            activeOpacity={0.85}
+          >
+            <View style={{
+              width: 44, height: 44, borderRadius: 12,
+              backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)',
+              justifyContent: 'center', alignItems: 'center',
+            }}>
+              <Feather name="award" size={18} color="#C9A84C" />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ fontSize: 16, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.3 }}>Curated</Text>
+              <Text style={{ fontSize: 11, color: 'rgba(245,240,232,0.5)', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 }}>India's most distinguished wedding professionals</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#C9A84C" />
+          </TouchableOpacity>
+
           {/* Destination Weddings */}
           <TouchableOpacity style={s.secondaryCard} onPress={() => router.push('/destination-weddings' as any)} activeOpacity={0.85}>
             <View style={s.secondaryIconBox}>
