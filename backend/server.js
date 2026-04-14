@@ -2490,3 +2490,76 @@ app.delete('/api/tds/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
+
+
+// ==================
+// LUXURY / CURATED VENDORS
+// ==================
+
+// Browse luxury vendors (couple-side)
+app.get('/api/luxury/vendors', async (req, res) => {
+  try {
+    const { category, city } = req.query;
+    let query = supabase.from('vendors').select('*').eq('is_luxury', true).eq('luxury_approved', true);
+    if (category) query = query.eq('luxury_category', category);
+    if (city) query = query.contains('destination_tags', [city]);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Request appointment (couple-side)
+app.post('/api/luxury/appointments', async (req, res) => {
+  try {
+    const { vendor_id, couple_id, appointment_fee } = req.body;
+    const response_deadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    // Default split: 80% vendor, 20% TDW
+    const vendor_share = Math.round(appointment_fee * 0.8);
+    const tdw_share = appointment_fee - vendor_share;
+    const { data, error } = await supabase.from('luxury_appointments').insert([{
+      vendor_id, couple_id, appointment_fee, status: 'requested',
+      requested_at: new Date().toISOString(), response_deadline,
+      vendor_share, tdw_share, payment_id: null, refund_id: null,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Vendor confirms or declines appointment
+app.put('/api/luxury/appointments/:id', async (req, res) => {
+  try {
+    const { status } = req.body; // 'confirmed' or 'declined'
+    const updates = { status, responded_at: new Date().toISOString() };
+    if (status === 'declined') {
+      updates.refund_id = 'pending_refund'; // Razorpay refund triggered here in production
+    }
+    const { data, error } = await supabase.from('luxury_appointments').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Vendor's appointment list
+app.get('/api/luxury/appointments/vendor/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('luxury_appointments').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Expire unresponded appointments (cron — call daily)
+app.post('/api/luxury/expire-appointments', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase.from('luxury_appointments')
+      .update({ status: 'expired', refund_id: 'auto_refund' })
+      .eq('status', 'requested')
+      .lt('response_deadline', now)
+      .select();
+    if (error) throw error;
+    res.json({ success: true, expired: data?.length || 0, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
