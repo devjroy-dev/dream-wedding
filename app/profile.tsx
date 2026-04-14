@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Alert, ActivityIndicator, Modal, TextInput
-} from 'react-native';
+, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { updateUser } from '../services/api';
@@ -39,6 +39,18 @@ export default function ProfileScreen() {
       if (tier) setCoupleTier(tier as any);
       const tokens = await AsyncStorage.getItem('tdw_token_balance');
       if (tokens !== null) setTokenBalance(parseInt(tokens));
+      // Check if referred by vendor
+      const referredBy = await AsyncStorage.getItem('tdw_referred_by_vendor');
+      if (referredBy && !await AsyncStorage.getItem('tdw_referral_credited')) {
+        // Credit the vendor's referral
+        try {
+          await fetch('https://dream-wedding-production-89ae.up.railway.app/api/referrals/track-click', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vendor_id: referredBy, referral_code: referredBy, status: 'signed_up' }),
+          });
+          await AsyncStorage.setItem('tdw_referral_credited', 'true');
+        } catch (e) {}
+      }
     } catch (e) {}
     finally { setLoading(false); }
   };
@@ -370,13 +382,20 @@ export default function ProfileScreen() {
         {/* Referral Banner */}
         <TouchableOpacity
           style={styles.referralCard}
-          onPress={() => Alert.alert('Invite a Friend', 'Share your referral link:\n\nthedreamwedding.in/invite/your-code\n\nGet 1 month Premium free when they sign up!')}
+          onPress={async () => {
+            const refCode = session?.userId?.slice(0, 8) || 'invite';
+            try {
+              await Share.share({
+                message: 'Plan your dream wedding with The Dream Wedding — India\'s most elegant wedding planning app. Join using my link and get 2 bonus tokens!\n\nhttps://thedreamwedding.in/ref/' + refCode,
+              });
+            } catch (e) {}
+          }}
         >
           <View style={styles.referralLeft}>
             <Text style={styles.referralTitle}>Invite a friend</Text>
-            <Text style={styles.referralSub}>Get 1 month Premium free when they sign up</Text>
+            <Text style={styles.referralSub}>They get 2 bonus tokens, you get 2 bonus tokens</Text>
           </View>
-          <Text style={styles.referralArrow}>›</Text>
+          <Feather name="share-2" size={16} color="#C9A84C" />
         </TouchableOpacity>
 
         {/* Post Wedding */}

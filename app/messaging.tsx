@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Dimensions, ScrollView, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator
-} from 'react-native';
+, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { joinConversation, sendSocketMessage, onReceiveMessage, offReceiveMessage } from '../services/socket';
 import { getMessages, getUserBookings } from '../services/api';
@@ -12,6 +13,7 @@ import { getMessages, getUserBookings } from '../services/api';
 const { width } = Dimensions.get('window');
 
 export default function MessagingScreen() {
+  const [coupleTier, setCoupleTier] = useState<string>('free');
   const router = useRouter();
   const [activeConversation, setActiveConversation] = useState<any>(null);
   const [newMessage, setNewMessage] = useState('');
@@ -22,6 +24,7 @@ export default function MessagingScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
+    AsyncStorage.getItem('tdw_couple_tier').then(t => { if (t) setCoupleTier(t); }).catch(() => {});
     initSession();
   }, []);
 
@@ -90,6 +93,22 @@ export default function MessagingScreen() {
 
     return () => offReceiveMessage();
   }, [activeConversation, userId]);
+
+  const sendImage = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) { Alert.alert('Permission needed', 'Please allow photo access.'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
+      if (!result.canceled && result.assets[0]) {
+        const imageMsg = '[Image] ' + result.assets[0].uri.split('/').pop();
+        if (userId && activeConversation) {
+          sendSocketMessage(userId, activeConversation.vendorId, imageMsg, 'user');
+          setMessages(prev => [...prev, { message: imageMsg, sender_type: 'user', created_at: new Date().toISOString() }]);
+          setNewMessage('');
+        }
+      }
+    } catch (e) {}
+  };
 
   const sendMessage = () => {
     if (newMessage.trim() === '' || !activeConversation || !userId) return;

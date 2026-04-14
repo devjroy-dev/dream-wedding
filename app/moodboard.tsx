@@ -117,6 +117,17 @@ export default function MoodboardScreen() {
     );
   };
 
+  const handleInviteCoplanner = async () => {
+    try {
+      const session = await AsyncStorage.getItem('user_session');
+      const parsed = session ? JSON.parse(session) : {};
+      const code = parsed.userId?.slice(0, 8) || 'plan';
+      await Share.share({
+        message: 'Join me on The Dream Wedding to plan our wedding together! Open this link to see my saved vendors and plan with me:\n\nhttps://thedreamwedding.in/coplan/' + code,
+      });
+    } catch (e) {}
+  };
+
   const handleShare = async () => {
     try {
       await Share.share({
@@ -188,9 +199,14 @@ export default function MoodboardScreen() {
             </Text>
           </View>
           {saved.length > 0 && (
-            <TouchableOpacity onPress={handleShare} style={styles.shareIconBtn}>
-              <Feather name="share-2" size={16} color="#2C2420" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={handleInviteCoplanner} style={styles.shareIconBtn}>
+                <Feather name="users" size={16} color="#C9A84C" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleShare} style={styles.shareIconBtn}>
+                <Feather name="share-2" size={16} color="#2C2420" />
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 

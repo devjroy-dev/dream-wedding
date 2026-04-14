@@ -11,7 +11,8 @@ import {
   Text,
   TouchableOpacity,
   View
-} from 'react-native';
+, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getVendor } from '../services/api';
 
 const { width, height } = Dimensions.get('window');
@@ -39,6 +40,9 @@ const MOCK_VENDOR = {
 };
 
 export default function VendorProfileScreen() {
+  const [coupleTier, setCoupleTier] = useState<string>('free');
+  const [vendorAvailable, setVendorAvailable] = useState<boolean | null>(null);
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const [vendor, setVendor] = useState<any>(null);
@@ -48,6 +52,7 @@ export default function VendorProfileScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    AsyncStorage.getItem('tdw_couple_tier').then(t => { if (t) setCoupleTier(t); }).catch(() => {});
     loadVendor();
   }, [id]);
 
@@ -74,7 +79,31 @@ export default function VendorProfileScreen() {
   });
 
   if (loading) {
-    return (
+    const checkAvailability = async (vendorId: string) => {
+    try {
+      setCheckingAvailability(true);
+      const session = await AsyncStorage.getItem('user_session');
+      if (!session) return;
+      const parsed = JSON.parse(session);
+      const weddingDate = parsed.wedding_date;
+      if (!weddingDate) { Alert.alert('Set Your Date', 'Please set your wedding date in your profile first.'); return; }
+      const res = await fetch('https://dream-wedding-production-89ae.up.railway.app/api/availability/' + vendorId);
+      const data = await res.json();
+      if (data.success) {
+        const blocked = (data.data || []).map((d: any) => d.blocked_date);
+        const myDate = new Date(weddingDate).toLocaleDateString('en-IN');
+        const isBlocked = blocked.some((d: string) => d === myDate || d === weddingDate);
+        setVendorAvailable(!isBlocked);
+        Alert.alert(
+          isBlocked ? 'Not Available' : 'Available!',
+          isBlocked ? 'This vendor is not available on your wedding date.' : 'Great news — this vendor appears to be available on your date! Send an enquiry to confirm.',
+        );
+      }
+    } catch (e) { Alert.alert('Error', 'Could not check availability.'); }
+    finally { setCheckingAvailability(false); }
+  };
+
+  return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C9A84C" />
       </View>
@@ -82,7 +111,7 @@ export default function VendorProfileScreen() {
   }
 
   if (!vendor) {
-    return (
+      return (
       <View style={styles.loadingContainer}>
         <Text style={styles.errorText}>Vendor not found</Text>
         <TouchableOpacity onPress={() => router.back()}>
@@ -93,6 +122,30 @@ export default function VendorProfileScreen() {
   }
 
   const images = vendor.portfolio_images || [];
+
+  const checkAvailability = async (vendorId: string) => {
+    try {
+      setCheckingAvailability(true);
+      const session = await AsyncStorage.getItem('user_session');
+      if (!session) return;
+      const parsed = JSON.parse(session);
+      const weddingDate = parsed.wedding_date;
+      if (!weddingDate) { Alert.alert('Set Your Date', 'Please set your wedding date in your profile first.'); return; }
+      const res = await fetch('https://dream-wedding-production-89ae.up.railway.app/api/availability/' + vendorId);
+      const data = await res.json();
+      if (data.success) {
+        const blocked = (data.data || []).map((d: any) => d.blocked_date);
+        const myDate = new Date(weddingDate).toLocaleDateString('en-IN');
+        const isBlocked = blocked.some((d: string) => d === myDate || d === weddingDate);
+        setVendorAvailable(!isBlocked);
+        Alert.alert(
+          isBlocked ? 'Not Available' : 'Available!',
+          isBlocked ? 'This vendor is not available on your wedding date.' : 'Great news — this vendor appears to be available on your date! Send an enquiry to confirm.',
+        );
+      }
+    } catch (e) { Alert.alert('Error', 'Could not check availability.'); }
+    finally { setCheckingAvailability(false); }
+  };
 
   return (
     <View style={styles.container}>
