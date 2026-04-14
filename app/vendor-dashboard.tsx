@@ -760,6 +760,7 @@ export default function VendorDashboardScreen() {
     else if (datePickerTarget === 'promoExpiry') setNewPromoExpiry(formatted);
     else if (datePickerTarget === 'blockDate') setNewBlockDate(formatted);
     else if (datePickerTarget === 'contractDate') setContractEventDate(formatted);
+    else if (datePickerTarget === 'dsTaskDue') setNewTaskDueDate(formatted);
     else if (datePickerTarget.startsWith('instalment_')) {
       const idx = parseInt(datePickerTarget.split('_')[1]);
       const u = [...paymentInstalments];
@@ -767,6 +768,22 @@ export default function VendorDashboardScreen() {
       setPaymentInstalments(u);
     }
   };
+
+  // Deluxe Suite create states
+  const [showCreateTask, setShowCreateTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskAssignee, setNewTaskAssignee] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState('medium');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [dsTeamMembers, setDsTeamMembers] = useState<any[]>([]);
+  const [dsMessages, setDsMessages] = useState<any[]>([]);
+  const [dsNewMessage, setDsNewMessage] = useState('');
+  const [dsChannel, setDsChannel] = useState('general');
+  const [dsCheckins, setDsCheckins] = useState<any[]>([]);
+  const [dsSentiment, setDsSentiment] = useState<any[]>([]);
+  const [dsPhotos, setDsPhotos] = useState<any[]>([]);
+  const [dsTemplates, setDsTemplates] = useState<any[]>([]);
+  const [dsPerformance, setDsPerformance] = useState<any[]>([]);
 
   // WhatsApp broadcast state
   const [broadcastMessage, setBroadcastMessage] = useState('');
@@ -845,13 +862,27 @@ export default function VendorDashboardScreen() {
 
   const loadDeluxeSuiteData = async () => {
     try {
-      const [briefingRes, tasksRes, procRes, delRes, trialsRes] = await Promise.all([
+      const [briefingRes, tasksRes, procRes, delRes, trialsRes, teamRes, msgRes, checkRes, sentRes, photoRes, tmplRes, perfRes] = await Promise.all([
         fetch(`${API}/api/ds/briefing/${vendorSession.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/ds/tasks/${vendorSession.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/ds/procurement/${vendorSession.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/ds/deliveries/${vendorSession.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/ds/trials/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/team/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/messages/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/checkins/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/sentiment/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/photos/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/templates/${vendorSession.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/ds/performance/${vendorSession.vendorId}`).then(r => r.json()),
       ]);
+      if (teamRes.success) setDsTeamMembers(teamRes.data || []);
+      if (msgRes.success) setDsMessages(msgRes.data || []);
+      if (checkRes.success) setDsCheckins(checkRes.data || []);
+      if (sentRes.success) setDsSentiment(sentRes.data || []);
+      if (photoRes.success) setDsPhotos(photoRes.data || []);
+      if (tmplRes.success) setDsTemplates(tmplRes.data || []);
+      if (perfRes.success) setDsPerformance(perfRes.data || []);
       const tasks = tasksRes.success ? tasksRes.data || [] : [];
       const overdue = tasks.filter((t: any) => t.status !== 'completed' && new Date(t.due_date) < new Date()).length;
       setDsData({
@@ -870,6 +901,65 @@ export default function VendorDashboardScreen() {
   };
 
   // ── All existing business logic functions (unchanged) ──────────────────────
+
+  // ── Deluxe Suite Handlers ────────────────────────────────────────────────
+
+  const handleCreateDsTask = async () => {
+    if (!newTaskTitle) { Alert.alert('Missing info', 'Please enter a task title.'); return; }
+    try {
+      const res = await fetch(`${API}/api/ds/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor_id: vendorSession.vendorId, title: newTaskTitle, assigned_to: newTaskAssignee || null, priority: newTaskPriority, due_date: newTaskDueDate || null, status: 'pending' }) });
+      const data = await res.json();
+      if (data.success) {
+        setDsData(prev => ({ ...prev, tasks: [data.data, ...prev.tasks] }));
+        setNewTaskTitle(''); setNewTaskAssignee(''); setNewTaskDueDate(''); setShowCreateTask(false);
+      }
+    } catch (e) { Alert.alert('Error', 'Could not create task.'); }
+  };
+
+  const handleToggleTaskStatus = async (taskId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'completed' ? 'pending' : 'completed';
+    try {
+      await fetch(`${API}/api/ds/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: newStatus }) });
+      setDsData(prev => ({ ...prev, tasks: prev.tasks.map((t: any) => t.id === taskId ? { ...t, status: newStatus } : t) }));
+    } catch (e) {}
+  };
+
+  const handleUpdateProcStatus = async (id: string, newStatus: string) => {
+    try {
+      await fetch(`${API}/api/ds/procurement/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: newStatus }) });
+      setDsData(prev => ({ ...prev, procurement: prev.procurement.map((p: any) => p.id === id ? { ...p, status: newStatus } : p) }));
+    } catch (e) {}
+  };
+
+  const handleUpdateDelStatus = async (id: string, newStatus: string) => {
+    try {
+      await fetch(`${API}/api/ds/deliveries/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: newStatus }) });
+      setDsData(prev => ({ ...prev, deliveries: prev.deliveries.map((d: any) => d.id === id ? { ...d, status: newStatus } : d) }));
+    } catch (e) {}
+  };
+
+  const handleSendDsMessage = async () => {
+    if (!dsNewMessage.trim()) return;
+    try {
+      const res = await fetch(`${API}/api/ds/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor_id: vendorSession.vendorId, channel: dsChannel, sender_name: vendorSession.vendorName || 'Owner', message: dsNewMessage }) });
+      const data = await res.json();
+      if (data.success) { setDsMessages(prev => [data.data, ...prev]); setDsNewMessage(''); }
+    } catch (e) {}
+  };
+
+  const handleApprovePhoto = async (photoId: string, status: string) => {
+    try {
+      await fetch(`${API}/api/ds/photos/${photoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      setDsPhotos(prev => prev.map((p: any) => p.id === photoId ? { ...p, status } : p));
+    } catch (e) {}
+  };
+
+  const handleUpdateTrialStatus = async (trialId: string, status: string) => {
+    try {
+      await fetch(`${API}/api/ds/trials/${trialId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      setDsData(prev => ({ ...prev, trials: prev.trials.map((t: any) => t.id === trialId ? { ...t, status } : t) }));
+    } catch (e) {}
+  };
 
   const openSettings = async () => {
     try {
@@ -1483,38 +1573,217 @@ export default function VendorDashboardScreen() {
             </TouchableOpacity>
           )}
 
-          {/* ── PRESTIGE: Command Feed ── */}
+
+          {/* ── PRESTIGE: Live Command Feed ── */}
           {vendorTier === 'prestige' && (
             <>
               <PrestigeStatsRow dsData={dsData} />
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                {PRESTIGE_COMMANDS.map(cmd => (
-                  <CommandCard
-                    key={cmd.id}
-                    icon={cmd.icon}
-                    label={cmd.label}
-                    color={cmd.color}
-                    count={cmd.id === 'tasks' ? dsData.tasks.length : cmd.id === 'procurement' ? dsData.procurement.length : cmd.id === 'delivery' ? dsData.deliveries.length : cmd.id === 'trials' ? dsData.trials.length : 0}
-                    urgent={cmd.id === 'tasks' ? dsData.overdueTasks : undefined}
-                    onPress={() => {
-                      if (cmd.id === 'tasks') setActiveTab('ds-event-dashboard');
-                      else if (cmd.id === 'procurement') setActiveTab('ds-procurement');
-                      else if (cmd.id === 'delivery') setActiveTab('ds-deliveries');
-                      else if (cmd.id === 'trials') setActiveTab('ds-trials');
-                      else if (cmd.id === 'appointments') setActiveTab('ds-trials');
-                      else if (cmd.id === 'team-activity') setActiveTab('ds-team-hub');
-                      else if (cmd.id === 'payments') setActiveTab('Payments');
-                    }}
-                  />
-                ))}
+
+              {/* ── TASKS (inline, actionable) ── */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={styles.sectionLabel}>TASKS</Text>
+                <TouchableOpacity onPress={() => setShowCreateTask(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#2C2420', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Feather name="plus" size={11} color="#C9A84C" />
+                  <Text style={{ fontSize: 11, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>New Task</Text>
+                </TouchableOpacity>
               </View>
+              {showCreateTask && (
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#EDE8E0', gap: 10 }}>
+                  <TextInput style={styles.fieldInput} placeholder="Task title" placeholderTextColor="#B8ADA4" value={newTaskTitle} onChangeText={setNewTaskTitle} />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput style={[styles.fieldInput, { flex: 1 }]} placeholder="Assign to" placeholderTextColor="#B8ADA4" value={newTaskAssignee} onChangeText={setNewTaskAssignee} />
+                    <TouchableOpacity style={[styles.fieldInput, { justifyContent: 'center' }]} onPress={() => openDatePicker('dsTaskDue', newTaskDueDate)}>
+                      <Text style={{ fontSize: 14, color: newTaskDueDate ? '#2C2420' : '#B8ADA4', fontFamily: 'DMSans_400Regular' }}>{newTaskDueDate || 'Due date'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {['low', 'medium', 'high', 'urgent'].map(p => (
+                      <TouchableOpacity key={p} onPress={() => setNewTaskPriority(p)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 50, backgroundColor: newTaskPriority === p ? '#2C2420' : '#FFFFFF', borderWidth: 1, borderColor: newTaskPriority === p ? '#2C2420' : '#EDE8E0' }}>
+                        <Text style={{ fontSize: 11, color: newTaskPriority === p ? '#C9A84C' : '#8C7B6E', fontFamily: 'DMSans_500Medium', textTransform: 'capitalize' }}>{p}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity style={[styles.unblockBtn, { flex: 1, alignItems: 'center' }]} onPress={() => setShowCreateTask(false)}><Text style={styles.unblockBtnText}>Cancel</Text></TouchableOpacity>
+                    <TouchableOpacity style={[styles.goldBtn, { flex: 2 }]} onPress={handleCreateDsTask}><Text style={styles.goldBtnText}>CREATE TASK</Text></TouchableOpacity>
+                  </View>
+                </View>
+              )}
+              {dsData.tasks.length === 0 ? (
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 20, borderWidth: 1, borderColor: '#EDE8E0', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>No tasks yet. Create your first task above.</Text>
+                </View>
+              ) : (
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#EDE8E0', overflow: 'hidden' }}>
+                  {dsData.tasks.slice(0, 8).map((task: any, idx: number) => (
+                    <View key={task.id}>
+                      <TouchableOpacity onPress={() => handleToggleTaskStatus(task.id, task.status)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 }}>
+                        <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: task.status === 'completed' ? '#4CAF50' : task.priority === 'urgent' ? '#E57373' : task.priority === 'high' ? '#C9A84C' : '#EDE8E0', backgroundColor: task.status === 'completed' ? '#4CAF5015' : 'transparent', justifyContent: 'center', alignItems: 'center' }}>
+                          {task.status === 'completed' && <Feather name="check" size={12} color="#4CAF50" />}
+                        </View>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ fontSize: 14, color: task.status === 'completed' ? '#B8ADA4' : '#2C2420', fontFamily: 'DMSans_400Regular', textDecorationLine: task.status === 'completed' ? 'line-through' : 'none' }}>{task.title}</Text>
+                          <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{task.assigned_to || 'Unassigned'}{task.due_date ? ' · ' + task.due_date : ''}</Text>
+                        </View>
+                        {task.priority === 'urgent' && <View style={{ backgroundColor: '#E5737320', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 2 }}><Text style={{ fontSize: 9, color: '#E57373', fontFamily: 'DMSans_500Medium' }}>URGENT</Text></View>}
+                      </TouchableOpacity>
+                      {idx < Math.min(dsData.tasks.length, 8) - 1 && <View style={{ height: 1, backgroundColor: '#EDE8E0', marginHorizontal: 16 }} />}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* ── TEAM CHAT (inline) ── */}
+              <Text style={styles.sectionLabel}>TEAM CHAT</Text>
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#EDE8E0', gap: 12 }}>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {['general', 'broadcast'].map(ch => (
+                    <TouchableOpacity key={ch} onPress={() => setDsChannel(ch)} style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 50, backgroundColor: dsChannel === ch ? '#2C2420' : '#FAF6F0', borderWidth: 1, borderColor: dsChannel === ch ? '#2C2420' : '#EDE8E0' }}>
+                      <Text style={{ fontSize: 11, color: dsChannel === ch ? '#C9A84C' : '#8C7B6E', fontFamily: 'DMSans_500Medium', textTransform: 'capitalize' }}>#{ch}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {dsMessages.filter((m: any) => m.channel === dsChannel).slice(0, 5).map((msg: any) => (
+                  <View key={msg.id} style={{ gap: 2 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={{ fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_500Medium' }}>{msg.sender_name || 'Team'}</Text>
+                      <Text style={{ fontSize: 9, color: '#B8ADA4', fontFamily: 'DMSans_300Light' }}>{msg.created_at ? new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 18 }}>{msg.message}</Text>
+                  </View>
+                ))}
+                {dsMessages.filter((m: any) => m.channel === dsChannel).length === 0 && (
+                  <Text style={{ fontSize: 12, color: '#B8ADA4', fontFamily: 'DMSans_300Light', textAlign: 'center' }}>No messages in #{dsChannel}</Text>
+                )}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput style={[styles.fieldInput, { flex: 1 }]} placeholder="Type a message..." placeholderTextColor="#B8ADA4" value={dsNewMessage} onChangeText={setDsNewMessage} />
+                  <TouchableOpacity onPress={handleSendDsMessage} style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#C9A84C', justifyContent: 'center', alignItems: 'center' }}>
+                    <Feather name="send" size={14} color="#2C2420" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* ── PROCUREMENT STATUS ── */}
+              {dsData.procurement.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>PROCUREMENT</Text>
+                  {dsData.procurement.slice(0, 5).map((item: any) => {
+                    const nextStatus: Record<string, string> = { ordered: 'in_transit', in_transit: 'received', received: 'verified' };
+                    return (
+                      <View key={item.id} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EDE8E0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{item.item_name || item.description || 'Item'}</Text>
+                          <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{item.supplier || ''}</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => nextStatus[item.status] && handleUpdateProcStatus(item.id, nextStatus[item.status])} style={{ backgroundColor: item.status === 'verified' ? '#4CAF5015' : '#FFF8EC', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: item.status === 'verified' ? '#4CAF50' : '#E8D9B5' }}>
+                          <Text style={{ fontSize: 10, color: item.status === 'verified' ? '#4CAF50' : '#C9A84C', fontFamily: 'DMSans_500Medium', textTransform: 'capitalize' }}>{item.status === 'verified' ? 'Done' : item.status?.replace('_', ' ') + ' →'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* ── DELIVERIES STATUS ── */}
+              {dsData.deliveries.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>DELIVERIES</Text>
+                  {dsData.deliveries.slice(0, 5).map((item: any) => {
+                    const nextStatus: Record<string, string> = { preparing: 'dispatched', dispatched: 'delivered', delivered: 'client_confirmed' };
+                    return (
+                      <View key={item.id} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EDE8E0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{item.item_name || item.description || 'Delivery'}</Text>
+                          <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{item.client_name || ''}</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => nextStatus[item.status] && handleUpdateDelStatus(item.id, nextStatus[item.status])} style={{ backgroundColor: item.status === 'client_confirmed' ? '#4CAF5015' : '#FFF8EC', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: item.status === 'client_confirmed' ? '#4CAF50' : '#E8D9B5' }}>
+                          <Text style={{ fontSize: 10, color: item.status === 'client_confirmed' ? '#4CAF50' : '#C9A84C', fontFamily: 'DMSans_500Medium', textTransform: 'capitalize' }}>{item.status === 'client_confirmed' ? 'Confirmed' : item.status?.replace('_', ' ') + ' →'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* ── TRIALS ── */}
+              {dsData.trials.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>UPCOMING TRIALS</Text>
+                  {dsData.trials.slice(0, 4).map((trial: any) => (
+                    <View key={trial.id} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EDE8E0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{trial.type || 'Trial'} — {trial.client_name || 'Client'}</Text>
+                        <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{trial.date} · {trial.assigned_to || 'Unassigned'}</Text>
+                      </View>
+                      {trial.status === 'scheduled' ? (
+                        <TouchableOpacity onPress={() => handleUpdateTrialStatus(trial.id, 'confirmed')} style={{ backgroundColor: '#FFF8EC', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#E8D9B5' }}>
+                          <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>Confirm</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={{ backgroundColor: '#4CAF5015', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 }}>
+                          <Text style={{ fontSize: 10, color: '#4CAF50', fontFamily: 'DMSans_500Medium' }}>{trial.status}</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {/* ── TEAM ON SITE ── */}
+              {dsTeamMembers.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>TEAM ({dsTeamMembers.filter((m: any) => m.status === 'active').length} active)</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {dsTeamMembers.filter((m: any) => m.status === 'active').slice(0, 8).map((member: any) => (
+                      <View key={member.id} style={{ backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#EDE8E0', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10, color: '#C9A84C', fontFamily: 'DMSans_500Medium' }}>{(member.name || '?')[0]}</Text>
+                        </View>
+                        <View>
+                          <Text style={{ fontSize: 12, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{member.name}</Text>
+                          <Text style={{ fontSize: 9, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{member.role || 'Staff'}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {/* ── PHOTO APPROVALS ── */}
+              {dsPhotos.filter((p: any) => p.status === 'pending').length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>PHOTO APPROVALS ({dsPhotos.filter((p: any) => p.status === 'pending').length} pending)</Text>
+                  {dsPhotos.filter((p: any) => p.status === 'pending').slice(0, 4).map((photo: any) => (
+                    <View key={photo.id} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#EDE8E0', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center' }}>
+                        <Feather name="image" size={20} color="#C9A84C" />
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular' }}>{photo.description || 'Photo submission'}</Text>
+                        <Text style={{ fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_300Light' }}>{photo.submitted_by || 'Team member'}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity onPress={() => handleApprovePhoto(photo.id, 'approved')} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#4CAF5015', justifyContent: 'center', alignItems: 'center' }}>
+                          <Feather name="check" size={14} color="#4CAF50" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleApprovePhoto(photo.id, 'revision_needed')} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#E5737315', justifyContent: 'center', alignItems: 'center' }}>
+                          <Feather name="rotate-ccw" size={14} color="#E57373" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {/* ── Quick access to remaining tools ── */}
               <TouchableOpacity style={{ backgroundColor: '#2C2420', borderRadius: 14, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)' }} onPress={() => setShowDeluxeSuite(true)}>
                 <Feather name="award" size={16} color="#C9A84C" />
-                <Text style={{ fontSize: 14, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' }}>Open Deluxe Suite</Text>
+                <Text style={{ fontSize: 14, color: '#C9A84C', fontFamily: 'PlayfairDisplay_400Regular' }}>All Deluxe Suite Tools</Text>
                 <Feather name="chevron-right" size={14} color="#C9A84C" />
               </TouchableOpacity>
             </>
           )}
+
 
           {/* ── SIGNATURE: Business Pulse + Tool Grid ── */}
           {vendorTier === 'signature' && (
@@ -2141,15 +2410,14 @@ export default function VendorDashboardScreen() {
               </View>
             )}
 
-            {/* ── Deluxe Suite tabs (Prestige only) — placeholder screens ── */}
+            {/* ── Deluxe Suite tabs — redirect to overview feed ── */}
             {activeTab.startsWith('ds-') && (
               <View style={styles.tabPane}>
-                <View style={styles.emptyCard}>
-                  <Feather name="award" size={32} color="#C9A84C" />
-                  <Text style={styles.emptyTitle}>{DELUXE_SUITE_TABS.find(t => t.id === activeTab)?.label || 'Deluxe Suite'}</Text>
-                  <Text style={styles.emptySub}>This tool is connected to your web dashboard at vendor.thedreamwedding.in. Full mobile experience coming soon.</Text>
-                  <TouchableOpacity style={styles.goldBtn} onPress={handleGenerateCode}><Feather name="monitor" size={14} color="#2C2420" /><Text style={styles.goldBtnText}>OPEN WEB DASHBOARD</Text></TouchableOpacity>
+                <View style={{ backgroundColor: '#FFF8EC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E8D9B5', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Feather name="info" size={14} color="#C9A84C" />
+                  <Text style={{ flex: 1, fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', lineHeight: 18 }}>All Deluxe Suite tools are available in your command feed. Tap Dashboard to access them.</Text>
                 </View>
+                <TouchableOpacity style={styles.goldBtn} onPress={() => setActiveTab('Overview')}><Feather name="grid" size={14} color="#2C2420" /><Text style={styles.goldBtnText}>GO TO DASHBOARD</Text></TouchableOpacity>
               </View>
             )}
 
