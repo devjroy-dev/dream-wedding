@@ -382,7 +382,7 @@ app.post('/api/bookings/:id/confirm', async (req, res) => {
       read: false,
     }]);
 
-    res.json({ success: true, data, message: 'Booking confirmed. Payment Shield released to vendor.' });
+    res.json({ success: true, data, message: 'Booking confirmed. Booking confirmed. Payment released to vendor.' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
