@@ -3939,10 +3939,27 @@ export default function VendorDashboard() {
               <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)' }}>Send a message to all your past clients in one tap. The most powerful growth tool for Indian vendors.</p>
             </div>
 
-            {/* Quick broadcast templates */}
+            {/* Custom message */}
             <div className="card" style={{ padding: '28px 32px' }}>
-              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Broadcast Templates</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '16px' }}>Compose Message</div>
+              <textarea
+                value={(() => { try { return (window as any).__waBroadcastMsg || ''; } catch(e) { return ''; } })()}
+                onChange={(e) => { (window as any).__waBroadcastMsg = e.target.value; setDsChatInput(e.target.value); }}
+                placeholder={`Hi! This is ${vendorData?.name || 'your business'}. Write your broadcast message here...`}
+                rows={4}
+                style={{ width: '100%', padding: '14px 16px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', resize: 'vertical', lineHeight: 1.6, marginBottom: '12px' }}
+              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => { const msg = (window as any).__waBroadcastMsg || ''; if (!msg.trim()) { toast.error('Write a message first'); return; } navigator.clipboard.writeText(msg); toast.success('Message copied'); }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '6px', border: '1px solid var(--card-border)', background: '#fff', color: 'var(--dark)', cursor: 'pointer' }}>Copy Message</button>
+                <a href={`https://wa.me/?text=${encodeURIComponent((typeof window !== 'undefined' ? (window as any).__waBroadcastMsg : '') || '')}`} target="_blank" rel="noreferrer" style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '6px', border: 'none', background: '#25D366', color: '#fff', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}><Send size={12} /> Open WhatsApp</a>
+              </div>
+            </div>
+
+            {/* Quick templates - editable */}
+            <div className="card" style={{ padding: '28px 32px' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '6px' }}>Quick Templates</div>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)', marginBottom: '20px' }}>Tap to load into composer. Edit before sending.</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {[
                   { title: 'Seasonal Offer', msg: `Hi! This is ${vendorData?.name || 'your vendor'}. We have special rates for winter weddings (Nov-Feb). Limited slots available. Reply to know more or visit thedreamwedding.in` },
                   { title: 'Portfolio Update', msg: `Hi! We just wrapped up a stunning wedding and our new work is live. Check out our latest portfolio on The Dream Wedding app. Would love to work with anyone you know who is getting married!` },
@@ -3950,16 +3967,7 @@ export default function VendorDashboard() {
                   { title: 'Festival Greeting', msg: `Wishing you and your family a very happy festive season! If any friends or family are planning a wedding, do share our name. We are booking dates for the upcoming season. Thank you for your continued trust!` },
                   { title: 'Availability Alert', msg: `Hi! Quick update — we have a few premium dates still available for the upcoming wedding season. If you know anyone looking, please share our profile. Early bookings get priority. Thank you!` },
                 ].map((tmpl, idx) => (
-                  <div key={idx} style={{ padding: '16px 20px', borderRadius: '10px', border: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--dark)', marginBottom: '6px' }}>{tmpl.title}</div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)', lineHeight: 1.6 }}>{tmpl.msg}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                      <button onClick={() => { navigator.clipboard.writeText(tmpl.msg); toast.success('Message copied'); }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--card-border)', background: '#fff', color: 'var(--dark)', cursor: 'pointer' }}>Copy</button>
-                      <a href={`https://wa.me/?text=${encodeURIComponent(tmpl.msg)}`} target="_blank" rel="noreferrer" style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, padding: '8px 14px', borderRadius: '6px', border: 'none', background: '#25D366', color: '#fff', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}><Send size={11} /> Send</a>
-                    </div>
-                  </div>
+                  <button key={idx} onClick={() => { (window as any).__waBroadcastMsg = tmpl.msg; setDsChatInput(tmpl.msg); toast.info(`"${tmpl.title}" loaded — edit above`); }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 18px', borderRadius: '50px', border: '1px solid var(--card-border)', background: '#fff', color: 'var(--dark)', cursor: 'pointer' }}>{tmpl.title}</button>
                 ))}
               </div>
             </div>
