@@ -410,6 +410,7 @@ export default function VendorDashboard() {
   const [dsEventView, setDsEventView] = useState<string | null>(null);
   const [vendorData, setVendorData] = useState<any>(null);
   const [vendorTier, setVendorTier] = useState<'essential' | 'signature' | 'prestige'>('essential');
+  const [foundingBadge, setFoundingBadge] = useState(false);
   const [packages, setPackages] = useState<any[]>([
     { id: '1', name: 'Silver', price: 80000, inclusions: ['1 day coverage', '300 edited photos', 'Online gallery'] },
     { id: '2', name: 'Gold', price: 150000, inclusions: ['2 day coverage', '600 edited photos', 'Highlight reel', 'Online gallery'] },
@@ -787,18 +788,18 @@ export default function VendorDashboard() {
         loadClients(vendor.id);
         loadPayments(vendor.id);
         loadExpenses(vendor.id);
-        // Load subscription tier
-        try {
-          const tierRes = await fetch(`${API}/subscriptions/${vendor.id}`);
-          const tierData = await tierRes.json();
-          if (tierData.success && tierData.data?.tier) setVendorTier(tierData.data.tier);
-        } catch(e) {}
-        // Also check session for tier (from login)
+        // Load subscription tier + founding badge
         try {
           const webSession = JSON.parse(localStorage.getItem('vendor_web_session') || '{}');
           if (webSession.tier && ['essential', 'signature', 'prestige'].includes(webSession.tier)) {
             setVendorTier(webSession.tier);
           }
+        } catch(e) {}
+        try {
+          const tierRes = await fetch(`${API}/subscriptions/${vendor.id}`);
+          const tierData = await tierRes.json();
+          if (tierData.success && tierData.data?.tier) setVendorTier(tierData.data.tier);
+          if (tierData.success && tierData.data?.founding_badge) setFoundingBadge(true);
         } catch(e) {}
       }
     } catch (e) {} finally { setLoading(false); }
@@ -1660,16 +1661,8 @@ export default function VendorDashboard() {
               letterSpacing: '0.3px',
             }}>
               {vendorData?.name || 'Your Business'}
-              {vendorTier !== 'essential' && (
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px',
-                  marginLeft: '10px', padding: '3px 10px', borderRadius: '50px',
-                  background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.2)',
-                  fontFamily: 'Inter, sans-serif', fontSize: '9px', fontWeight: 500,
-                  color: '#C9A84C', letterSpacing: '1px', textTransform: 'uppercase',
-                  verticalAlign: 'middle',
-                }}>Est. 2026</span>
-              )}
+              {foundingBadge && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#C9A84C', marginLeft: '8px', verticalAlign: 'middle', boxShadow: '0 0 0 2px rgba(201,168,76,0.2)' }} title="Founding Vendor" />}
+
             </h1>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
               <p style={{
