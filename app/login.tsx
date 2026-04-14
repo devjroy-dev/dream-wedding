@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
   logoThe: { fontSize: 13, color: '#8C7B6E', letterSpacing: 12, textTransform: 'uppercase' },
   logoMain: { fontSize: 48, color: '#2C2420', letterSpacing: 1, textAlign: 'center', fontWeight: '300' },
   logoDivider: { height: 1, backgroundColor: '#C9A84C', marginVertical: 10 },
-  logoTagline: { fontSize: 14, color: '#2C2420', letterSpacing: 0.3, fontStyle: 'italic', textAlign: 'center' },
+  logoTagline: { fontSize: 14, color: '#2C2420', letterSpacing: 0.3, fontFamily: 'PlayfairDisplay_400Regular', fontStyle: 'italic', textAlign: 'center' },
   bottomSection: { gap: 20 },
   buttons: { gap: 12 },
   socialButton: { width: '100%', borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 15, alignItems: 'center', backgroundColor: '#FFFFFF', elevation: 1 },

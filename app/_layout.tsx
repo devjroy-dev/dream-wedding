@@ -3,6 +3,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { useFonts, PlayfairDisplay_400Regular } from '@expo-google-fonts/playfair-display/index';
+import { DMSans_400Regular } from '@expo-google-fonts/dm-sans';
 
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean; error: any}> {
   constructor(props: any) {
@@ -97,6 +99,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  useFonts({ PlayfairDisplay_400Regular, DMSans_400Regular });
+
   return (
     <ErrorBoundary>
       <StatusBar style="dark" />
