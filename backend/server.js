@@ -1578,6 +1578,81 @@ app.get('/api/referrals/stats/:vendorId', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+// ==================
+// REFERRAL REWARDS CALCULATION
+// ==================
+
+app.get('/api/referrals/rewards/:vendorId', async (req, res) => {
+  try {
+    const vid = req.params.vendorId;
+    // Get referrals
+    const { data: referrals } = await supabase.from('vendor_referrals').select('*').eq('vendor_id', vid);
+    const all = referrals || [];
+    const active = all.filter(r => r.status === 'active' || r.status === 'token_purchased').length;
+    const signed_up = all.filter(r => r.status === 'signed_up').length;
+    const dormant = all.filter(r => r.status === 'dormant').length;
+    const clicked = all.filter(r => r.status === 'clicked').length;
+
+    // Get subscription to check if founding vendor
+    const { data: sub } = await supabase.from('vendor_subscriptions').select('*').eq('vendor_id', vid).order('created_at', { ascending: false }).limit(1).single();
+    const isFounding = sub?.is_founding_vendor || sub?.founding_badge || false;
+    const tier = sub?.tier || 'essential';
+
+    // Calculate discount for Essential tier
+    let discount = 0;
+    let nextMilestone = { referrals: 1, discount: isFounding ? 10 : 5 };
+    if (tier === 'essential' || tier === 'signature') {
+      if (isFounding) {
+        if (active >= 10) { discount = 50; nextMilestone = { referrals: 10, discount: 50 }; }
+        else if (active >= 5) { discount = 35; nextMilestone = { referrals: 10, discount: 50 }; }
+        else if (active >= 3) { discount = 20; nextMilestone = { referrals: 5, discount: 35 }; }
+        else if (active >= 1) { discount = 10; nextMilestone = { referrals: 3, discount: 20 }; }
+        else { discount = 0; nextMilestone = { referrals: 1, discount: 10 }; }
+      } else {
+        if (active >= 10) { discount = 35; nextMilestone = { referrals: 10, discount: 35 }; }
+        else if (active >= 5) { discount = 20; nextMilestone = { referrals: 10, discount: 35 }; }
+        else if (active >= 3) { discount = 10; nextMilestone = { referrals: 5, discount: 20 }; }
+        else if (active >= 1) { discount = 5; nextMilestone = { referrals: 3, discount: 10 }; }
+        else { discount = 0; nextMilestone = { referrals: 1, discount: 5 }; }
+      }
+    }
+
+    // Calculate visibility tier for Signature
+    let visibilityTier = 'none';
+    let visibilityDesc = '';
+    if (tier === 'signature') {
+      if (active >= 100) { visibilityTier = 'unlimited'; visibilityDesc = 'Unlimited reverse lead access + custom quotes'; }
+      else if (active >= 75) { visibilityTier = 'reverse_leads'; visibilityDesc = 'Reverse lead access — 100 leads/month'; }
+      else if (active >= 25) { visibilityTier = 'featured'; visibilityDesc = 'Featured placement 1 week/month'; }
+      else if (active > 0) { visibilityTier = 'boost'; visibilityDesc = 'Algorithmic discovery boost active'; }
+    }
+
+    // Milestones for display
+    const milestones = isFounding
+      ? [{ referrals: 1, discount: 10 }, { referrals: 3, discount: 20 }, { referrals: 5, discount: 35 }, { referrals: 10, discount: 50 }]
+      : [{ referrals: 1, discount: 5 }, { referrals: 3, discount: 10 }, { referrals: 5, discount: 20 }, { referrals: 10, discount: 35 }];
+
+    const visibilityMilestones = [
+      { referrals: 1, reward: 'Discovery Boost' },
+      { referrals: 25, reward: 'Featured 1 week/month' },
+      { referrals: 75, reward: 'Reverse Leads (100/mo)' },
+      { referrals: 100, reward: 'Unlimited Leads' },
+    ];
+
+    res.json({
+      success: true,
+      data: {
+        total: all.length, active, signed_up, dormant, clicked,
+        is_founding: isFounding, tier,
+        discount, next_milestone: nextMilestone,
+        milestones, visibility_tier: visibilityTier, visibility_desc: visibilityDesc,
+        visibility_milestones: visibilityMilestones,
+        referrals: all.slice(0, 20),
+      }
+    });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
 app.get('/api/credentials/:vendorId', async (req, res) => {
   try {
     const { data, error } = await supabase.from('vendor_credentials').select('username, phone_verified, phone_number')

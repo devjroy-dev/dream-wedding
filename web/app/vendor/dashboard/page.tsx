@@ -410,6 +410,7 @@ export default function VendorDashboard() {
   const [dsEventView, setDsEventView] = useState<string | null>(null);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [referralLink, setReferralLink] = useState('');
+  const [referralRewards, setReferralRewards] = useState<any>(null);
   const [vendorData, setVendorData] = useState<any>(null);
   const [vendorTier, setVendorTier] = useState<'essential' | 'signature' | 'prestige'>('essential');
   const [foundingBadge, setFoundingBadge] = useState(false);
@@ -628,7 +629,7 @@ export default function VendorDashboard() {
       if (activeTab === 'expenses') loadExpenses();
       if (activeTab === 'payments') loadPayments();
       if (activeTab === 'tax') loadTDS();
-      if (activeTab === 'referral') { loadClients(); if (vendorData?.id) fetch(`${API}/referral-code/${vendorData.id}`).then(r => r.json()).then(d => { if (d.success) setReferralLink(`https://thedreamwedding.in/ref/${d.data.code}`); }).catch(() => {}); }
+      if (activeTab === 'referral') { loadClients(); if (vendorData?.id) { fetch(`${API}/referral-code/${vendorData.id}`).then(r => r.json()).then(d => { if (d.success) setReferralLink(`https://thedreamwedding.in/ref/${d.data.code}`); }).catch(() => {}); fetch(`${API}/referrals/rewards/${vendorData.id}`).then(r => r.json()).then(d => { if (d.success) setReferralRewards(d.data); }).catch(() => {}); } }
       if (activeTab === 'whatsapp') loadClients();
       if (activeTab === 'analytics') { loadBookings(); loadInvoices(); loadExpenses(); }
       if (activeTab === 'portal') loadClients();
@@ -3757,13 +3758,55 @@ export default function VendorDashboard() {
               </div>
             </div>
 
+            {/* Rewards progress */}
+            {referralRewards && (
+              <div className="card" style={{ padding: '28px 32px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                  <div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '8px' }}>Current Discount Earned</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '40px', fontWeight: 700, color: 'var(--dark)', letterSpacing: '-1px' }}>{referralRewards.discount}% <span style={{ fontSize: '16px', fontWeight: 400, color: 'var(--grey)' }}>off subscription</span></div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Next milestone</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)' }}>{referralRewards.next_milestone.discount}% off at {referralRewards.next_milestone.referrals} referrals</div>
+                  </div>
+                </div>
+                <div style={{ background: '#F3F4F6', borderRadius: '4px', height: '6px', marginBottom: '10px' }}>
+                  <div style={{ background: 'var(--gold)', borderRadius: '4px', height: '6px', width: `${referralRewards.next_milestone.referrals > 0 ? Math.min((referralRewards.active / referralRewards.next_milestone.referrals) * 100, 100) : 0}%` }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>{referralRewards.active} active referral{referralRewards.active !== 1 ? 's' : ''}</span>
+                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>{Math.max(referralRewards.next_milestone.referrals - referralRewards.active, 0)} more to next tier</span>
+                </div>
+                {referralRewards.is_founding && (
+                  <div style={{ marginTop: '12px', padding: '8px 14px', borderRadius: '8px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#C9A84C' }} />
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: '#C9A84C', fontWeight: 500 }}>Founding Vendor — enhanced discount rates</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Milestone tiers */}
+            {referralRewards && (
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${referralRewards.milestones.length}, 1fr)`, gap: '12px' }}>
+                {referralRewards.milestones.map((m: any) => (
+                  <div key={m.referrals} className="card" style={{ padding: '20px', textAlign: 'center', border: referralRewards.active >= m.referrals ? '1px solid var(--gold)' : '1px solid var(--card-border)', background: referralRewards.active >= m.referrals ? 'rgba(201,168,76,0.04)' : '#fff' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', fontWeight: 700, color: referralRewards.active >= m.referrals ? 'var(--gold)' : 'var(--text-muted)', marginBottom: '4px' }}>{m.discount}%</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{m.referrals} referral{m.referrals !== 1 ? 's' : ''}</div>
+                    {referralRewards.active >= m.referrals && <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 600, color: 'var(--gold)', marginTop: '6px', letterSpacing: '0.5px' }}>EARNED</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Referral stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
-                { num: String(clients.length), label: 'Total Clients', color: 'var(--dark)' },
-                { num: String(selectedClients.length), label: 'Selected', color: 'var(--gold)' },
-                { num: '0', label: 'Downloaded App', color: '#4CAF50' },
-                { num: '0', label: 'Active on App', color: '#1D4ED8' },
+                { num: String(referralRewards?.active || 0), label: 'Active', color: '#4CAF50' },
+                { num: String(referralRewards?.signed_up || 0), label: 'Signed Up', color: 'var(--gold)' },
+                { num: String(referralRewards?.clicked || 0), label: 'Link Clicks', color: '#1D4ED8' },
+                { num: String(referralRewards?.dormant || 0), label: 'Dormant', color: '#DC2626' },
               ].map((s, i) => (
                 <div key={i} className="card" style={{ textAlign: 'center', padding: '20px 16px', borderTop: `3px solid ${s.color}` }}>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '28px', fontWeight: 300, color: s.color }}>{s.num}</div>
@@ -3771,6 +3814,26 @@ export default function VendorDashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Visibility rewards for Signature */}
+            {referralRewards?.tier === 'signature' && (
+              <div className="card" style={{ padding: '28px 32px' }}>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '16px' }}>Visibility Rewards</div>
+                {referralRewards.visibility_desc && (
+                  <div style={{ padding: '12px 16px', borderRadius: '8px', background: 'rgba(76,175,80,0.06)', border: '1px solid rgba(76,175,80,0.15)', marginBottom: '16px' }}>
+                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: '#4CAF50' }}>{referralRewards.visibility_desc}</span>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${referralRewards.visibility_milestones.length}, 1fr)`, gap: '12px' }}>
+                  {referralRewards.visibility_milestones.map((m: any) => (
+                    <div key={m.referrals} style={{ padding: '16px', borderRadius: '8px', textAlign: 'center', border: referralRewards.active >= m.referrals ? '1px solid var(--gold)' : '1px solid var(--card-border)', background: referralRewards.active >= m.referrals ? 'rgba(201,168,76,0.04)' : '#fff' }}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 700, color: referralRewards.active >= m.referrals ? 'var(--gold)' : 'var(--text-muted)', marginBottom: '4px' }}>{m.referrals}+</div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>{m.reward}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Client list with checkboxes */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
