@@ -324,7 +324,7 @@ export default function UserTypeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
   },
   scroll: {
     paddingTop: 80,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     overflow: 'hidden',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     overflow: 'hidden',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },

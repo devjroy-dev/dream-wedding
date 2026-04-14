@@ -193,13 +193,13 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
+  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE8E0' },
   greeting: { fontSize: 28, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5 },
   subGreeting: { fontSize: 13, color: '#8C7B6E', marginTop: 4, letterSpacing: 0.3 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  notifBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
+  notifBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE8E0' },
   notifIcon: { fontSize: 16 },
   avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
   avatarText: { color: '#C9A84C', fontSize: 16, fontWeight: '500' },
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     gap: 16,
   },
   countdownLeft: { alignItems: 'center', minWidth: 60 },
@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
   genieSubtitle: { fontSize: 12, color: '#8C7B6E' },
   genieArrow: { fontSize: 20, color: '#C9A84C' },
 
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', marginHorizontal: 24, borderRadius: 10, borderWidth: 1, borderColor: '#E8E0D5', paddingHorizontal: 14, paddingVertical: 12, marginBottom: 24, gap: 8 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', marginHorizontal: 24, borderRadius: 10, borderWidth: 1, borderColor: '#EDE8E0', paddingHorizontal: 14, paddingVertical: 12, marginBottom: 24, gap: 8 },
   searchIcon: { fontSize: 18, color: '#8C7B6E' },
   searchInput: { flex: 1, fontSize: 14, color: '#2C2420' },
   searchClear: { fontSize: 12, color: '#8C7B6E', padding: 4 },
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
   trendingBtnSub: { fontSize: 12, color: '#8C7B6E' },
   trendingBtnArrow: { fontSize: 22, color: '#C9A84C' },
 
-  referralBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, padding: 18, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E8E0D5', marginBottom: 12 },
+  referralBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 24, padding: 18, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#EDE8E0', marginBottom: 12 },
   referralLeft: { flex: 1, gap: 4 },
   referralTitle: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
   referralSub: { fontSize: 12, color: '#8C7B6E', lineHeight: 18 },
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   postWeddingSubtitle: { fontSize: 12, color: '#8C7B6E', lineHeight: 18 },
   postWeddingArrow: { fontSize: 20, color: '#C9A84C' },
 
-  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#E8E0D5', backgroundColor: '#F5F0E8', position: 'absolute', bottom: 0, width: '100%' },
+  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#EDE8E0', backgroundColor: '#FAF6F0', position: 'absolute', bottom: 0, width: '100%' },
   navItem: { alignItems: 'center', gap: 4 },
   navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C9A84C' },
   navLabel: { fontSize: 12, color: '#8C7B6E', letterSpacing: 0.3 },

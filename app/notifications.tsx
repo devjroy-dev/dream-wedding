@@ -184,8 +184,8 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
-  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60 },
+  loadingContainer: { flex: 1, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 16 },
   backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },

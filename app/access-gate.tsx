@@ -127,7 +127,7 @@ export default function AccessGateScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#F5F0E8', paddingHorizontal: 28, paddingBottom: 48, paddingTop: 60 },
+  container: { flexGrow: 1, backgroundColor: '#FAF6F0', paddingHorizontal: 28, paddingBottom: 48, paddingTop: 60 },
   logoSection: { flex: 1, minHeight: height * 0.45, justifyContent: 'center', alignItems: 'center' },
   logoInner: { alignItems: 'center', gap: 12 },
   logoThe: { fontSize: 13, color: '#8C7B6E', letterSpacing: 12, textTransform: 'uppercase' },
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     paddingVertical: 18,
     paddingHorizontal: 20,
     fontSize: 18,

@@ -17,7 +17,7 @@ import { Platform } from 'react-native';
 
 const colors = {
   // Core brand
-  cream:        '#F5F0E8',
+  cream:        '#FAF6F0',
   creamDark:    '#EDE8DF',
   gold:         '#C9A84C',
   dark:         '#2C2420',
@@ -29,7 +29,7 @@ const colors = {
   white:        '#FFFFFF',
   lightGold:    '#FFF8EC',
   goldBorder:   '#E8D9B5',
-  border:       '#E8E0D5',
+  border:       '#EDE8E0',
 
   // Semantic
   success:      '#4CAF50',

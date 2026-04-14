@@ -636,7 +636,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     paddingTop: 60,
   },
 
@@ -733,7 +733,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -807,7 +807,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
@@ -838,7 +838,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     gap: 4,
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     position: 'relative',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
@@ -948,7 +948,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     overflow: 'hidden',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
@@ -985,7 +985,7 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 1.5,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   budgetRadioSelected: {
     width: 22,
@@ -1026,7 +1026,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   pillSelected: {
     backgroundColor: '#2C2420',
@@ -1046,8 +1046,8 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     paddingBottom: 36,
     borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
-    backgroundColor: '#F5F0E8',
+    borderTopColor: '#EDE8E0',
+    backgroundColor: '#FAF6F0',
   },
   nextBtn: {
     backgroundColor: '#2C2420',
@@ -1067,7 +1067,7 @@ const styles = StyleSheet.create({
   // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     paddingTop: 20,
   },
   modalHeader: {
@@ -1077,7 +1077,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E8E0D5',
+    borderBottomColor: '#EDE8E0',
   },
   modalTitle: {
     fontSize: 20,
@@ -1100,7 +1100,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     gap: 10,
   },
   searchInput: {

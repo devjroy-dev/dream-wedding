@@ -55,13 +55,13 @@ export default function PaymentSuccessScreen() {
         </Text>
       </View>
 
-      <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#E8DDD4', alignItems: 'center', gap: 12 }}>
+      <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#EDE8E0', alignItems: 'center', gap: 12 }}>
         <Text style={{ fontSize: 16, color: '#2C2420', fontWeight: '600', letterSpacing: 0.3 }}>Payment Shield</Text>
         <Text style={{ fontSize: 13, color: '#8C7B6E', textAlign: 'center', lineHeight: 20 }}>When the vendor completes their work, release the secured payment.</Text>
         <TouchableOpacity style={{ backgroundColor: '#2C2420', borderRadius: 12, paddingVertical: 15, width: '100%', alignItems: 'center' }} onPress={() => Alert.alert('Release Payment', 'This will release the secured amount to the vendor. Proceed?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Release', onPress: () => Alert.alert('Released', 'Payment released to vendor.') }])}>
           <Text style={{ color: '#F5F0E8', fontSize: 13, fontWeight: '500', letterSpacing: 1.5 }}>RELEASE PAYMENT</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={{ borderRadius: 12, paddingVertical: 13, width: '100%', alignItems: 'center', borderWidth: 1, borderColor: '#E8DDD4' }} onPress={() => Alert.alert('Cash Settlement', 'Confirm you paid the vendor in cash? Secured amount returns to you.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Confirm', onPress: () => Alert.alert('Confirmed', 'Secured amount will be returned.') }])}>
+        <TouchableOpacity style={{ borderRadius: 12, paddingVertical: 13, width: '100%', alignItems: 'center', borderWidth: 1, borderColor: '#EDE8E0' }} onPress={() => Alert.alert('Cash Settlement', 'Confirm you paid the vendor in cash? Secured amount returns to you.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Confirm', onPress: () => Alert.alert('Confirmed', 'Secured amount will be returned.') }])}>
           <Text style={{ color: '#8C7B6E', fontSize: 12, fontWeight: '500', letterSpacing: 1.5 }}>I PAID IN CASH</Text>
         </TouchableOpacity>
       </View>
@@ -84,7 +84,7 @@ export default function PaymentSuccessScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 16,
@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     width: '100%',
     overflow: 'hidden',
     shadowColor: '#2C2420',

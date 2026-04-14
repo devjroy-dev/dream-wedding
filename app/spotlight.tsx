@@ -350,7 +350,7 @@ const CARD_HEIGHT = CARD_WIDTH * 1.4;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     paddingTop: 60,
   },
   centered: {
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   editorialText: {
     fontSize: 12,
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 50,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     backgroundColor: '#FFFFFF',
   },
   filterPillActive: {
@@ -729,7 +729,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   transparencyText: {
     flex: 1,
@@ -747,8 +747,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: 28,
     borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
-    backgroundColor: '#F5F0E8',
+    borderTopColor: '#EDE8E0',
+    backgroundColor: '#FAF6F0',
     position: 'absolute',
     bottom: 0,
     width: '100%',

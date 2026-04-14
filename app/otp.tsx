@@ -139,7 +139,7 @@ export default function OTPScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#F5F0E8', paddingTop: 60, paddingHorizontal: 28, paddingBottom: 40 },
+  container: { flexGrow: 1, backgroundColor: '#FAF6F0', paddingTop: 60, paddingHorizontal: 28, paddingBottom: 40 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 52 },
   backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
   logo: { fontSize: 14, color: '#C9A84C', fontWeight: '500', letterSpacing: 2, textAlign: 'center' },
@@ -147,11 +147,11 @@ const styles = StyleSheet.create({
   title: { fontSize: 36, color: '#2C2420', fontWeight: '300', letterSpacing: 0.5, lineHeight: 46 },
   subtitle: { fontSize: 14, color: '#8C7B6E', marginTop: -8 },
   phoneRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  countryCode: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, backgroundColor: '#FFFFFF', justifyContent: 'center' },
+  countryCode: { borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, backgroundColor: '#FFFFFF', justifyContent: 'center' },
   countryCodeText: { fontSize: 15, color: '#2C2420', fontWeight: '500' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: '#2C2420', backgroundColor: '#FFFFFF' },
-  inputFull: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: '#2C2420', backgroundColor: '#FFFFFF' },
-  otpInput: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 18, fontSize: 28, color: '#2C2420', backgroundColor: '#FFFFFF', letterSpacing: 12, marginTop: 8 },
+  input: { flex: 1, borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: '#2C2420', backgroundColor: '#FFFFFF' },
+  inputFull: { borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 10, paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: '#2C2420', backgroundColor: '#FFFFFF' },
+  otpInput: { borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 10, paddingVertical: 18, fontSize: 28, color: '#2C2420', backgroundColor: '#FFFFFF', letterSpacing: 12, marginTop: 8 },
   button: { backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   buttonDisabled: { opacity: 0.3 },
   buttonText: { color: '#F5F0E8', fontSize: 15, letterSpacing: 0.5, fontWeight: '500' },

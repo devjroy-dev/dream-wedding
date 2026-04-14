@@ -262,7 +262,7 @@ export default function SpecialOffersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     paddingTop: 60,
   },
 
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   headerCenter: {
     alignItems: 'center',
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 50,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     backgroundColor: '#FFFFFF',
   },
   filterPillActive: {
@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   bottomLeft: {
     flex: 1,

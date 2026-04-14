@@ -246,7 +246,7 @@ export default function HomeScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
+  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60 },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 24, marginBottom: 20 },
@@ -257,7 +257,7 @@ const s = StyleSheet.create({
   countdownLabel: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
   subGreeting: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E8E0D5' },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE8E0' },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2C2420', justifyContent: 'center', alignItems: 'center' },
   avatarText: { color: '#C9A84C', fontSize: 15, fontFamily: 'DMSans_500Medium' },
 
@@ -272,7 +272,7 @@ const s = StyleSheet.create({
   // Pills
   pillsScroll: { marginBottom: 28 },
   pillsContent: { paddingHorizontal: 24, gap: 8 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 50, borderWidth: 1, borderColor: '#E8E0D5', backgroundColor: '#FFFFFF' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 50, borderWidth: 1, borderColor: '#EDE8E0', backgroundColor: '#FFFFFF' },
   pillText: { fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', letterSpacing: 0.2 },
 
   // Primary actions
@@ -294,7 +294,7 @@ const s = StyleSheet.create({
 
   secondaryCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E8E0D5', padding: 20,
+    backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#EDE8E0', padding: 20,
   },
   secondaryIconBox: {
     width: 40, height: 40, borderRadius: 10,
@@ -311,7 +311,7 @@ const s = StyleSheet.create({
   exploreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   exploreCard: {
     width: (width - 60) / 2, backgroundColor: '#FFFFFF',
-    borderRadius: 16, borderWidth: 1, borderColor: '#E8E0D5', padding: 20, gap: 8,
+    borderRadius: 16, borderWidth: 1, borderColor: '#EDE8E0', padding: 20, gap: 8,
   },
   exploreIconBox: {
     width: 36, height: 36, borderRadius: 10,

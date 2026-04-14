@@ -414,7 +414,7 @@ export default function MoodboardScreen() {
             backgroundColor: '#FAFAF8',
             borderRadius: 14,
             borderWidth: 1,
-            borderColor: '#E8E0D5',
+            borderColor: '#EDE8E0',
             borderStyle: 'dashed',
             opacity: 0.8,
             padding: 16,
@@ -458,12 +458,12 @@ export default function MoodboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     paddingTop: 60,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
 
   // Popular section
@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 50,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     backgroundColor: '#FFFFFF',
   },
   filterTabActive: {
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -761,9 +761,9 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 6,
     borderRadius: 6,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
   },
   actionPillGold: {
     backgroundColor: '#FFF8EC',
@@ -858,8 +858,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: 28,
     borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
-    backgroundColor: '#F5F0E8',
+    borderTopColor: '#EDE8E0',
+    backgroundColor: '#FAF6F0',
     position: 'absolute',
     bottom: 0,
     width: '100%',

@@ -228,8 +228,8 @@ const MOCK_VENDORS = [
 ];
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
-  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60 },
+  loadingContainer: { flex: 1, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 24 },
   backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
   title: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
@@ -253,9 +253,9 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 12, color: '#8C7B6E', width: 90, paddingTop: 2 },
   valueCol: { alignItems: 'center', gap: 4 },
   fieldValue: { fontSize: 13, color: '#2C2420', fontWeight: '500', textAlign: 'center' },
-  vibeTag: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4 },
+  vibeTag: { borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 50, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4 },
   vibeTagText: { fontSize: 10, color: '#8C7B6E' },
-  profileBtn: { backgroundColor: '#FFFFFF', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: '#E8E0D5', alignItems: 'center', width: '100%' },
+  profileBtn: { backgroundColor: '#FFFFFF', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: '#EDE8E0', alignItems: 'center', width: '100%' },
   profileBtnText: { fontSize: 11, color: '#2C2420', fontWeight: '500' },
   lockBtn: { backgroundColor: '#2C2420', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center', width: '100%', marginTop: 6 },
   lockBtnText: { fontSize: 11, color: '#C9A84C', fontWeight: '500' },

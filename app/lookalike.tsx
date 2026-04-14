@@ -179,8 +179,8 @@ export default function LookAlikeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8', paddingTop: 60 },
-  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#FAF6F0', paddingTop: 60 },
+  loadingContainer: { flex: 1, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 8 },
   backBtn: { fontSize: 22, color: '#2C2420', width: 24 },
   title: { fontSize: 17, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
   emptySubtitle: { fontSize: 14, color: '#8C7B6E', textAlign: 'center', lineHeight: 22 },
   emptyBtn: { marginTop: 16, backgroundColor: '#2C2420', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 },
   emptyBtnText: { fontSize: 14, color: '#F5F0E8', fontWeight: '500' },
-  vendorCard: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E8E0D5' },
+  vendorCard: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#EDE8E0' },
   vendorImage: { width: '100%', height: 200, resizeMode: 'cover' },
   matchBadge: { position: 'absolute', top: 16, left: 16, backgroundColor: '#2C2420', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5 },
   matchBadgeText: { fontSize: 11, color: '#C9A84C', fontWeight: '600', letterSpacing: 0.3 },
@@ -209,10 +209,10 @@ const styles = StyleSheet.create({
   vendorInfoBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   vendorPrice: { fontSize: 14, color: '#2C2420', fontWeight: '500' },
   vibeTags: { flexDirection: 'row', gap: 6 },
-  vibeTag: { borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 3 },
+  vibeTag: { borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 3 },
   vibeTagText: { fontSize: 11, color: '#8C7B6E' },
   cardActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  inquireBtn: { flex: 1, borderWidth: 1, borderColor: '#E8E0D5', borderRadius: 10, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F5F0E8' },
+  inquireBtn: { flex: 1, borderWidth: 1, borderColor: '#EDE8E0', borderRadius: 10, paddingVertical: 10, alignItems: 'center', backgroundColor: '#FAF6F0' },
   inquireBtnText: { fontSize: 13, color: '#2C2420', fontWeight: '500' },
   lockBtn: { flex: 1, backgroundColor: '#2C2420', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   lockBtnText: { fontSize: 13, color: '#C9A84C', fontWeight: '500' },

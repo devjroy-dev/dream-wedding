@@ -294,8 +294,8 @@ export default function VendorProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F0E8' },
-  loadingContainer: { flex: 1, backgroundColor: '#F5F0E8', justifyContent: 'center', alignItems: 'center', gap: 16 },
+  container: { flex: 1, backgroundColor: '#FAF6F0' },
+  loadingContainer: { flex: 1, backgroundColor: '#FAF6F0', justifyContent: 'center', alignItems: 'center', gap: 16 },
   errorText: { fontSize: 16, color: '#8C7B6E' },
   errorBack: { fontSize: 14, color: '#C9A84C', marginTop: 8 },
 
@@ -305,13 +305,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 88,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingBottom: 12,
     zIndex: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E8E0D5',
+    borderBottomColor: '#EDE8E0',
   },
   floatingHeaderName: { fontSize: 16, color: '#2C2420', fontWeight: '500', letterSpacing: 0.3 },
 
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
   vibeTags: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flex: 1, marginLeft: 12 },
   vibeTag: {
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     borderRadius: 50,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     shadowColor: '#2C2420',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -455,7 +455,7 @@ const styles = StyleSheet.create({
 
   reviewPlaceholder: {
     height: 80,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
@@ -488,14 +488,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     paddingBottom: 32,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
+    borderTopColor: '#EDE8E0',
   },
   msgBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',

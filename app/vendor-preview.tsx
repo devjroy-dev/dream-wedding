@@ -150,7 +150,7 @@ export default function VendorPreviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
   },
   previewBanner: {
     backgroundColor: '#2C2420',
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   },
   vibeTag: {
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     borderRadius: 50,
     paddingHorizontal: 10,
     paddingVertical: 3,
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     overflow: 'hidden',
   },
   detailRow: {
@@ -345,9 +345,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     paddingBottom: 32,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: '#FAF6F0',
     borderTopWidth: 1,
-    borderTopColor: '#E8E0D5',
+    borderTopColor: '#EDE8E0',
     opacity: 0.5,
   },
   disabledBtn: {
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   },
   quoteBtn: {
     borderWidth: 1,
-    borderColor: '#E8E0D5',
+    borderColor: '#EDE8E0',
     backgroundColor: '#FFFFFF',
   },
   quoteBtnText: {
