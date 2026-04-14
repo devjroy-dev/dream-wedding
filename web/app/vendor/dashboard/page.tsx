@@ -88,6 +88,33 @@ const DELUXE_SUITE_TABS = [
   { id: 'ds-performance', label: 'Team Performance', icon: UserCheck, desc: 'Weekly scorecard per team member. Tasks on time, overdue count, response time. See who delivers and who needs support.' },
 ];
 
+// ── Tier Access Logic ────────────────────────────────────────────
+const TIER_LEVEL: Record<string, number> = { essential: 1, signature: 2, prestige: 3 };
+
+const TAB_TIER: Record<string, string> = {
+  // Essential (all vendors)
+  'overview': 'essential', 'clients': 'essential', 'inquiries': 'essential',
+  'calendar': 'essential', 'availability': 'essential', 'templates': 'essential',
+  'invoices': 'essential', 'contracts': 'essential', 'runsheet': 'essential',
+  'checklist': 'essential', 'equipment': 'essential', 'packages': 'essential',
+  // Signature
+  'payments': 'signature', 'outstanding': 'signature', 'expenses': 'signature',
+  'profit': 'signature', 'cash': 'signature', 'tax': 'signature',
+  'advancetax': 'signature', 'forecast': 'signature', 'paymentshield': 'signature',
+  'referral': 'signature', 'csvimport': 'signature', 'team': 'signature',
+  'delivery': 'signature', 'timeline': 'signature',
+  // Prestige (Deluxe Suite)
+  'ds-event-dashboard': 'prestige', 'ds-team-hub': 'prestige', 'ds-team-chat': 'prestige',
+  'ds-daily-briefing': 'prestige', 'ds-procurement': 'prestige', 'ds-deliveries': 'prestige',
+  'ds-trials': 'prestige', 'ds-photo-approvals': 'prestige', 'ds-checkin': 'prestige',
+  'ds-sentiment': 'prestige', 'ds-templates': 'prestige', 'ds-performance': 'prestige',
+};
+
+function hasTabAccess(tier: string, tabId: string): boolean {
+  const required = TAB_TIER[tabId] || 'essential';
+  return (TIER_LEVEL[tier] || 1) >= (TIER_LEVEL[required] || 1);
+}
+
 // ── Deluxe Suite Preview Modal (for non-VV vendors) ─────────────
 function DeluxeSuiteModal({ tab, onClose }: { tab: any; onClose: () => void }) {
   if (!tab) return null;
@@ -379,6 +406,7 @@ export default function VendorDashboard() {
   const [dsNewTemplate, setDsNewTemplate] = useState({ template_name: '', event_type: 'wedding', tasks: '[]' });
   const [dsEventView, setDsEventView] = useState<string | null>(null);
   const [vendorData, setVendorData] = useState<any>(null);
+  const [vendorTier, setVendorTier] = useState<'essential' | 'signature' | 'prestige'>('essential');
   const [packages, setPackages] = useState<any[]>([
     { id: '1', name: 'Silver', price: 80000, inclusions: ['1 day coverage', '300 edited photos', 'Online gallery'] },
     { id: '2', name: 'Gold', price: 150000, inclusions: ['2 day coverage', '600 edited photos', 'Highlight reel', 'Online gallery'] },
@@ -724,7 +752,7 @@ export default function VendorDashboard() {
       setLoading(true);
       let session: any = {};
       try {
-        const ls = localStorage.getItem('vendor_session') || sessionStorage.getItem('vendor_session') || '{}';
+        const ls = localStorage.getItem('vendor_web_session') || localStorage.getItem('vendor_session') || sessionStorage.getItem('vendor_session') || '{}';
         session = JSON.parse(ls);
       } catch(e) {}
       const isDemo = window.location.href.includes('demo=1') || window.location.href.includes('/vendor/demo');
@@ -753,6 +781,19 @@ export default function VendorDashboard() {
         loadClients(vendor.id);
         loadPayments(vendor.id);
         loadExpenses(vendor.id);
+        // Load subscription tier
+        try {
+          const tierRes = await fetch(`${API}/subscriptions/${vendor.id}`);
+          const tierData = await tierRes.json();
+          if (tierData.success && tierData.data?.tier) setVendorTier(tierData.data.tier);
+        } catch(e) {}
+        // Also check session for tier (from login)
+        try {
+          const webSession = JSON.parse(localStorage.getItem('vendor_web_session') || '{}');
+          if (webSession.tier && ['essential', 'signature', 'prestige'].includes(webSession.tier)) {
+            setVendorTier(webSession.tier);
+          }
+        } catch(e) {}
       }
     } catch (e) {} finally { setLoading(false); }
   };
@@ -1392,10 +1433,18 @@ export default function VendorDashboard() {
           {ACTIVE_TABS.filter(tab => !sidebarSearch || tab.label.toLowerCase().includes(sidebarSearch.toLowerCase())).map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const locked = !hasTabAccess(vendorTier, tab.id);
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  if (locked) {
+                    const requiredTier = TAB_TIER[tab.id] || 'signature';
+                    setDeluxeSuiteTab({ ...tab, desc: `This feature is available on the ${requiredTier.charAt(0).toUpperCase() + requiredTier.slice(1)} plan. Upgrade to unlock.` });
+                  } else {
+                    setActiveTab(tab.id);
+                  }
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1408,18 +1457,21 @@ export default function VendorDashboard() {
                   borderRadius: 0,
                   cursor: 'pointer',
                   textAlign: 'left',
+                  opacity: locked ? 0.45 : 1,
                 }}
               >
-                <Icon size={14} color={isActive ? 'var(--gold)' : 'var(--grey)'} />
+                <Icon size={14} color={isActive ? 'var(--gold)' : locked ? 'var(--grey)' : 'var(--grey)'} />
                 <span style={{
                   fontFamily: 'Inter, sans-serif',
                   fontSize: '13px',
                   fontWeight: isActive ? 500 : 300,
                   color: isActive ? 'var(--gold)' : 'var(--grey)',
                   letterSpacing: '0.2px',
+                  flex: 1,
                 }}>
                   {!sidebarCollapsed && tab.label}
                 </span>
+                {locked && !sidebarCollapsed && <Lock size={10} color="var(--grey)" />}
               </button>
             );
           })}
@@ -1508,10 +1560,11 @@ export default function VendorDashboard() {
             {DELUXE_SUITE_TABS.filter(tab => !sidebarSearch || tab.label.toLowerCase().includes(sidebarSearch.toLowerCase())).map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const dsLocked = vendorTier !== 'prestige';
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => dsLocked ? setDeluxeSuiteTab(tab) : setActiveTab(tab.id)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1537,7 +1590,9 @@ export default function VendorDashboard() {
                     {!sidebarCollapsed && tab.label}
                   </span>
                   {!sidebarCollapsed && (
-                    <Award size={9} color={isActive ? '#C9A84C' : 'rgba(201,168,76,0.35)'} />
+                    dsLocked
+                      ? <Lock size={9} color="rgba(201,168,76,0.35)" />
+                      : <Award size={9} color={isActive ? '#C9A84C' : 'rgba(201,168,76,0.35)'} />
                   )}
                 </button>
               );

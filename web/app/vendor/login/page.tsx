@@ -85,7 +85,7 @@ export default function VendorLoginPage() {
 
         <div>
           <div style={{ fontSize: '38px', fontWeight: 300, color: '#fff', lineHeight: 1.2, letterSpacing: '-0.8px', marginBottom: '20px' }}>
-            The business<br />behind the magic.
+            Every dream<br />needs a maker.
           </div>
           <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', lineHeight: 1.8, maxWidth: '340px' }}>
             India's wedding professionals<br />run their business here.
