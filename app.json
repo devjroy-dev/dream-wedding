@@ -54,6 +54,7 @@
       "typedRoutes": true,
       "reactCompiler": false
     },
+    "newArchEnabled": false,
     "extra": {
       "router": {},
       "eas": {
