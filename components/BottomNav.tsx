@@ -12,13 +12,7 @@ export default function BottomNav() {
   return (
     <View style={styles.nav}>
       {TABS.map((item) => {
-        const isActive =
-          (item.route === '/home' && pathname === '/home') ||
-          (item.route === '/moodboard' && pathname === '/moodboard') ||
-          (item.route === '/messaging' && pathname === '/messaging') ||
-          (item.route === '/bts-planner' && pathname === '/bts-planner') ||
-          (item.route === '/profile' && pathname === '/profile');
-
+        const isActive = item.route === pathname;
         return (
           <TouchableOpacity
             key={item.label}
@@ -32,7 +26,7 @@ export default function BottomNav() {
             <Feather
               name={item.icon as any}
               size={TDW.icons.xl}
-              color={isActive ? TDW.colors.dark : TDW.colors.grey}
+              color={isActive ? TDW.colors.gold : TDW.colors.greyMuted}
             />
             <Text style={[
               styles.label,
@@ -60,7 +54,7 @@ const styles = StyleSheet.create({
     ...TDW.typography.navLabel as any,
   },
   labelActive: {
-    color: TDW.colors.dark,
+    color: TDW.colors.gold,
     fontFamily: TDW.fonts.sansMedium,
   },
   dot: {

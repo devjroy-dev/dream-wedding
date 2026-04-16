@@ -336,11 +336,10 @@ const icons = {
 
 const bottomNavTabs = {
   couple: [
-    { label: 'Home',      icon: 'home',           route: '/home'        },
+    { label: 'Discover',  icon: 'compass',        route: '/home'        },
     { label: 'Moodboard', icon: 'heart',          route: '/moodboard'   },
-    { label: 'Messages',  icon: 'message-circle', route: '/messaging'   },
     { label: 'Planner',   icon: 'calendar',       route: '/bts-planner' },
-    { label: 'Profile',   icon: 'user',           route: '/profile'     },
+    { label: 'Inbox',     icon: 'message-circle', route: '/messaging'   },
   ],
   vendor: [
     { label: 'Dashboard', icon: 'grid',           route: '/vendor-dashboard' },

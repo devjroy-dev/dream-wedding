@@ -1,4 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+"""
+Session 6 — Patch 5: Home.tsx → Discover Landing
+Clean editorial Discover tab. Swipe entry as hero.
+Category pills, featured boards, avatar for profile.
+Budget-tier greeting from journeyConfig.
+"""
+
+home = r'''import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Dimensions, ScrollView, Animated, BackHandler, Alert,
@@ -293,3 +300,14 @@ const s = StyleSheet.create({
   exploreTitle: { fontSize: 13, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', letterSpacing: 0.2 },
   exploreSub: { fontSize: 10, color: '#8C7B6E', fontFamily: 'DMSans_300Light', letterSpacing: 0.2, lineHeight: 15 },
 });
+'''
+
+with open('app/home.tsx', 'w') as f:
+    f.write(home)
+
+print("✓ app/home.tsx — rewritten as Discover landing")
+print("  Budget-tier greeting, category pills, hero card, featured boards")
+print("  Avatar top-right for Profile access")
+print()
+print("PATCH 5 COMPLETE")
+print("Run: npx tsc --noEmit -p tsconfig.json")
