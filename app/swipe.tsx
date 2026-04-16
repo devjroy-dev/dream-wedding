@@ -93,13 +93,7 @@ export default function SwipeScreen() {
         const parsed = JSON.parse(session);
         setUserId(parsed.userId || parsed.uid || null);
         if (parsed.budget) setUserBudget(parsed.budget);
-        // Load token balance + unlocked vendors + couple tier
-        const storedTokens = await AsyncStorage.getItem('tdw_token_balance');
-        if (storedTokens !== null) setTokenBalance(parseInt(storedTokens));
-        const storedUnlocked = await AsyncStorage.getItem('tdw_unlocked_vendors');
-        if (storedUnlocked) setUnlockedVendors(JSON.parse(storedUnlocked));
-        const storedTier = await AsyncStorage.getItem('tdw_couple_tier');
-        if (storedTier) setCoupleTier(storedTier as any);
+        // Token system removed — free discovery
         const sCity = parsed.city || parsed.wedding_city || '';
         const sBudget = parsed.budget ? String(parsed.budget) : '';
         setSessionCity(sCity);

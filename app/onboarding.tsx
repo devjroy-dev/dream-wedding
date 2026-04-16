@@ -189,6 +189,7 @@ export default function OnboardingScreen() {
         wedding_flexible: isFlexible,
         functions: selectedFunctions,
         budget: parseInt(selectedBudget),
+        budget_tier: parseInt(selectedBudget) >= 5000000 ? 'luxe' : parseInt(selectedBudget) >= 1500000 ? 'signature' : 'essential',
         city: selectedCity,
         city_type: cityType,
         onboarded: true,

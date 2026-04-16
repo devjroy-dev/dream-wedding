@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, ScrollView, Animated, BackHandler,
+  Dimensions, ScrollView, Animated, BackHandler, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,7 +18,7 @@ import WebsiteTool from '../components/planner/WebsiteTool';
 import DreamAiTool from '../components/planner/DreamAiTool';
 import {
   JOURNEY_PHASES, QUICK_ACCESS_TOOLS, PROGRESS_LABELS,
-  getCurrentPhase, getProgressIndex, getBudgetTier,
+  getCurrentPhase, getProgressIndex, getBudgetTier, TIER_CONTENT,
   type BudgetTier, type PhaseId,
 } from '../constants/journeyConfig';
 
@@ -31,6 +31,8 @@ export default function BTSPlannerScreen() {
   const [userId, setUserId] = useState('');
   const [userSession, setUserSession] = useState<any>(null);
   const [budgetTier, setBudgetTier] = useState<BudgetTier>('essential');
+  const [coupleTier, setCoupleTier] = useState<'free' | 'premium' | 'elite'>('free');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [daysUntil, setDaysUntil] = useState<number | null>(null);
   const [currentPhase, setCurrentPhase] = useState<PhaseId>('foundation');
   const [progressIdx, setProgressIdx] = useState(0);
@@ -62,6 +64,9 @@ export default function BTSPlannerScreen() {
         setUserSession(p);
         const budget = p.budget || 0;
         setBudgetTier(getBudgetTier(budget));
+        // Load couple subscription tier
+        const storedTier = await AsyncStorage.getItem('tdw_couple_tier');
+        if (storedTier) setCoupleTier(storedTier as any);
         const name = p.name || '';
         const partner = p.partnerName || '';
         setCoupleName(partner ? `${name.split(' ')[0]} & ${partner.split(' ')[0]}` : name.split(' ')[0]);
@@ -82,10 +87,15 @@ export default function BTSPlannerScreen() {
 
   // ── Tool routing ───────────────────────────────────────────────────────────
 
-  const handleToolPress = (route: string) => {
+  const handleToolPress = (route: string, isPlatinumOnly?: boolean) => {
     if (route === 'discover') { router.push('/swipe' as any); return; }
     if (route === 'moodboard') { router.push('/moodboard' as any); return; }
     if (route === 'destination') { router.push('/destination-weddings' as any); return; }
+    // Gate Platinum-only tools
+    if (isPlatinumOnly && coupleTier !== 'elite') {
+      setShowUpgradeModal(true);
+      return;
+    }
     setActiveTool(route);
   };
 
@@ -211,7 +221,7 @@ export default function BTSPlannerScreen() {
                     </View>
                     <View style={s.phaseTitleWrap}>
                       <Text style={[s.phaseTitle, !active && s.phaseTitleMuted]}>{phase.label}</Text>
-                      <Text style={s.phaseSubtitle}>{phase.subtitle}</Text>
+                      <Text style={s.phaseSubtitle}>{TIER_CONTENT[budgetTier].phaseSubtitles[phase.id] || phase.subtitle}</Text>
                     </View>
                   </View>
 
@@ -221,7 +231,7 @@ export default function BTSPlannerScreen() {
                         <TouchableOpacity
                           key={tool.id}
                           style={[s.toolCard, tool.comingSoon && s.toolCardMuted]}
-                          onPress={() => !tool.comingSoon && handleToolPress(tool.route)}
+                          onPress={() => !tool.comingSoon && handleToolPress(tool.route, tool.platinumOnly)}
                           activeOpacity={tool.comingSoon ? 1 : 0.7}
                         >
                           <View style={s.toolIconBox}>
@@ -269,6 +279,37 @@ export default function BTSPlannerScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Upgrade Modal */}
+      <Modal visible={showUpgradeModal} transparent animationType="fade">
+        <View style={s.upgradeOverlay}>
+          <View style={s.upgradeCard}>
+            <View style={s.upgradeIconWrap}>
+              <Feather name="zap" size={24} color="#C9A84C" />
+            </View>
+            <Text style={s.upgradeTitle}>Unlock with Platinum</Text>
+            <Text style={s.upgradeBody}>
+              DreamAi, Memory Box, and premium planning tools are available with the Platinum plan.
+            </Text>
+            <View style={s.upgradePriceRow}>
+              <Text style={s.upgradePrice}>Rs.2,999</Text>
+              <Text style={s.upgradePriceLabel}> one-time</Text>
+            </View>
+            <TouchableOpacity
+              style={s.upgradeBtn}
+              onPress={() => {
+                setShowUpgradeModal(false);
+                router.push('/profile' as any);
+              }}
+            >
+              <Text style={s.upgradeBtnText}>View Plans</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowUpgradeModal(false)} style={s.upgradeCancel}>
+              <Text style={s.upgradeCancelText}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <BottomNav />
     </View>
@@ -416,5 +457,47 @@ const s = StyleSheet.create({
   },
   quickLabel: {
     fontSize: 13, color: '#2C2420', fontFamily: 'DMSans_400Regular', letterSpacing: 0.2,
+  },
+
+  // Upgrade modal
+  upgradeOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 32,
+  },
+  upgradeCard: {
+    backgroundColor: '#FAF6F0', borderRadius: 20, padding: 28, width: '100%',
+    maxWidth: 320, alignItems: 'center', gap: 12,
+  },
+  upgradeIconWrap: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFF8EC',
+    borderWidth: 1, borderColor: '#E8D9B5',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 4,
+  },
+  upgradeTitle: {
+    fontSize: 20, color: '#2C2420', fontFamily: 'PlayfairDisplay_400Regular', textAlign: 'center',
+  },
+  upgradeBody: {
+    fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light',
+    textAlign: 'center', lineHeight: 20,
+  },
+  upgradePriceRow: {
+    flexDirection: 'row', alignItems: 'baseline', marginTop: 4,
+  },
+  upgradePrice: {
+    fontSize: 22, color: '#C9A84C', fontFamily: 'PlayfairDisplay_600SemiBold',
+  },
+  upgradePriceLabel: {
+    fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light',
+  },
+  upgradeBtn: {
+    width: '100%', backgroundColor: '#2C2420', borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center', marginTop: 4,
+  },
+  upgradeBtnText: {
+    color: '#FAF6F0', fontSize: 13, fontFamily: 'DMSans_300Light',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+  },
+  upgradeCancel: { paddingVertical: 8 },
+  upgradeCancelText: {
+    fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light',
   },
 });

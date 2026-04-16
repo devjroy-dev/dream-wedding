@@ -11,7 +11,7 @@ import { getBudgetTier, TIER_CONTENT } from '../constants/journeyConfig';
 
 const { width } = Dimensions.get('window');
 
-const CATEGORIES = [
+const ALL_CATEGORIES = [
   { id: 'venues',           label: 'Venues',          icon: 'home'       },
   { id: 'photographers',    label: 'Photographers',   icon: 'camera'     },
   { id: 'mua',              label: 'Makeup Artists',   icon: 'scissors'   },
@@ -24,12 +24,25 @@ const CATEGORIES = [
   { id: 'bridal-wellness',  label: 'Bridal Wellness',  icon: 'heart'      },
 ];
 
+// Budget-tier category priority — what matters most at each budget level
+const TIER_CATEGORY_ORDER: Record<string, string[]> = {
+  essential: ['venues', 'photographers', 'mua', 'designers', 'choreographers', 'dj', 'content-creators', 'jewellery', 'bridal-wellness', 'event-managers'],
+  signature: ['venues', 'photographers', 'designers', 'mua', 'event-managers', 'choreographers', 'dj', 'content-creators', 'jewellery', 'bridal-wellness'],
+  luxe: ['event-managers', 'venues', 'photographers', 'designers', 'mua', 'choreographers', 'content-creators', 'dj', 'jewellery', 'bridal-wellness'],
+};
+
+const getCategoriesForTier = (tier: string) => {
+  const order = TIER_CATEGORY_ORDER[tier] || TIER_CATEGORY_ORDER.signature;
+  return order.map(id => ALL_CATEGORIES.find(c => c.id === id)!).filter(Boolean);
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const [userName, setUserName] = useState('');
   const [daysToGo, setDaysToGo] = useState<number | null>(null);
   const [greeting, setGreeting] = useState('Good morning');
   const [tierGreeting, setTierGreeting] = useState('');
+  const [budgetTierName, setBudgetTierName] = useState('signature');
   const fadeIn = useRef(new Animated.Value(0)).current;
   const [backPressCount, setBackPressCount] = useState(0);
 
@@ -75,6 +88,7 @@ export default function HomeScreen() {
         if (parsed.budget) {
           const tier = getBudgetTier(parsed.budget);
           setTierGreeting(TIER_CONTENT[tier].greeting);
+          setBudgetTierName(tier);
         }
       }
     } catch (e) {}
@@ -132,7 +146,7 @@ export default function HomeScreen() {
           contentContainerStyle={s.pillsContent}
           style={s.pillsScroll}
         >
-          {CATEGORIES.map(cat => (
+          {getCategoriesForTier(budgetTierName).map(cat => (
             <TouchableOpacity
               key={cat.id}
               style={s.pill}

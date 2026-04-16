@@ -149,12 +149,21 @@ export const getProgressIndex = (daysToWedding: number): number => {
 
 interface TierContent {
   greeting: string;
+  phaseSubtitles: Record<string, string>;
   budgetDefaults: { category: string; amount: number; icon: string }[];
 }
 
 export const TIER_CONTENT: Record<BudgetTier, TierContent> = {
   essential: {
     greeting: 'Every detail matters, and it will be beautiful.',
+    phaseSubtitles: {
+      foundation: 'Set a realistic budget and start smart',
+      search: 'Find vendors who deliver magic within your range',
+      team: 'Every rupee counts — choose wisely',
+      coordination: 'Streamline everything, waste nothing',
+      final: 'You\'ve planned beautifully — now enjoy it',
+      wedding_week: 'This is your moment',
+    },
     budgetDefaults: [
       { category: 'Venue',           amount: 200000, icon: 'home' },
       { category: 'Photography',     amount: 60000,  icon: 'camera' },
@@ -170,6 +179,14 @@ export const TIER_CONTENT: Record<BudgetTier, TierContent> = {
   },
   signature: {
     greeting: 'Balance quality across every moment.',
+    phaseSubtitles: {
+      foundation: 'The essentials that shape everything',
+      search: 'Discover vendors who bring your vision to life',
+      team: 'Assemble the people who make the dream real',
+      coordination: 'Every detail, beautifully managed',
+      final: 'Almost there — make it perfect',
+      wedding_week: 'This is your moment',
+    },
     budgetDefaults: [
       { category: 'Venue',           amount: 600000,  icon: 'home' },
       { category: 'Photography',     amount: 200000,  icon: 'camera' },
@@ -186,6 +203,14 @@ export const TIER_CONTENT: Record<BudgetTier, TierContent> = {
   },
   luxe: {
     greeting: 'This will be remarkable.',
+    phaseSubtitles: {
+      foundation: 'Architect an extraordinary celebration',
+      search: 'Curate India\'s finest for your vision',
+      team: 'Orchestrate with precision and taste',
+      coordination: 'Every element, flawlessly composed',
+      final: 'Perfection is in the details',
+      wedding_week: 'Your legacy begins',
+    },
     budgetDefaults: [
       { category: 'Venue',           amount: 2500000, icon: 'home' },
       { category: 'Photography',     amount: 500000,  icon: 'camera' },
