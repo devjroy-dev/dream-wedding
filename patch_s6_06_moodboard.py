@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+"""
+Session 6 — Patch 6: Moodboard Pinterest Overhaul
+Transforms moodboard from saved-vendor list into Pinterest-style
+inspiration board with folders, tags, masonry grid.
+Preserves saved vendor data + actions (message, enquire).
+"""
+
+moodboard = r'''import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
   Dimensions, ScrollView, Image, ActivityIndicator,
@@ -437,3 +444,16 @@ const s = StyleSheet.create({
   modalCancel: { alignItems: 'center', paddingVertical: 10 },
   modalCancelText: { fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_300Light' },
 });
+'''
+
+with open('app/moodboard.tsx', 'w') as f:
+    f.write(moodboard)
+
+print("✓ app/moodboard.tsx — Pinterest-style moodboard")
+print("  Masonry grid, folder pills with counts, function tags")
+print("  Vendor pins: message + enquire actions preserved")
+print("  Custom pins: add ideas, assign to folders")
+print("  Animated remove, share support")
+print()
+print("PATCH 6 COMPLETE")
+print("Run: npx tsc --noEmit -p tsconfig.json")
