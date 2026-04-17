@@ -357,7 +357,7 @@ export default function AdminPage() {
     } catch (e) { alert('Network error'); } finally { setGenerating(false); }
   };
 
-  const generateTierCode = async (tier: 'signature' | 'prestige') => {
+  const generateTierCode = async (tier: 'essential' | 'signature' | 'prestige') => {
     // Name/nickname optional
     setTierGenerating(true); setTierNewCode(null);
     try {
@@ -553,6 +553,9 @@ export default function AdminPage() {
               <input placeholder="Note (optional)" value={tierNote} onChange={e => setTierNote(e.target.value)} style={{ ...s.input, flex: 1 }} />
             </div>
             <div className='admin-flex-col' style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => generateTierCode('essential')} disabled={tierGenerating} style={{ flex: 1, padding: '14px 24px', background: '#8C7B6E', color: '#fff', border: 'none', borderRadius: 9, cursor: tierGenerating ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
+                {tierGenerating ? 'Generating...' : 'Generate Essential Code'}
+              </button>
               <button onClick={() => generateTierCode('signature')} disabled={tierGenerating} style={{ flex: 1, padding: '14px 24px', background: '#C9A84C', color: '#fff', border: 'none', borderRadius: 9, cursor: tierGenerating ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
                 {tierGenerating ? 'Generating...' : 'Generate Signature Code'}
               </button>

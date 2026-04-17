@@ -6,14 +6,15 @@ import {
   FileText, CreditCard, Clock, Users, TrendingDown, Percent,
   Share2, BarChart2, Package, Gift, Globe, Award, ChevronRight,
   LogOut, Settings as SettingsIcon, Lock, Briefcase, MapPin, Zap,
-  CheckCircle, AlertCircle, X, Search, Mail,
+  CheckCircle, AlertCircle, X, Search, Mail, MoreHorizontal,
+  Minus, Edit2, DollarSign, Tag,
 } from 'react-feather';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-type Tab = 'Dashboard' | 'Inquiries' | 'Calendar' | 'Tools' | 'Profile';
+type Tab = 'Home' | 'Inquiries' | 'Calendar' | 'Clients' | 'More';
 type Tier = 'essential' | 'signature' | 'prestige';
 
 interface VendorSession {
@@ -30,23 +31,23 @@ interface VendorSession {
 // ── Tier Tools (matches React Native ESSENTIAL_TOOLS / SIGNATURE_TOOLS) ──
 
 const ESSENTIAL_TOOLS = [
-  { id: 'overview',     icon: Grid,         label: 'Overview',     tab: 'Dashboard' as Tab },
+  { id: 'overview',     icon: Grid,         label: 'Overview',     tab: 'Home' as Tab },
   { id: 'inquiries',    icon: Mail,         label: 'Enquiries',    tab: 'Inquiries' as Tab },
   { id: 'calendar',     icon: Calendar,     label: 'Calendar',     tab: 'Calendar' as Tab },
-  { id: 'clients',      icon: Users,        label: 'Clients',      tab: 'Tools' as Tab, sub: 'clients' },
-  { id: 'invoices',     icon: FileText,     label: 'Invoices',     tab: 'Tools' as Tab, sub: 'invoices' },
-  { id: 'contracts',    icon: Briefcase,    label: 'Contracts',    tab: 'Tools' as Tab, sub: 'contracts' },
-  { id: 'payments',     icon: CreditCard,   label: 'Payments',     tab: 'Tools' as Tab, sub: 'payments' },
+  { id: 'clients',      icon: Users,        label: 'Clients',      tab: 'Clients' as Tab, sub: 'clients' },
+  { id: 'invoices',     icon: FileText,     label: 'Invoices',     tab: 'Clients' as Tab, sub: 'invoices' },
+  { id: 'contracts',    icon: Briefcase,    label: 'Contracts',    tab: 'Clients' as Tab, sub: 'contracts' },
+  { id: 'payments',     icon: CreditCard,   label: 'Payments',     tab: 'Clients' as Tab, sub: 'payments' },
   { id: 'availability', icon: Clock,        label: 'Availability', tab: 'Calendar' as Tab },
 ];
 
 const SIGNATURE_TOOLS = [
-  { id: 'expenses',  icon: TrendingDown,  label: 'Expenses',  tab: 'Tools' as Tab, sub: 'expenses' },
-  { id: 'tax',       icon: Percent,       label: 'Tax & TDS', tab: 'Tools' as Tab, sub: 'tax' },
-  { id: 'team',      icon: Users,         label: 'My Team',   tab: 'Tools' as Tab, sub: 'team' },
-  { id: 'referral',  icon: Share2,        label: 'Referrals', tab: 'Tools' as Tab, sub: 'referral' },
-  { id: 'whatsapp',  icon: MessageCircle, label: 'Broadcast', tab: 'Tools' as Tab, sub: 'whatsapp' },
-  { id: 'analytics', icon: BarChart2,     label: 'Analytics', tab: 'Tools' as Tab, sub: 'analytics' },
+  { id: 'expenses',  icon: TrendingDown,  label: 'Expenses',  tab: 'Clients' as Tab, sub: 'expenses' },
+  { id: 'tax',       icon: Percent,       label: 'Tax & TDS', tab: 'Clients' as Tab, sub: 'tax' },
+  { id: 'team',      icon: Users,         label: 'My Team',   tab: 'Clients' as Tab, sub: 'team' },
+  { id: 'referral',  icon: Share2,        label: 'Referrals', tab: 'Clients' as Tab, sub: 'referral' },
+  { id: 'whatsapp',  icon: MessageCircle, label: 'Broadcast', tab: 'Clients' as Tab, sub: 'whatsapp' },
+  { id: 'analytics', icon: BarChart2,     label: 'Analytics', tab: 'Clients' as Tab, sub: 'analytics' },
 ];
 
 // ── Brand Tokens (match React Native theme) ──────────────────────────────
@@ -96,7 +97,7 @@ function fmtINR(n: number): string {
 
 export default function VendorMobilePage() {
   const [session, setSession] = useState<VendorSession | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('Dashboard');
+  const [activeTab, setActiveTab] = useState<Tab>('Home');
   const [activeSubTool, setActiveSubTool] = useState<string | null>(null);
 
   // Data
@@ -125,6 +126,11 @@ export default function VendorMobilePage() {
     setChecklistDismissed(true);
     if (typeof window !== 'undefined') localStorage.setItem('tdw_checklist_dismissed', '1');
   };
+
+  // ── Quick Action bottom sheets ────────────────────────────────────────
+  const [showQuickInvoice, setShowQuickInvoice] = useState(false);
+  const [showQuickBlock, setShowQuickBlock] = useState(false);
+  const [showQuickReminder, setShowQuickReminder] = useState(false);
 
   // ── Add Client modal ───────────────────────────────────────────────────
   const [showAddClient, setShowAddClient] = useState(false);
@@ -258,7 +264,7 @@ export default function VendorMobilePage() {
 
       {/* ── BODY ── */}
       <div style={{ padding: '8px 16px 24px' }}>
-        {activeTab === 'Dashboard' && (
+        {activeTab === 'Home' && (
           <DashboardTab
             session={session}
             tier={tier}
@@ -274,6 +280,9 @@ export default function VendorMobilePage() {
             checklistDismissed={checklistDismissed}
             onDismissChecklist={dismissChecklist}
             onAddClient={() => setShowAddClient(true)}
+            onOpenInvoice={() => setShowQuickInvoice(true)}
+            onOpenBlockDate={() => setShowQuickBlock(true)}
+            onOpenReminder={() => setShowQuickReminder(true)}
           />
         )}
         {activeTab === 'Inquiries' && (
@@ -304,7 +313,7 @@ export default function VendorMobilePage() {
             }}
           />
         )}
-        {activeTab === 'Tools' && (
+        {activeTab === 'Clients' && (
           <ToolsTab
             session={session}
             tier={tier}
@@ -316,8 +325,8 @@ export default function VendorMobilePage() {
             onAddClient={() => setShowAddClient(true)}
           />
         )}
-        {activeTab === 'Profile' && (
-          <ProfileTab
+        {activeTab === 'More' && (
+          <MoreTab
             session={session}
             tier={tier}
             vendorData={vendorData}
@@ -363,6 +372,44 @@ export default function VendorMobilePage() {
             setAiRequestSent(true);
             setVendorData((p: any) => p ? { ...p, ai_access_requested: true } : p);
           }}
+        />
+      )}
+
+      {/* ── QUICK INVOICE SHEET ── */}
+      {showQuickInvoice && (
+        <QuickInvoiceSheet
+          vendorId={session.vendorId}
+          vendorName={session.vendorName}
+          clients={clients}
+          onClose={() => setShowQuickInvoice(false)}
+          onSaved={(newInvoice: any) => {
+            setInvoices(prev => [newInvoice, ...prev]);
+            setShowQuickInvoice(false);
+          }}
+        />
+      )}
+
+      {/* ── QUICK BLOCK DATE SHEET ── */}
+      {showQuickBlock && (
+        <QuickBlockDateSheet
+          vendorId={session.vendorId}
+          onClose={() => setShowQuickBlock(false)}
+          onSaved={(blocked: any) => {
+            setBlockedDates(prev => [blocked, ...prev]);
+            setShowQuickBlock(false);
+          }}
+        />
+      )}
+
+      {/* ── QUICK REMINDER SHEET ── */}
+      {showQuickReminder && (
+        <QuickReminderSheet
+          invoices={invoices.filter((i: any) => i.status !== 'paid')}
+          paymentSchedules={paymentSchedules.filter((s: any) =>
+            (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date())
+          )}
+          vendorName={session.vendorName}
+          onClose={() => setShowQuickReminder(false)}
         />
       )}
     </div>
@@ -417,7 +464,7 @@ function Header({ session, tier }: { session: VendorSession; tier: Tier }) {
 // DASHBOARD TAB (mirrors React Native Overview)
 // ══════════════════════════════════════════════════════════════════════════
 
-function DashboardTab({ session, tier, bookings, invoices, clients, leads, paymentSchedules, loading, onJumpToTab, vendorData, onOpenAiModal, checklistDismissed, onDismissChecklist, onAddClient }: any) {
+function DashboardTab({ session, tier, bookings, invoices, clients, leads, paymentSchedules, loading, onJumpToTab, vendorData, onOpenAiModal, checklistDismissed, onDismissChecklist, onAddClient, onOpenInvoice, onOpenBlockDate, onOpenReminder }: any) {
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
   const todayBookings = bookings.filter((b: any) => {
     if (!b.event_date) return false;
@@ -447,6 +494,65 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
   const profilePercent = Math.round((profileCompletedCount / profileSteps.length) * 100);
   const profileIncomplete = profilePercent < 100;
 
+  // ── Contextual upgrade nudges — Pattern 4 ─────────────────────────────
+  // Detect a trigger moment, show a single card, record it so it never fires again.
+  // Only for Essential/Signature. Prestige vendors see nothing.
+  const [nudgeDismissed, setNudgeDismissed] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const d = localStorage.getItem('tdw_nudge_dismissed');
+    if (d) setNudgeDismissed(d);
+  }, []);
+
+  const shownNudges: string[] = Array.isArray(vendorData?.upgrade_nudges_shown) ? vendorData.upgrade_nudges_shown : [];
+
+  // Trigger 1 — Essential: 5+ clients added in last 7 days → Signature / Analytics
+  const clientsLast7Days = clients.filter((c: any) => {
+    const created = c.created_at ? new Date(c.created_at) : null;
+    if (!created) return false;
+    return (Date.now() - created.getTime()) < 7 * 24 * 60 * 60 * 1000;
+  }).length;
+  const trigger_growth_analytics: NudgeTrigger = {
+    key: 'growth_analytics',
+    eyebrow: 'You\'re Growing Fast',
+    title: `${clientsLast7Days} new clients this week — impressive.`,
+    body: 'Signature unlocks Analytics so you can see which channels and events drive your best bookings. Plus Expenses, Tax, Team, and Broadcast.',
+    cta: 'See Signature',
+    href: '/vendor/dashboard',
+  };
+
+  // Trigger 2 — Essential: 3+ overdue payment schedules → Broadcast / Signature
+  const overdueCount = overdueSchedules.length;
+  const trigger_broadcast_reminders: NudgeTrigger = {
+    key: 'broadcast_reminders',
+    eyebrow: 'Recover Outstanding Faster',
+    title: `You have ${overdueCount} overdue payments.`,
+    body: 'Signature vendors use WhatsApp Broadcast to send polite bulk reminders — and recover 40% faster than one-by-one follow-ups.',
+    cta: 'See Signature',
+    href: '/vendor/dashboard',
+  };
+
+  let activeTrigger: NudgeTrigger | null = null;
+  if (tier === 'essential' && vendorData?.id) {
+    if (clientsLast7Days >= 5 && !shownNudges.includes('growth_analytics') && nudgeDismissed !== 'growth_analytics') {
+      activeTrigger = trigger_growth_analytics;
+    } else if (overdueCount >= 3 && !shownNudges.includes('broadcast_reminders') && nudgeDismissed !== 'broadcast_reminders') {
+      activeTrigger = trigger_broadcast_reminders;
+    }
+  }
+
+  const dismissNudge = (key: string) => {
+    setNudgeDismissed(key);
+    if (typeof window !== 'undefined') localStorage.setItem('tdw_nudge_dismissed', key);
+    // Record on backend so it never fires again even on a different device
+    if (vendorData?.id) {
+      fetch(`${API}/api/vendors/${vendorData.id}/upgrade-nudge`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trigger_key: key }),
+      }).catch(() => {});
+    }
+  };
+
   if (loading) {
     return <div style={{ padding: '40px 0', textAlign: 'center', color: C.muted }}>Loading your business…</div>;
   }
@@ -460,6 +566,14 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           percent={profilePercent}
           steps={profileSteps}
           onDismiss={onDismissChecklist}
+        />
+      )}
+
+      {/* ── CONTEXTUAL UPGRADE NUDGE (Pattern 4) ── */}
+      {activeTrigger && (
+        <UpgradeNudge
+          trigger={activeTrigger}
+          onDismiss={() => dismissNudge(activeTrigger!.key)}
         />
       )}
 
@@ -774,7 +888,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           </div>
           {unpaidInvoices.length > 3 && (
             <button
-              onClick={() => onJumpToTab('Tools')}
+              onClick={() => onJumpToTab('Clients')}
               style={{
                 background: 'none', border: 'none',
                 fontSize: '11px', color: C.goldDeep, fontWeight: 600,
@@ -826,12 +940,13 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
         </div>
       )}
 
-      {/* ── THREE QUICK ACTIONS (real, all wired) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+      {/* ── QUICK ACTIONS (real, all wired to bottom sheets) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
         {[
-          { icon: FileText, label: 'Invoice',    onClick: () => onJumpToTab('Tools') },
-          { icon: Calendar, label: 'Block Date', onClick: () => onJumpToTab('Calendar') },
-          { icon: Users,    label: 'Add Client', onClick: () => onAddClient && onAddClient() },
+          { icon: FileText,   label: 'Invoice',    onClick: () => onOpenInvoice && onOpenInvoice() },
+          { icon: Send,       label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
+          { icon: Calendar,   label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
+          { icon: Users,      label: 'Add Client', onClick: () => onAddClient && onAddClient() },
         ].map((a: any, i: number) => {
           const I = a.icon;
           return (
@@ -842,8 +957,8 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
                 background: C.ivory,
                 border: `1px solid ${C.goldBorder}`,
                 borderRadius: '14px',
-                padding: '18px 10px 16px',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+                padding: '16px 6px 14px',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px',
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 transition: 'all 0.25s ease',
@@ -851,12 +966,12 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
               onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = C.goldSoft; }}
               onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.background = C.ivory; }}
             >
-              <I size={18} color={C.gold} />
+              <I size={16} color={C.gold} />
               <span style={{
                 fontFamily: 'DM Sans, sans-serif',
-                fontSize: '10px', fontWeight: 500,
-                letterSpacing: '1.5px', textTransform: 'uppercase',
-                color: C.dark,
+                fontSize: '9px', fontWeight: 500,
+                letterSpacing: '1.2px', textTransform: 'uppercase',
+                color: C.dark, textAlign: 'center', lineHeight: 1.15,
               }}>{a.label}</span>
             </button>
           );
@@ -894,7 +1009,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
             <SectionLabel>Recent Clients</SectionLabel>
             <button
-              onClick={() => onJumpToTab('Tools')}
+              onClick={() => onJumpToTab('Clients')}
               style={{
                 background: 'none', border: 'none',
                 fontSize: '10px', color: C.goldDeep, fontWeight: 600,
@@ -1497,7 +1612,7 @@ function Empty({ icon, title, sub }: any) {
 // PROFILE TAB
 // ══════════════════════════════════════════════════════════════════════════
 
-function ProfileTab({ session, tier, vendorData, aiStatus, buyingTokens, setBuyingTokens, onAiStatusUpdate }: any) {
+function MoreTab({ session, tier, vendorData, aiStatus, buyingTokens, setBuyingTokens, onAiStatusUpdate }: any) {
   const handleLogout = () => {
     if (!confirm('Sign out?')) return;
     localStorage.removeItem('vendor_web_session');
@@ -1676,6 +1791,9 @@ function ProfileTab({ session, tier, vendorData, aiStatus, buyingTokens, setBuyi
         </div>
       )}
 
+      {/* ── Tools section with tier-locked tiles ── */}
+      <ToolsGrid tier={tier} />
+
       {/* Menu */}
       <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
         {[
@@ -1710,11 +1828,11 @@ function ProfileTab({ session, tier, vendorData, aiStatus, buyingTokens, setBuyi
 
 function BottomNav({ active, pending, onChange }: { active: Tab; pending: number; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string; icon: any }[] = [
-    { id: 'Dashboard', label: 'Dashboard', icon: Grid },
+    { id: 'Home',      label: 'Home',      icon: Grid },
     { id: 'Inquiries', label: 'Inquiries', icon: Mail },
     { id: 'Calendar',  label: 'Calendar',  icon: Calendar },
-    { id: 'Tools',     label: 'Tools',     icon: Tool },
-    { id: 'Profile',   label: 'Profile',   icon: User },
+    { id: 'Clients',   label: 'Clients',   icon: Users },
+    { id: 'More',      label: 'More',      icon: MoreHorizontal },
   ];
 
   return (
@@ -2327,5 +2445,832 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       letterSpacing: '2.5px', textTransform: 'uppercase',
       color: C.goldDeep, marginBottom: '10px',
     }}>{children}</div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// TOOLS GRID — shows all business tools with tier-locked state
+// ══════════════════════════════════════════════════════════════════════════
+
+type ToolDef = {
+  id: string;
+  label: string;
+  icon: any;
+  minTier: 'essential' | 'signature' | 'prestige';
+  href?: string;
+  desc: string;
+};
+
+const MORE_TOOLS: ToolDef[] = [
+  { id: 'expenses',  label: 'Expenses',   icon: TrendingDown,  minTier: 'signature', href: '/vendor/dashboard', desc: 'Track every expense. See where your money goes. P&L view.' },
+  { id: 'tax',       label: 'Tax & TDS',  icon: Percent,       minTier: 'signature', href: '/vendor/dashboard', desc: 'GST invoices. Quarterly TDS summary. CA-ready exports.' },
+  { id: 'broadcast', label: 'Broadcast',  icon: Send,          minTier: 'signature', href: '/vendor/dashboard', desc: 'Send WhatsApp updates to client groups. Templates included.' },
+  { id: 'analytics', label: 'Analytics',  icon: BarChart2,     minTier: 'signature', href: '/vendor/dashboard', desc: 'Revenue trends. Lead conversion. What\'s working.' },
+  { id: 'team',      label: 'Team',       icon: Users,         minTier: 'signature', href: '/vendor/dashboard', desc: 'Add assistants. Assign roles. Team calendar.' },
+  { id: 'referrals', label: 'Referrals',  icon: Share2,        minTier: 'signature', href: '/vendor/dashboard', desc: 'Past Client Discount Loop. 10% off per 10 clients who join.' },
+  { id: 'deluxe',    label: 'Deluxe Suite', icon: Award,       minTier: 'prestige',  href: '/vendor/dashboard', desc: 'Tasks, procurement, deliveries, photo approvals, client sentiment. For ops teams.' },
+];
+
+const TIER_RANK: Record<string, number> = { essential: 1, signature: 2, prestige: 3 };
+
+function ToolsGrid({ tier }: { tier: Tier }) {
+  const [lockedModal, setLockedModal] = useState<ToolDef | null>(null);
+  const vendorRank = TIER_RANK[tier] || 1;
+
+  return (
+    <>
+      <div style={{
+        fontFamily: 'DM Sans, sans-serif',
+        fontSize: '9px', fontWeight: 600,
+        letterSpacing: '2.5px', textTransform: 'uppercase',
+        color: C.goldDeep, marginBottom: '10px', marginTop: '4px',
+      }}>Your Tools</div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '10px',
+        marginBottom: '14px',
+      }}>
+        {MORE_TOOLS.map((tool) => {
+          const required = TIER_RANK[tool.minTier] || 1;
+          const locked = vendorRank < required;
+          const I = tool.icon;
+          if (locked) {
+            return (
+              <button
+                key={tool.id}
+                onClick={() => setLockedModal(tool)}
+                style={{
+                  position: 'relative',
+                  background: C.pearl,
+                  border: `1px solid ${C.borderSoft}`,
+                  borderRadius: '14px',
+                  padding: '18px 8px 16px',
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', gap: '8px',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Shimmer overlay on top edge */}
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
+                  background: `linear-gradient(90deg, transparent 0%, ${C.goldBorder} 50%, transparent 100%)`,
+                }} />
+                {/* Lock badge */}
+                <div style={{
+                  position: 'absolute', top: '6px', right: '6px',
+                  width: '18px', height: '18px', borderRadius: '50%',
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Lock size={9} color={C.goldDeep} />
+                </div>
+                <I size={18} color={C.goldBorder} />
+                <span style={{
+                  fontFamily: 'DM Sans, sans-serif',
+                  fontSize: '10px', fontWeight: 500,
+                  letterSpacing: '1.5px', textTransform: 'uppercase',
+                  color: C.muted, textAlign: 'center', lineHeight: 1.3,
+                }}>{tool.label}</span>
+              </button>
+            );
+          }
+          return (
+            <a
+              key={tool.id}
+              href={tool.href}
+              style={{
+                background: C.ivory,
+                border: `1px solid ${C.goldBorder}`,
+                borderRadius: '14px',
+                padding: '18px 8px 16px',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: '8px',
+                cursor: 'pointer', fontFamily: 'inherit',
+                textDecoration: 'none',
+              }}
+            >
+              <I size={18} color={C.gold} />
+              <span style={{
+                fontFamily: 'DM Sans, sans-serif',
+                fontSize: '10px', fontWeight: 500,
+                letterSpacing: '1.5px', textTransform: 'uppercase',
+                color: C.dark, textAlign: 'center', lineHeight: 1.3,
+              }}>{tool.label}</span>
+            </a>
+          );
+        })}
+      </div>
+
+      {/* Upgrade modal */}
+      {lockedModal && (
+        <div
+          onClick={() => setLockedModal(null)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(26,20,16,0.62)',
+            zIndex: 200,
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: '480px',
+              background: C.ivory,
+              borderTopLeftRadius: '24px', borderTopRightRadius: '24px',
+              padding: '28px 24px calc(env(safe-area-inset-bottom) + 28px)',
+              position: 'relative',
+              boxShadow: '0 -8px 40px rgba(26,20,16,0.24)',
+            }}
+          >
+            {/* Handle bar */}
+            <div style={{
+              width: '40px', height: '4px', borderRadius: '2px',
+              background: C.border, margin: '0 auto 18px',
+            }} />
+            {/* Lock icon + Tier badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{
+                width: '44px', height: '44px', borderRadius: '14px',
+                background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Lock size={18} color={C.gold} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontFamily: 'DM Sans, sans-serif',
+                  fontSize: '9px', fontWeight: 600,
+                  letterSpacing: '2.5px', textTransform: 'uppercase',
+                  color: C.goldDeep,
+                }}>{lockedModal.minTier === 'prestige' ? 'Prestige Only' : 'Signature & Above'}</div>
+                <div style={{
+                  fontFamily: "'Playfair Display', serif",
+                  fontSize: '22px', color: C.dark, fontWeight: 400,
+                  letterSpacing: '0.2px', marginTop: '2px',
+                }}>{lockedModal.label}</div>
+              </div>
+              <button
+                onClick={() => setLockedModal(null)}
+                style={{
+                  background: 'transparent', border: 'none',
+                  cursor: 'pointer', padding: '8px',
+                }}
+              ><X size={16} color={C.muted} /></button>
+            </div>
+
+            {/* Description */}
+            <div style={{
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '13px', color: C.muted,
+              lineHeight: 1.65, marginBottom: '20px',
+            }}>{lockedModal.desc}</div>
+
+            {/* CTA */}
+            <a
+              href="/vendor/dashboard"
+              style={{
+                display: 'block', textAlign: 'center',
+                background: C.gold, color: C.ivory,
+                textDecoration: 'none',
+                padding: '14px', borderRadius: '12px',
+                fontFamily: 'DM Sans, sans-serif',
+                fontSize: '11px', fontWeight: 600,
+                letterSpacing: '1.8px', textTransform: 'uppercase',
+              }}
+            >Upgrade to {lockedModal.minTier === 'prestige' ? 'Prestige' : 'Signature'}</a>
+
+            <div style={{
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '10px', color: C.light,
+              textAlign: 'center', marginTop: '10px', fontStyle: 'italic',
+            }}>
+              Manage your subscription from the business portal.
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// UPGRADE NUDGE — contextual upsell card (Pattern 4)
+// ══════════════════════════════════════════════════════════════════════════
+
+type NudgeTrigger = {
+  key: string;
+  eyebrow: string;
+  title: string;
+  body: string;
+  cta: string;
+  href: string;
+};
+
+function UpgradeNudge({ trigger, onDismiss }: { trigger: NudgeTrigger; onDismiss: () => void }) {
+  return (
+    <div style={{
+      background: C.champagne,
+      border: `1px solid ${C.goldBorder}`,
+      borderRadius: '18px',
+      padding: '20px 22px',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      {/* Gold top shimmer */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, transparent 0%, ${C.gold} 50%, transparent 100%)`,
+      }} />
+      {/* Close */}
+      <button
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        style={{
+          position: 'absolute', top: '14px', right: '14px',
+          background: 'transparent', border: 'none',
+          cursor: 'pointer', padding: '4px',
+        }}
+      ><X size={14} color={C.muted} /></button>
+
+      <div style={{
+        fontFamily: 'DM Sans, sans-serif',
+        fontSize: '9px', fontWeight: 600,
+        letterSpacing: '2.5px', textTransform: 'uppercase',
+        color: C.goldDeep, marginBottom: '8px',
+      }}>{trigger.eyebrow}</div>
+      <div style={{
+        fontFamily: "'Playfair Display', serif",
+        fontSize: '18px', color: C.dark, fontWeight: 400,
+        letterSpacing: '0.2px', lineHeight: 1.35, marginBottom: '8px',
+        paddingRight: '20px',
+      }}>{trigger.title}</div>
+      <div style={{
+        fontFamily: 'DM Sans, sans-serif',
+        fontSize: '12px', color: C.muted,
+        lineHeight: 1.6, marginBottom: '16px',
+      }}>{trigger.body}</div>
+      <a
+        href={trigger.href}
+        style={{
+          display: 'inline-block',
+          background: C.gold, color: C.ivory,
+          textDecoration: 'none',
+          padding: '10px 18px', borderRadius: '10px',
+          fontFamily: 'DM Sans, sans-serif',
+          fontSize: '10px', fontWeight: 600,
+          letterSpacing: '1.8px', textTransform: 'uppercase',
+        }}
+      >{trigger.cta}</a>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// BOTTOM-SHEET SHELL — shared luxe overlay for all quick action sheets
+// ══════════════════════════════════════════════════════════════════════════
+
+function SheetOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(26,20,16,0.55)',
+        zIndex: 200,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        animation: 'tdwFadeIn 0.22s ease',
+      }}
+    >
+      <style>{`
+        @keyframes tdwFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes tdwSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+      `}</style>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: '480px',
+          background: C.ivory,
+          borderTopLeftRadius: '24px', borderTopRightRadius: '24px',
+          padding: '8px 22px calc(env(safe-area-inset-bottom) + 24px)',
+          boxShadow: '0 -8px 40px rgba(26,20,16,0.24)',
+          maxHeight: '90dvh', overflowY: 'auto',
+          animation: 'tdwSlideUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        }}
+      >
+        {/* Handle bar */}
+        <div style={{
+          width: '40px', height: '4px', borderRadius: '2px',
+          background: C.border, margin: '10px auto 18px',
+        }} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SheetHeader({ eyebrow, title, onClose }: { eyebrow: string; title: string; onClose: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '18px' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{
+          fontFamily: 'DM Sans, sans-serif',
+          fontSize: '9px', fontWeight: 600,
+          letterSpacing: '2.5px', textTransform: 'uppercase',
+          color: C.goldDeep, marginBottom: '4px',
+        }}>{eyebrow}</div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: '22px', color: C.dark, fontWeight: 400,
+          letterSpacing: '0.2px',
+        }}>{title}</div>
+      </div>
+      <button
+        onClick={onClose}
+        aria-label="Close"
+        style={{
+          background: C.pearl,
+          border: 'none', borderRadius: '50%',
+          width: '32px', height: '32px',
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      ><X size={14} color={C.muted} /></button>
+    </div>
+  );
+}
+
+function FieldLabel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      fontFamily: 'DM Sans, sans-serif',
+      fontSize: '10px', fontWeight: 500,
+      letterSpacing: '1.5px', textTransform: 'uppercase',
+      color: C.muted, marginBottom: '6px',
+      ...style,
+    }}>{children}</div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUICK INVOICE SHEET — create a simple invoice for an existing client
+// ══════════════════════════════════════════════════════════════════════════
+
+function QuickInvoiceSheet({
+  vendorId, vendorName, clients, onClose, onSaved,
+}: {
+  vendorId: string; vendorName: string; clients: any[];
+  onClose: () => void; onSaved: (invoice: any) => void;
+}) {
+  const [clientId, setClientId] = useState<string>('');
+  const [amount, setAmount] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const selectedClient = clients.find(c => c.id === clientId);
+  const canSave = !!clientId && amount && parseInt(amount) > 0 && !submitting;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setError('');
+    setSubmitting(true);
+    try {
+      // Generate a human-readable invoice number (INV-YYMMDD-NNN)
+      const d = new Date();
+      const yymmdd = d.toISOString().slice(2, 10).replace(/-/g, '');
+      const invoice_number = `INV-${yymmdd}-${Math.floor(Math.random() * 900 + 100)}`;
+      const r = await fetch(API + '/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          client_id: clientId,
+          client_name: selectedClient?.name || '',
+          client_phone: selectedClient?.phone || '',
+          client_email: selectedClient?.email || '',
+          amount: parseInt(amount),
+          description: description.trim() || `Services by ${vendorName}`,
+          invoice_number,
+          status: 'unpaid',
+          issue_date: new Date().toISOString().slice(0, 10),
+        }),
+      });
+      const d2 = await r.json();
+      if (d2.success && d2.data) {
+        onSaved(d2.data);
+      } else {
+        setError(d2.error || 'Could not save invoice');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Quick Action" title="Create Invoice" onClose={onClose} />
+
+      {clients.length === 0 ? (
+        <div style={{
+          background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+          borderRadius: '12px', padding: '18px',
+          fontSize: '13px', color: C.goldDeep, lineHeight: 1.55,
+          marginBottom: '12px',
+        }}>
+          Add a client first, then you can invoice them. Tap <strong>Add Client</strong> on the Home tab.
+        </div>
+      ) : (
+        <>
+          <FieldLabel>Client</FieldLabel>
+          <select
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            style={{
+              width: '100%',
+              background: C.ivory,
+              border: `1px solid ${C.border}`,
+              borderRadius: '12px',
+              padding: '13px 14px',
+              fontSize: '14px', color: clientId ? C.dark : C.muted,
+              fontFamily: 'DM Sans, sans-serif',
+              outline: 'none', marginBottom: '14px',
+              appearance: 'none', WebkitAppearance: 'none',
+            }}
+          >
+            <option value="">Select a client…</option>
+            {clients.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.event_type ? ` · ${c.event_type}` : ''}
+              </option>
+            ))}
+          </select>
+
+          <FieldLabel>Amount (₹)</FieldLabel>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            background: C.ivory, border: `1px solid ${C.border}`,
+            borderRadius: '12px', padding: '13px 14px', marginBottom: '14px',
+          }}>
+            <span style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: '18px', color: C.goldDeep, fontWeight: 400,
+            }}>₹</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={amount ? parseInt(amount).toLocaleString('en-IN') : ''}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="e.g. 50000"
+              style={{
+                flex: 1, background: 'transparent', border: 'none',
+                fontSize: '18px', fontFamily: "'Playfair Display', serif",
+                color: C.dark, fontWeight: 400, outline: 'none',
+              }}
+            />
+          </div>
+
+          <FieldLabel>Description (optional)</FieldLabel>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Wedding photography — Sangeet + Reception"
+            style={{
+              width: '100%',
+              background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '13px 14px',
+              fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none',
+              marginBottom: '14px', boxSizing: 'border-box',
+            }}
+          />
+
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif', fontSize: '11px',
+            color: C.muted, marginBottom: '16px', fontStyle: 'italic',
+          }}>
+            GST (18%) is added automatically. Total: ₹{amount ? (parseInt(amount) * 1.18).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '0'}
+          </div>
+        </>
+      )}
+
+      {error && (
+        <div style={{
+          background: C.redSoft, border: `1px solid ${C.redBorder}`,
+          borderRadius: '10px', padding: '10px 12px',
+          fontSize: '11px', color: C.red, marginBottom: '12px',
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1,
+            background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`, borderRadius: '12px',
+            padding: '13px', fontSize: '11px', fontWeight: 500,
+            letterSpacing: '1.5px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >Cancel</button>
+        <button
+          onClick={handleSave}
+          disabled={!canSave}
+          style={{
+            flex: 2,
+            background: canSave ? C.gold : C.border,
+            color: canSave ? C.ivory : C.light,
+            border: 'none', borderRadius: '12px',
+            padding: '14px', fontSize: '11px', fontWeight: 600,
+            letterSpacing: '1.8px', textTransform: 'uppercase',
+            cursor: canSave ? 'pointer' : 'not-allowed',
+            fontFamily: 'DM Sans, sans-serif',
+          }}
+        >{submitting ? 'Saving…' : 'Save Invoice'}</button>
+      </div>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUICK BLOCK DATE SHEET — block a date so couples can't request it
+// ══════════════════════════════════════════════════════════════════════════
+
+function QuickBlockDateSheet({
+  vendorId, onClose, onSaved,
+}: {
+  vendorId: string; onClose: () => void; onSaved: (blocked: any) => void;
+}) {
+  const [blockDate, setBlockDate] = useState<string>('');
+  const [reason, setReason] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const canSave = !!blockDate && !submitting;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setError('');
+    setSubmitting(true);
+    try {
+      const r = await fetch(API + '/api/availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          blocked_date: blockDate,
+          reason: reason.trim() || null,
+        }),
+      });
+      const d = await r.json();
+      if (d.success && d.data) {
+        onSaved(d.data);
+      } else {
+        setError(d.error || 'Could not block date');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Quick Action" title="Block a Date" onClose={onClose} />
+
+      <div style={{
+        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+        borderRadius: '10px', padding: '12px 14px',
+        fontSize: '11px', color: C.goldDeep, lineHeight: 1.55,
+        marginBottom: '14px',
+      }}>
+        Couples won't be able to request this date. Blocking is private — no one sees the reason.
+      </div>
+
+      <FieldLabel>Date</FieldLabel>
+      <input
+        type="date"
+        value={blockDate}
+        onChange={(e) => setBlockDate(e.target.value)}
+        style={{
+          width: '100%',
+          background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px',
+          fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '14px', boxSizing: 'border-box',
+        }}
+      />
+
+      <FieldLabel>Reason (optional, private)</FieldLabel>
+      <input
+        type="text"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. Personal travel, family event"
+        style={{
+          width: '100%',
+          background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px',
+          fontSize: '13px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '16px', boxSizing: 'border-box',
+        }}
+      />
+
+      {error && (
+        <div style={{
+          background: C.redSoft, border: `1px solid ${C.redBorder}`,
+          borderRadius: '10px', padding: '10px 12px',
+          fontSize: '11px', color: C.red, marginBottom: '12px',
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1,
+            background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`, borderRadius: '12px',
+            padding: '13px', fontSize: '11px', fontWeight: 500,
+            letterSpacing: '1.5px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >Cancel</button>
+        <button
+          onClick={handleSave}
+          disabled={!canSave}
+          style={{
+            flex: 2,
+            background: canSave ? C.gold : C.border,
+            color: canSave ? C.ivory : C.light,
+            border: 'none', borderRadius: '12px',
+            padding: '14px', fontSize: '11px', fontWeight: 600,
+            letterSpacing: '1.8px', textTransform: 'uppercase',
+            cursor: canSave ? 'pointer' : 'not-allowed',
+            fontFamily: 'DM Sans, sans-serif',
+          }}
+        >{submitting ? 'Blocking…' : 'Block Date'}</button>
+      </div>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUICK REMINDER SHEET — list of unpaid items with one-tap WhatsApp
+// ══════════════════════════════════════════════════════════════════════════
+
+function QuickReminderSheet({
+  invoices, paymentSchedules, vendorName, onClose,
+}: {
+  invoices: any[]; paymentSchedules: any[]; vendorName: string; onClose: () => void;
+}) {
+  // Build a unified list of items that can have a reminder sent
+  type ReminderItem = {
+    id: string;
+    client_name: string;
+    client_phone: string;
+    amount: number;
+    label: string;
+    source: 'invoice' | 'schedule';
+    is_overdue: boolean;
+  };
+
+  const items: ReminderItem[] = [];
+  for (const inv of invoices) {
+    if (!inv.client_phone) continue;
+    items.push({
+      id: `inv-${inv.id}`,
+      client_name: inv.client_name || 'Client',
+      client_phone: inv.client_phone,
+      amount: parseInt(inv.amount) || 0,
+      label: inv.invoice_number || 'Invoice',
+      source: 'invoice',
+      is_overdue: false,
+    });
+  }
+  for (const sched of paymentSchedules) {
+    const overdueInst = (sched.instalments || []).filter((i: any) => !i.paid && i.due_date && new Date(i.due_date) < new Date());
+    if (overdueInst.length === 0 || !sched.client_phone) continue;
+    items.push({
+      id: `sched-${sched.id}`,
+      client_name: sched.client_name || 'Client',
+      client_phone: sched.client_phone,
+      amount: overdueInst.reduce((s: number, i: any) => s + (parseInt(i.amount) || 0), 0),
+      label: `${overdueInst.length} overdue instalment${overdueInst.length > 1 ? 's' : ''}`,
+      source: 'schedule',
+      is_overdue: true,
+    });
+  }
+
+  const sendReminder = (item: ReminderItem) => {
+    const cleanPhone = String(item.client_phone).replace(/\D/g, '');
+    const amountFmt = item.amount.toLocaleString('en-IN');
+    const msg = item.is_overdue
+      ? `Hi ${item.client_name}! Gentle reminder — ${item.label} totalling ₹${amountFmt} is pending. Please clear at your earliest convenience. — ${vendorName}`
+      : `Hi ${item.client_name}! Gentle reminder regarding ${item.label} for ₹${amountFmt}. Please let me know once done! — ${vendorName}`;
+    window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Quick Action" title="Send Payment Reminder" onClose={onClose} />
+
+      {items.length === 0 ? (
+        <div style={{
+          background: C.greenSoft, border: `1px solid rgba(76,175,80,0.22)`,
+          borderRadius: '12px', padding: '20px',
+          textAlign: 'center', marginBottom: '14px',
+        }}>
+          <CheckCircle size={28} color={C.green} />
+          <div style={{
+            fontFamily: "'Playfair Display', serif",
+            fontSize: '18px', color: C.dark, fontWeight: 400,
+            marginTop: '10px',
+          }}>All clear.</div>
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif',
+            fontSize: '12px', color: C.muted, marginTop: '4px',
+          }}>No outstanding invoices or overdue payments.</div>
+        </div>
+      ) : (
+        <>
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif',
+            fontSize: '11px', color: C.muted,
+            marginBottom: '14px', fontStyle: 'italic',
+          }}>
+            Tap to open WhatsApp with a polite, pre-written message. Review before sending.
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+            {items.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => sendReminder(item)}
+                style={{
+                  background: item.is_overdue ? C.redSoft : C.pearl,
+                  border: `1px solid ${item.is_overdue ? C.redBorder : C.border}`,
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  textAlign: 'left', cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '13px', color: C.dark, fontWeight: 500,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{item.client_name}</div>
+                  <div style={{
+                    fontSize: '11px', color: item.is_overdue ? C.red : C.muted,
+                    marginTop: '2px',
+                  }}>{item.label}{item.is_overdue ? ' · Overdue' : ''}</div>
+                </div>
+                <div style={{
+                  fontFamily: "'Playfair Display', serif",
+                  fontSize: '15px', color: C.dark,
+                }}>₹{item.amount.toLocaleString('en-IN')}</div>
+                <div style={{
+                  background: '#25D366', borderRadius: '50%',
+                  width: '32px', height: '32px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <MessageCircle size={14} color="#FFFFFF" />
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <button
+        onClick={onClose}
+        style={{
+          width: '100%',
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, borderRadius: '12px',
+          padding: '13px', fontSize: '11px', fontWeight: 500,
+          letterSpacing: '1.5px', textTransform: 'uppercase',
+          cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+        }}
+      >Done</button>
+    </SheetOverlay>
   );
 }

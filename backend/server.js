@@ -468,6 +468,60 @@ app.post('/api/bookings/:id/decline', async (req, res) => {
   }
 });
 
+// ── Mark a booking as "quoted" — vendor has sent a price to the couple ──
+// Accepts optional quote_amount + quote_note. Status transitions
+// pending_confirmation → quoted. Couple can still confirm/decline later.
+app.post('/api/bookings/:id/quote', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { quote_amount, quote_note } = req.body || {};
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings').select('*').eq('id', id).single();
+    if (fetchError || !booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+    const updates = {
+      status: 'quoted',
+      quoted_at: new Date().toISOString(),
+    };
+    if (quote_amount != null) updates.quote_amount = parseInt(quote_amount) || null;
+    if (quote_note) updates.quote_note = String(quote_note).slice(0, 500);
+    const { data, error } = await supabase
+      .from('bookings').update(updates).eq('id', id).select().single();
+    if (error) throw error;
+    await supabase.from('notifications').insert([{
+      user_id: booking.user_id,
+      title: 'Quote received',
+      message: `${booking.vendor_name || 'Your vendor'} has sent a quote for your event. Review and confirm.`,
+      type: 'quote_received',
+      read: false,
+    }]).catch(() => {});
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Upgrade nudges: record a nudge shown for a vendor (show-once guarantee) ──
+app.post('/api/vendors/:id/upgrade-nudge', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trigger_key } = req.body || {};
+    if (!trigger_key) return res.status(400).json({ success: false, error: 'trigger_key required' });
+    const { data: vendor } = await supabase
+      .from('vendors').select('upgrade_nudges_shown').eq('id', id).single();
+    const existing = Array.isArray(vendor?.upgrade_nudges_shown) ? vendor.upgrade_nudges_shown : [];
+    if (existing.includes(trigger_key)) return res.json({ success: true, data: { already_shown: true } });
+    const next = [...existing, trigger_key];
+    const { error } = await supabase
+      .from('vendors').update({ upgrade_nudges_shown: next }).eq('id', id);
+    if (error) throw error;
+    res.json({ success: true, data: { upgrade_nudges_shown: next } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.post('/api/bookings/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
@@ -876,10 +930,12 @@ app.get('/api/availability/:vendorId', async (req, res) => {
 
 app.post('/api/availability', async (req, res) => {
   try {
-    const { vendor_id, blocked_date } = req.body;
+    const { vendor_id, blocked_date, reason } = req.body;
+    const insertRow = { vendor_id, blocked_date };
+    if (reason) insertRow.reason = reason;
     const { data, error } = await supabase
       .from('vendor_availability')
-      .insert([{ vendor_id, blocked_date }])
+      .insert([insertRow])
       .select()
       .single();
     if (error) throw error;
@@ -1368,8 +1424,8 @@ app.get('/api/vendor-logins/:firebaseUID', async (req, res) => {
 app.post('/api/tier-codes/generate', async (req, res) => {
   try {
     const { tier, vendor_name, created_by, note } = req.body;
-    if (!tier || !['signature', 'prestige'].includes(tier)) {
-      return res.status(400).json({ success: false, error: 'Tier must be signature or prestige' });
+    if (!tier || !['essential', 'signature', 'prestige'].includes(tier)) {
+      return res.status(400).json({ success: false, error: 'Tier must be essential, signature, or prestige' });
     }
     const code = genCode();
     // Trial ends: 3 months from now OR Aug 1 2026, whichever is earlier
