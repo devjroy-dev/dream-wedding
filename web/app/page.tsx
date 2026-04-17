@@ -45,7 +45,7 @@ export default function HomePage() {
     setMounted(true);
     try {
       const vs = localStorage.getItem('vendor_web_session');
-      if (vs) { const p = JSON.parse(vs); if (p.vendorId) { window.location.href = '/vendor/dashboard'; return; } }
+      if (vs) { const p = JSON.parse(vs); if (p.vendorId) { window.location.href = '/vendor/mobile'; return; } }
       const cs = localStorage.getItem('couple_session');
       if (cs) { const p = JSON.parse(cs); if (p.id) { window.location.href = '/couple'; return; } }
     } catch {}
@@ -117,7 +117,7 @@ export default function HomePage() {
             category: data.data.category, city: data.data.city,
             tier: data.data.tier, trialEnd: data.data.trial_end,
           }));
-          window.location.href = '/vendor/dashboard';
+          window.location.href = '/vendor/mobile';
         } else {
           localStorage.setItem('couple_session', JSON.stringify({
             id: data.data.id, name: data.data.name,
@@ -146,7 +146,7 @@ export default function HomePage() {
             vendorId: data.data.id, vendorName: data.data.name,
             category: data.data.category, city: data.data.city, tier: data.data.tier,
           }));
-          window.location.href = '/vendor/dashboard';
+          window.location.href = '/vendor/mobile';
         } else {
           localStorage.setItem('couple_session', JSON.stringify({
             id: data.data.id, name: data.data.name,

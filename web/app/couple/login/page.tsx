@@ -174,7 +174,7 @@ export default function CoupleLoginPage() {
             <button onClick={() => { setMode('login'); setError(''); }} style={{ flex: 1, padding: '12px', fontSize: '12px', fontWeight: mode === 'login' ? 600 : 400, fontFamily: 'Inter, sans-serif', background: mode === 'login' ? '#2C2420' : '#fff', color: mode === 'login' ? '#C9A84C' : '#6B7280', border: 'none', cursor: 'pointer', borderLeft: '1px solid #E5E7EB', letterSpacing: '0.5px' }}>Log In</button>
           </div>
           {mode === 'signup' ? renderSignup() : renderLogin()}
-          <div style={{ marginTop: '20px', textAlign: 'center' }}><a href="/vendor/login" style={{ fontSize: '12px', color: '#8C7B6E', textDecoration: 'underline' }}>Vendor? Sign in here</a></div>
+          <div style={{ marginTop: '20px', textAlign: 'center' }}><a href="/vendor/mobile/login" style={{ fontSize: '12px', color: '#8C7B6E', textDecoration: 'underline' }}>Vendor? Sign in here</a></div>
         </div>
       </div>
     </div>

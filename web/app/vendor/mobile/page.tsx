@@ -101,19 +101,10 @@ export default function VendorMobilePage() {
   useEffect(() => {
     const s = getSession();
     if (!s || !s.vendorId) {
-      window.location.href = '/vendor/login';
+      window.location.href = '/vendor/mobile/login';
       return;
     }
     setSession(s);
-
-    // If user resizes to desktop, route to desktop dashboard
-    const onResize = () => {
-      if (window.innerWidth >= 768) {
-        window.location.href = '/vendor/dashboard';
-      }
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   // ── Load core data on mount ────────────────────────────────────────────
@@ -922,7 +913,7 @@ function ProfileTab({ session, tier }: { session: VendorSession; tier: Tier }) {
   const handleLogout = () => {
     if (!confirm('Sign out?')) return;
     localStorage.removeItem('vendor_web_session');
-    window.location.href = '/vendor/login';
+    window.location.href = '/vendor/mobile/login';
   };
 
   const tierLabel = tier === 'prestige' ? 'Prestige' : tier === 'signature' ? 'Signature' : 'Essential';

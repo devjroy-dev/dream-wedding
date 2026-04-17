@@ -27,6 +27,11 @@ export default function VendorLoginPage() {
   };
 
   useEffect(() => {
+    // Mobile visitors should never see the dark business portal login — bounce them to the PWA-styled login.
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      window.location.href = '/vendor/mobile/login';
+      return;
+    }
     const check = () => setIsMobile(window.innerWidth < 768);
     check(); window.addEventListener('resize', check);
     try { const s = localStorage.getItem('vendor_web_session'); if (s) { const p = JSON.parse(s); if (p.vendorId) goToVendorHome(); } } catch {}
