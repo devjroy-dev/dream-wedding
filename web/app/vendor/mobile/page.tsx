@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Grid, MessageCircle, Calendar, Tool, User, Plus, Phone, Send,
   FileText, CreditCard, Clock, Users, TrendingDown, Percent,
-  Share2, BarChart2, Package, Gift, Globe, Award, ChevronRight,
+  Share2, BarChart2, Package, Gift, Globe, Award, ChevronRight, ChevronDown,
   LogOut, Settings as SettingsIcon, Lock, Briefcase, MapPin, Zap,
   CheckCircle, AlertCircle, X, Search, Mail, MoreHorizontal,
-  Minus, Edit2, DollarSign, Tag,
+  Minus, Edit2, DollarSign, Tag, Trash2,
 } from 'react-feather';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
@@ -109,6 +109,8 @@ export default function VendorMobilePage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [blockedDates, setBlockedDates] = useState<any[]>([]);
   const [paymentSchedules, setPaymentSchedules] = useState<any[]>([]);
+  const [todos, setTodos] = useState<any[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ── Dream Ai state ─────────────────────────────────────────────────────
@@ -136,7 +138,7 @@ export default function VendorMobilePage() {
     try {
       const params = new URLSearchParams(window.location.search);
       const sub = params.get('sub');
-      const validSubs = ['clients', 'invoices', 'contracts', 'payments', 'expenses', 'tax', 'team', 'referral', 'whatsapp', 'analytics', 'chat'];
+      const validSubs = ['clients', 'invoices', 'contracts', 'payments', 'expenses', 'tax', 'team', 'referral', 'whatsapp', 'analytics', 'chat', 'todos', 'events'];
       if (sub && validSubs.includes(sub)) {
         setActiveTab('Tools');
         setActiveSubTool(sub);
@@ -151,6 +153,8 @@ export default function VendorMobilePage() {
   const [showQuickExpense, setShowQuickExpense] = useState(false);
   const [showQuickBroadcast, setShowQuickBroadcast] = useState(false);
   const [showQuickTask, setShowQuickTask] = useState(false);
+  const [showQuickTodo, setShowQuickTodo] = useState(false);
+  const [showQuickEvent, setShowQuickEvent] = useState(false);
 
   // ── Add Client modal ───────────────────────────────────────────────────
   const [showAddClient, setShowAddClient] = useState(false);
@@ -223,7 +227,7 @@ export default function VendorMobilePage() {
 
     const loadAll = async () => {
       try {
-        const [bRes, iRes, cRes, blockRes, schedRes, vRes, aiRes] = await Promise.all([
+        const [bRes, iRes, cRes, blockRes, schedRes, vRes, aiRes, tRes, eRes] = await Promise.all([
           fetch(`${API}/api/bookings/vendor/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/invoices/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/vendor-clients/${vId}`).then(r => r.json()).catch(() => ({})),
@@ -231,6 +235,8 @@ export default function VendorMobilePage() {
           fetch(`${API}/api/payment-schedules/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/vendors/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/ai-tokens/status/${vId}`).then(r => r.json()).catch(() => ({})),
+          fetch(`${API}/api/todos/${vId}`).then(r => r.json()).catch(() => ({})),
+          fetch(`${API}/api/events/${vId}`).then(r => r.json()).catch(() => ({})),
         ]);
         if (bRes.success) setBookings(bRes.data || []);
         if (iRes.success) setInvoices(iRes.data || []);
@@ -239,6 +245,8 @@ export default function VendorMobilePage() {
         if (schedRes.success) setPaymentSchedules(schedRes.data || []);
         if (vRes.success) setVendorData(vRes.data);
         if (aiRes.success) setAiStatus(aiRes.data || aiRes);
+        if (tRes.success) setTodos(tRes.data || []);
+        if (eRes.success) setEvents(eRes.data || []);
         // Leads = bookings with pending_confirmation status
         if (bRes.success) setLeads((bRes.data || []).filter((b: any) => b.status === 'pending_confirmation' || b.status === 'pending'));
       } catch (e) {
@@ -293,6 +301,8 @@ export default function VendorMobilePage() {
             clients={clients}
             leads={leads}
             paymentSchedules={paymentSchedules}
+            todos={todos}
+            events={events}
             loading={loading}
             onJumpToTab={(t: Tab) => {
               setActiveTab(t);
@@ -312,6 +322,15 @@ export default function VendorMobilePage() {
             onOpenInvoice={() => setShowQuickInvoice(true)}
             onOpenBlockDate={() => setShowQuickBlock(true)}
             onOpenReminder={() => setShowQuickReminder(true)}
+            onOpenTodo={() => setShowQuickTodo(true)}
+            onOpenEvent={() => setShowQuickEvent(true)}
+            onToggleTodo={async (id: string, done: boolean) => {
+              try {
+                const res = await fetch(`${API}/api/todos/${id}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({done}) });
+                const d = await res.json();
+                if (d.success) setTodos(prev => prev.map(t => t.id === id ? {...t, done} : t));
+              } catch {}
+            }}
           />
         )}
         {activeTab === 'Inquiries' && (
@@ -334,10 +353,22 @@ export default function VendorMobilePage() {
             session={session}
             bookings={bookings}
             blockedDates={blockedDates}
+            events={events}
             onAddClient={() => setShowAddClient(true)}
+            onOpenEvent={() => setShowQuickEvent(true)}
+            onDeleteEvent={async (id: string) => {
+              try {
+                const res = await fetch(`${API}/api/events/${id}`, { method: 'DELETE' });
+                const d = await res.json();
+                if (d.success) setEvents(prev => prev.filter(e => e.id !== id));
+              } catch {}
+            }}
             onRefresh={() => {
               fetch(`${API}/api/availability/${session.vendorId}`).then(r => r.json()).then(d => {
                 if (d.success) setBlockedDates(d.data || []);
+              });
+              fetch(`${API}/api/events/${session.vendorId}`).then(r => r.json()).then(d => {
+                if (d.success) setEvents(d.data || []);
               });
             }}
           />
@@ -353,8 +384,27 @@ export default function VendorMobilePage() {
             bookings={bookings}
             leads={leads}
             paymentSchedules={paymentSchedules}
+            todos={todos}
+            events={events}
             onAddClient={() => setShowAddClient(true)}
             onOpenInvoice={() => setShowQuickInvoice(true)}
+            onOpenTodo={() => setShowQuickTodo(true)}
+            onOpenEvent={() => setShowQuickEvent(true)}
+            onToggleTodo={async (id: string, done: boolean) => {
+              try {
+                const res = await fetch(`${API}/api/todos/${id}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({done}) });
+                const d = await res.json();
+                if (d.success) setTodos(prev => prev.map(t => t.id === id ? {...t, done} : t));
+              } catch {}
+            }}
+            onDeleteTodo={async (id: string) => {
+              try {
+                const res = await fetch(`${API}/api/todos/${id}`, { method: 'DELETE' });
+                const d = await res.json();
+                if (d.success) setTodos(prev => prev.filter(t => t.id !== id));
+              } catch {}
+            }}
+            onSavePaymentSchedule={(newSched: any) => setPaymentSchedules(prev => [newSched, ...prev])}
             vendorName={session?.vendorName}
           />
         )}
@@ -434,6 +484,8 @@ export default function VendorMobilePage() {
             setBlockedDates(prev => [blocked, ...prev]);
             setShowQuickBlock(false);
           }}
+          onClientCreated={(newClient: any) => setClients(prev => [newClient, ...prev])}
+          onEventCreated={(newEvent: any) => setEvents(prev => [newEvent, ...prev])}
         />
       )}
 
@@ -444,8 +496,30 @@ export default function VendorMobilePage() {
           paymentSchedules={paymentSchedules.filter((s: any) =>
             (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date())
           )}
+          clients={clients}
+          events={events}
+          bookings={bookings}
           vendorName={session.vendorName}
           onClose={() => setShowQuickReminder(false)}
+        />
+      )}
+
+      {/* ── QUICK TO-DO SHEET ── */}
+      {showQuickTodo && (
+        <QuickTodoSheet
+          vendorId={session.vendorId}
+          onClose={() => setShowQuickTodo(false)}
+          onSaved={(newTodo: any) => { setTodos(prev => [newTodo, ...prev]); setShowQuickTodo(false); }}
+        />
+      )}
+
+      {/* ── QUICK EVENT SHEET ── */}
+      {showQuickEvent && (
+        <QuickEventSheet
+          vendorId={session.vendorId}
+          clients={clients}
+          onClose={() => setShowQuickEvent(false)}
+          onSaved={(newEvent: any) => { setEvents(prev => [newEvent, ...prev]); setShowQuickEvent(false); }}
         />
       )}
 
@@ -547,7 +621,7 @@ function Header({ session, tier, onOpenProfile }: { session: VendorSession; tier
 // DASHBOARD TAB (mirrors React Native Overview)
 // ══════════════════════════════════════════════════════════════════════════
 
-function DashboardTab({ session, tier, bookings, invoices, clients, leads, paymentSchedules, loading, onJumpToTab, vendorData, onOpenAiModal, checklistDismissed, onDismissChecklist, onAddClient, onOpenInvoice, onOpenBlockDate, onOpenReminder }: any) {
+function DashboardTab({ session, tier, bookings, invoices, clients, leads, paymentSchedules, todos, events, loading, onJumpToTab, vendorData, onOpenAiModal, checklistDismissed, onDismissChecklist, onAddClient, onOpenInvoice, onOpenBlockDate, onOpenReminder, onOpenTodo, onOpenEvent, onToggleTodo }: any) {
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
   const todayBookings = bookings.filter((b: any) => {
     if (!b.event_date) return false;
@@ -1288,27 +1362,33 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
         const essentialActions = [
           { icon: FileText,   label: 'Invoice',    onClick: () => onOpenInvoice && onOpenInvoice() },
           { icon: Send,       label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
-          { icon: Calendar,   label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
+          { icon: Calendar,   label: 'Add Event',  onClick: () => onOpenEvent && onOpenEvent() },
+          { icon: CheckCircle, label: 'To-Do',     onClick: () => onOpenTodo && onOpenTodo() },
           { icon: Users,      label: 'Add Client', onClick: () => onAddClient && onAddClient() },
+          { icon: Calendar,   label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
         ];
         const signatureActions = [
           { icon: FileText,    label: 'Invoice',    onClick: () => onOpenInvoice && onOpenInvoice() },
           { icon: Send,        label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
-          { icon: Calendar,    label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
+          { icon: Calendar,    label: 'Add Event',  onClick: () => onOpenEvent && onOpenEvent() },
+          { icon: CheckCircle, label: 'To-Do',      onClick: () => onOpenTodo && onOpenTodo() },
           { icon: Users,       label: 'Add Client', onClick: () => onAddClient && onAddClient() },
+          { icon: Calendar,    label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: TrendingDown, label: 'Expense',   onClick: () => { onJumpToTab('Tools'); if (typeof window !== 'undefined') { localStorage.setItem('tdw_pwa_open_sub', 'expenses'); } } },
           { icon: MessageCircle, label: 'Broadcast', onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
         ];
         const prestigeActions = [
-          { icon: CheckCircle,   label: 'Delegate',   onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
-          { icon: MessageCircle, label: 'Team Chat',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
-          { icon: Send,          label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
-          { icon: Calendar,      label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: FileText,      label: 'Invoice',    onClick: () => onOpenInvoice && onOpenInvoice() },
+          { icon: Send,          label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
+          { icon: Calendar,      label: 'Add Event',  onClick: () => onOpenEvent && onOpenEvent() },
+          { icon: CheckCircle,   label: 'To-Do',      onClick: () => onOpenTodo && onOpenTodo() },
+          { icon: Calendar,      label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
+          { icon: MessageCircle, label: 'Team Chat',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
           { icon: Award,         label: 'Approvals',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
+          { icon: MessageCircle, label: 'Broadcast',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
         ];
         const actions = tier === 'prestige' ? prestigeActions : tier === 'signature' ? signatureActions : essentialActions;
-        const cols = actions.length === 4 ? 4 : 3;
+        const cols = 4;
         return (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: '8px' }}>
             {actions.map((a: any, i: number) => {
@@ -1340,6 +1420,114 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
                 </button>
               );
             })}
+          </div>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          TODAY'S SCHEDULE — events + bookings happening today
+         ══════════════════════════════════════════════════════════════════ */}
+      {(() => {
+        const todayStr = new Date().toDateString();
+        const todaysEvents = (events || []).filter((e: any) => e.event_date && new Date(e.event_date).toDateString() === todayStr);
+        const todaysBookings = bookings.filter((b: any) => b.event_date && new Date(b.event_date).toDateString() === todayStr);
+        if (todaysEvents.length === 0 && todaysBookings.length === 0) return null;
+        const items = [
+          ...todaysBookings.map((b: any) => ({ id: 'b-'+b.id, title: b.users?.name || b.client_name || 'Booking', sub: b.event_type || 'Event', time: b.event_time || null, kind: 'booking' })),
+          ...todaysEvents.map((e: any) => ({ id: 'e-'+e.id, title: e.title, sub: e.client_name || e.type || 'Personal', time: e.event_time || null, kind: 'event' })),
+        ];
+        return (
+          <div style={{ marginTop: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <SectionLabel>Today's Schedule</SectionLabel>
+              <span style={{ fontSize: '10px', color: C.muted, fontWeight: 600, letterSpacing: '1px' }}>{items.length} ITEM{items.length === 1 ? '' : 'S'}</span>
+            </div>
+            <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+              {items.map((it, idx) => (
+                <div key={it.id} style={{ padding: '12px 14px', borderBottom: idx < items.length - 1 ? `1px solid ${C.borderSoft}` : 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '6px', height: '36px', borderRadius: '3px',
+                    background: it.kind === 'booking' ? C.gold : C.muted, flexShrink: 0,
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13.5px', color: C.dark, fontWeight: 500, lineHeight: 1.4 }}>{it.title}</div>
+                    <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{it.time ? it.time + ' · ' : ''}{it.sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          TO-DO CARD — pending tasks, with quick add
+         ══════════════════════════════════════════════════════════════════ */}
+      {(() => {
+        const today = new Date(); today.setHours(0,0,0,0);
+        const pendingTodos = (todos || []).filter((t: any) => !t.done);
+        const overdueCount = pendingTodos.filter((t: any) => t.due_date && new Date(t.due_date) < today).length;
+        const visible = pendingTodos.slice(0, 5);
+        return (
+          <div style={{ marginTop: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <SectionLabel>To-Do</SectionLabel>
+              <button onClick={() => onOpenTodo && onOpenTodo()} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                fontSize: '11px', color: C.goldDeep, fontWeight: 600, letterSpacing: '0.5px',
+                fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: '4px',
+              }}><Plus size={12} /> Add</button>
+            </div>
+            {pendingTodos.length === 0 ? (
+              <div style={{
+                background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`,
+                padding: '24px 20px', textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '13px', color: C.muted, fontStyle: 'italic' }}>All clear. Add a to-do to get started.</div>
+              </div>
+            ) : (
+              <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+                {overdueCount > 0 && (
+                  <div style={{
+                    background: C.redSoft, padding: '8px 14px',
+                    fontSize: '11px', color: C.red, fontWeight: 600,
+                    borderBottom: `1px solid ${C.redBorder}`,
+                  }}>{overdueCount} overdue</div>
+                )}
+                {visible.map((t: any, idx: number) => {
+                  const isOverdue = t.due_date && new Date(t.due_date) < today;
+                  return (
+                    <div key={t.id} style={{ padding: '12px 14px', borderBottom: idx < visible.length - 1 ? `1px solid ${C.borderSoft}` : 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button
+                        onClick={() => onToggleTodo && onToggleTodo(t.id, true)}
+                        style={{
+                          width: '18px', height: '18px', flexShrink: 0,
+                          borderRadius: '5px', border: `1.5px solid ${C.border}`,
+                          background: 'transparent', cursor: 'pointer', padding: 0,
+                        }} aria-label="Mark done" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', color: C.dark, fontWeight: 500, lineHeight: 1.35 }}>{t.title}</div>
+                        {t.due_date && (
+                          <div style={{ fontSize: '11px', color: isOverdue ? C.red : C.muted, marginTop: '2px', fontWeight: isOverdue ? 600 : 400 }}>
+                            {isOverdue ? 'Overdue · ' : ''}{new Date(t.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                          </div>
+                        )}
+                      </div>
+                      {t.priority === 'high' && <div style={{ width: '6px', height: '24px', borderRadius: '3px', background: C.red }} />}
+                    </div>
+                  );
+                })}
+                {pendingTodos.length > 5 && (
+                  <button onClick={() => { onJumpToTab('Tools'); if (typeof window !== 'undefined') localStorage.setItem('tdw_pwa_open_sub', 'todos'); }} style={{
+                    width: '100%', padding: '10px',
+                    background: C.pearl, color: C.muted,
+                    border: 'none', borderTop: `1px solid ${C.borderSoft}`,
+                    fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>View all {pendingTodos.length} →</button>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -1767,7 +1955,7 @@ function InquiriesTab({ session, leads, bookings, onRefresh }: any) {
 // CALENDAR TAB
 // ══════════════════════════════════════════════════════════════════════════
 
-function CalendarTab({ session, bookings, blockedDates, onRefresh, onAddClient }: any) {
+function CalendarTab({ session, bookings, blockedDates, events, onRefresh, onAddClient, onOpenEvent, onDeleteEvent }: any) {
   const [showBlock, setShowBlock] = useState(false);
   const [blockDate, setBlockDate] = useState('');
   const [blockReason, setBlockReason] = useState('');
@@ -1803,10 +1991,10 @@ function CalendarTab({ session, bookings, blockedDates, onRefresh, onAddClient }
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: 600, color: C.dark, fontFamily: 'Playfair Display, serif' }}>Calendar</div>
-          <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>Bookings and blocked dates</div>
+          <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>Bookings, events and blocked dates</div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={() => onAddClient && onAddClient()} style={{ background: C.goldSoft, color: C.goldDeep, border: `1px solid ${C.goldBorder}`, borderRadius: '10px', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
+          <button onClick={() => onOpenEvent && onOpenEvent()} style={{ background: C.goldSoft, color: C.goldDeep, border: `1px solid ${C.goldBorder}`, borderRadius: '10px', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
             <Plus size={12} /> Event
           </button>
           <button onClick={() => setShowBlock(!showBlock)} style={{ background: C.ivory, color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
@@ -1850,6 +2038,44 @@ function CalendarTab({ session, bookings, blockedDates, onRefresh, onAddClient }
       </div>
 
       <div>
+        <div style={{ fontSize: '10px', letterSpacing: '1.5px', color: C.muted, fontWeight: 600, marginBottom: '8px' }}>YOUR EVENTS ({(events || []).filter((e: any) => e.event_date && new Date(e.event_date) >= new Date(new Date().setHours(0,0,0,0))).length})</div>
+        {(() => {
+          const upcomingEvents = (events || [])
+            .filter((e: any) => e.event_date && new Date(e.event_date) >= new Date(new Date().setHours(0,0,0,0)))
+            .sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+          if (upcomingEvents.length === 0) {
+            return (
+              <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '20px', textAlign: 'center' }}>
+                <span style={{ fontSize: '13px', color: C.muted }}>No events. Tap Event to add one.</span>
+              </div>
+            );
+          }
+          return (
+            <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+              {upcomingEvents.map((e: any, idx: number) => (
+                <div key={e.id} style={{ padding: '12px 16px', borderBottom: idx < upcomingEvents.length - 1 ? `1px solid ${C.border}` : 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: 44, height: 44, borderRadius: '8px', background: C.pearl, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: C.dark, lineHeight: 1 }}>{new Date(e.event_date).getDate()}</span>
+                    <span style={{ fontSize: '9px', color: C.muted, fontWeight: 600, textTransform: 'uppercase', marginTop: '2px' }}>{new Date(e.event_date).toLocaleDateString('en-IN', { month: 'short' })}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13.5px', color: C.dark, fontWeight: 500, lineHeight: 1.4 }}>{e.title}</div>
+                    <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                      {e.event_time ? e.event_time + ' · ' : ''}
+                      {e.client_name || e.type || 'Personal'}
+                    </div>
+                  </div>
+                  <button onClick={() => onDeleteEvent && onDeleteEvent(e.id)} style={{ background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', flexShrink: 0 }}>
+                    <Trash2 size={14} color={C.light} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      <div>
         <div style={{ fontSize: '10px', letterSpacing: '1.5px', color: C.muted, fontWeight: 600, marginBottom: '8px' }}>BLOCKED DATES ({blockedDates.length})</div>
         {blockedDates.length === 0 ? (
           <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '20px', textAlign: 'center' }}>
@@ -1880,9 +2106,9 @@ function CalendarTab({ session, bookings, blockedDates, onRefresh, onAddClient }
 // TOOLS TAB (launcher grid → opens individual tool views)
 // ══════════════════════════════════════════════════════════════════════════
 
-function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, onAddClient, onOpenInvoice, vendorName, onToast }: any) {
+function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, todos, events, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName, onToast }: any) {
   if (activeSubTool) {
-    return <ToolDetailView session={session} tier={tier} sub={activeSubTool} clients={clients} invoices={invoices} bookings={bookings} leads={leads} paymentSchedules={paymentSchedules} onBack={() => setActiveSubTool(null)} onAddClient={onAddClient} onOpenInvoice={onOpenInvoice} vendorName={vendorName} />;
+    return <ToolDetailView session={session} tier={tier} sub={activeSubTool} clients={clients} invoices={invoices} bookings={bookings} leads={leads} paymentSchedules={paymentSchedules} todos={todos} events={events} onBack={() => setActiveSubTool(null)} onAddClient={onAddClient} onOpenInvoice={onOpenInvoice} onOpenTodo={onOpenTodo} onOpenEvent={onOpenEvent} onToggleTodo={onToggleTodo} onDeleteTodo={onDeleteTodo} onSavePaymentSchedule={onSavePaymentSchedule} vendorName={vendorName} />;
   }
 
   const [lockedModal, setLockedModal] = useState<any>(null);
@@ -1906,6 +2132,13 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
         { id: 'invoices',  label: 'Invoices',  icon: FileText,   sub: 'invoices',  minTier: 'essential', desc: 'Create, send, and track invoices. GST auto-calculated.' },
         { id: 'payments',  label: 'Payments',  icon: CreditCard, sub: 'payments',  minTier: 'essential', desc: 'Payment schedules and outstanding amounts.' },
         { id: 'contracts', label: 'Contracts', icon: Briefcase,  sub: 'contracts', minTier: 'essential', desc: 'Service agreements, generated and tracked per client.' },
+      ],
+    },
+    {
+      title: 'Utility',
+      tools: [
+        { id: 'todos',  label: 'To-Do',   icon: CheckCircle, sub: 'todos',  minTier: 'essential', desc: 'Personal task list. Quick reminders, things to do today.' },
+        { id: 'events', label: 'Events',  icon: Calendar,    sub: 'events', minTier: 'essential', desc: 'Schedule trials, venue visits, prep meetings — anything not a booking.' },
       ],
     },
     {
@@ -2112,11 +2345,11 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
 // TOOL DETAIL VIEW (each tool's content)
 // ══════════════════════════════════════════════════════════════════════════
 
-function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads, paymentSchedules, onBack, onAddClient, onOpenInvoice, vendorName }: any) {
+function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads, paymentSchedules, todos, events, onBack, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName }: any) {
   const titles: Record<string, string> = {
     clients: 'Clients', invoices: 'Invoices', contracts: 'Contracts', payments: 'Payments',
     expenses: 'Expenses', tax: 'Tax & TDS', team: 'My Team', referral: 'Referrals',
-    whatsapp: 'Broadcast', analytics: 'Analytics', chat: 'Team Chat',
+    whatsapp: 'Broadcast', analytics: 'Analytics', chat: 'Team Chat', todos: 'To-Do',
   };
 
   const renderContent = () => {
@@ -2210,7 +2443,18 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
           )}
 
           {invoices.length === 0 ? (
-            <Empty icon={<FileText size={28} color={C.light} />} title="No invoices yet" sub="Tap 'Create Invoice' above to bill a client. GST is auto-calculated at 18%." />
+            <div style={{
+              background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`,
+              padding: '40px 20px', textAlign: 'center',
+            }}>
+              <FileText size={32} color={C.light} style={{ marginBottom: '14px' }} />
+              <div style={{ fontSize: '15px', fontFamily: "'Playfair Display', serif", color: C.dark, marginBottom: '6px' }}>
+                No invoices yet
+              </div>
+              <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.55, maxWidth: '260px', margin: '0 auto' }}>
+                Tap "Create Invoice" above to bill a client.<br />GST is auto-calculated at 18%.
+              </div>
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {invoices.slice(0, 20).map((inv: any) => {
@@ -2259,34 +2503,112 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
     }
 
     if (sub === 'payments') {
-      return paymentSchedules.length === 0 ? (
-        <Empty icon={<CreditCard size={28} color={C.light} />} title="No payment schedules" sub="Set up payment schedules per client from the desktop dashboard." />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {paymentSchedules.map((s: any) => {
-            const overdue = (s.instalments || []).some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date());
-            return (
-              <div key={s.id} style={{ background: C.card, borderRadius: '12px', border: `1px solid ${overdue ? C.red : C.border}`, padding: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: '14px', color: C.dark, fontWeight: 500 }}>{s.client_name}</div>
-                    <div style={{ fontSize: '11px', color: overdue ? C.red : C.muted }}>{(s.instalments || []).filter((i: any) => !i.paid).length} pending</div>
-                  </div>
-                  {s.client_phone && (
-                    <a href={`https://wa.me/91${s.client_phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + s.client_name + '! Gentle reminder about pending payment.')}`} target="_blank" rel="noreferrer" style={{ background: '#25D366', borderRadius: '8px', padding: '8px 12px', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', color: '#fff', fontSize: '11px', fontWeight: 600 }}>
-                      <MessageCircle size={11} /> Remind
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      return (
+        <PaymentSchedulesPanel
+          session={session}
+          paymentSchedules={paymentSchedules}
+          clients={clients}
+          onSavePaymentSchedule={onSavePaymentSchedule}
+        />
       );
     }
 
     if (sub === 'expenses') {
       return <ExpensesPanel session={session} tier={tier} clients={clients} />;
+    }
+
+    if (sub === 'todos') {
+      return <TodoPanel todos={todos} onOpenTodo={onOpenTodo} onToggleTodo={onToggleTodo} onDeleteTodo={onDeleteTodo} />;
+    }
+
+    if (sub === 'events') {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const upcoming = (events || [])
+        .filter((e: any) => e.event_date && new Date(e.event_date) >= today)
+        .sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+      const past = (events || [])
+        .filter((e: any) => e.event_date && new Date(e.event_date) < today)
+        .sort((a: any, b: any) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+      return (
+        <div style={{ padding: '16px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '10px', letterSpacing: '1.5px', color: C.muted, fontWeight: 600, textTransform: 'uppercase' }}>Events</div>
+              <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>Trials, venue visits, prep meetings — anything not a booking</div>
+            </div>
+            <button onClick={onOpenEvent} style={{
+              background: C.gold, color: C.ivory, border: 'none',
+              borderRadius: '50px', padding: '8px 14px',
+              fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: '4px',
+              letterSpacing: '0.5px',
+            }}><Plus size={12} /> New</button>
+          </div>
+
+          {upcoming.length === 0 && past.length === 0 ? (
+            <div style={{
+              background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`,
+              padding: '40px 20px', textAlign: 'center',
+            }}>
+              <Calendar size={28} color={C.light} style={{ marginBottom: '12px' }} />
+              <div style={{ fontSize: '14px', fontFamily: "'Playfair Display', serif", color: C.dark, marginBottom: '4px' }}>
+                No events yet
+              </div>
+              <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.55, maxWidth: '260px', margin: '0 auto' }}>
+                Tap New to schedule trials, venue visits, prep meetings.
+              </div>
+            </div>
+          ) : (
+            <>
+              {upcoming.length > 0 && (
+                <>
+                  <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: C.muted, marginBottom: '10px' }}>
+                    Upcoming · {upcoming.length}
+                  </div>
+                  <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden', marginBottom: '20px' }}>
+                    {upcoming.map((e: any, idx: number) => (
+                      <div key={e.id} style={{ padding: '12px 14px', borderBottom: idx < upcoming.length - 1 ? `1px solid ${C.borderSoft}` : 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '8px', background: C.goldSoft, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: '14px', fontWeight: 700, color: C.goldDeep, lineHeight: 1 }}>{new Date(e.event_date).getDate()}</span>
+                          <span style={{ fontSize: '9px', color: C.goldDeep, fontWeight: 600, textTransform: 'uppercase', marginTop: '2px' }}>{new Date(e.event_date).toLocaleDateString('en-IN', { month: 'short' })}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '13.5px', color: C.dark, fontWeight: 500, lineHeight: 1.4 }}>{e.title}</div>
+                          <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                            {e.event_time ? e.event_time + ' · ' : ''}
+                            {e.client_name || e.type || 'Personal'}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {past.length > 0 && (
+                <>
+                  <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: C.muted, marginBottom: '10px' }}>
+                    Past · {past.length}
+                  </div>
+                  <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden', opacity: 0.65 }}>
+                    {past.slice(0, 10).map((e: any, idx: number) => (
+                      <div key={e.id} style={{ padding: '12px 14px', borderBottom: idx < Math.min(past.length, 10) - 1 ? `1px solid ${C.borderSoft}` : 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '8px', background: C.pearl, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: '14px', fontWeight: 700, color: C.muted, lineHeight: 1 }}>{new Date(e.event_date).getDate()}</span>
+                          <span style={{ fontSize: '9px', color: C.muted, fontWeight: 600, textTransform: 'uppercase', marginTop: '2px' }}>{new Date(e.event_date).toLocaleDateString('en-IN', { month: 'short' })}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '13.5px', color: C.dark, fontWeight: 500, lineHeight: 1.4 }}>{e.title}</div>
+                          <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{e.client_name || 'Personal'}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      );
     }
 
     if (sub === 'analytics') {
@@ -3783,12 +4105,20 @@ function QuickInvoiceSheet({
 // ══════════════════════════════════════════════════════════════════════════
 
 function QuickBlockDateSheet({
-  vendorId, onClose, onSaved,
+  vendorId, onClose, onSaved, onClientCreated, onEventCreated,
 }: {
-  vendorId: string; onClose: () => void; onSaved: (blocked: any) => void;
+  vendorId: string;
+  onClose: () => void;
+  onSaved: (blocked: any) => void;
+  onClientCreated?: (client: any) => void;
+  onEventCreated?: (event: any) => void;
 }) {
   const [blockDate, setBlockDate] = useState<string>('');
   const [reason, setReason] = useState<string>('');
+  // Optional: link this blocked date to a client/event so it doubles as a calendar event
+  const [linkClient, setLinkClient] = useState(false);
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -3799,6 +4129,7 @@ function QuickBlockDateSheet({
     setError('');
     setSubmitting(true);
     try {
+      // Step 1: block the availability date
       const r = await fetch(API + '/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3809,10 +4140,51 @@ function QuickBlockDateSheet({
         }),
       });
       const d = await r.json();
-      if (d.success && d.data) {
-        onSaved(d.data);
-      } else {
+      if (!d.success || !d.data) {
         setError(d.error || 'Could not block date');
+        setSubmitting(false);
+        return;
+      }
+      onSaved(d.data);
+
+      // Step 2 (optional): if vendor linked a client, auto-create the client + a calendar event
+      if (linkClient && clientName.trim()) {
+        let createdClientId: string | null = null;
+        if (clientPhone.trim()) {
+          try {
+            const cr = await fetch(API + '/api/vendor-clients', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                vendor_id: vendorId,
+                name: clientName.trim(),
+                phone: clientPhone.trim(),
+              }),
+            });
+            const cd = await cr.json();
+            if (cd.success && cd.data) {
+              createdClientId = cd.data.id;
+              if (onClientCreated) onClientCreated(cd.data);
+            }
+          } catch { /* non-fatal — date is already blocked */ }
+        }
+
+        try {
+          const er = await fetch(API + '/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              vendor_id: vendorId,
+              title: reason.trim() || `${clientName.trim()} — Booked`,
+              event_date: blockDate,
+              client_id: createdClientId,
+              client_name: clientName.trim(),
+              type: 'booking',
+            }),
+          });
+          const ed = await er.json();
+          if (ed.success && ed.data && onEventCreated) onEventCreated(ed.data);
+        } catch { /* non-fatal */ }
       }
     } catch {
       setError('Network error. Please try again.');
@@ -3831,7 +4203,7 @@ function QuickBlockDateSheet({
         fontSize: '11px', color: C.goldDeep, lineHeight: 1.55,
         marginBottom: '14px',
       }}>
-        Couples won't be able to request this date. Blocking is private — no one sees the reason.
+        Couples won't be able to request this date. Optionally link a client so it shows on your calendar.
       </div>
 
       <FieldLabel>Date</FieldLabel>
@@ -3849,21 +4221,64 @@ function QuickBlockDateSheet({
         }}
       />
 
-      <FieldLabel>Reason (optional, private)</FieldLabel>
+      <FieldLabel>Reason / Title (optional)</FieldLabel>
       <input
         type="text"
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder="e.g. Personal travel, family event"
+        placeholder="e.g. Pooja Wedding · Family event · Travel"
         style={{
           width: '100%',
           background: C.ivory, border: `1px solid ${C.border}`,
           borderRadius: '12px', padding: '13px 14px',
           fontSize: '13px', color: C.dark,
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
-          marginBottom: '16px', boxSizing: 'border-box',
+          marginBottom: '14px', boxSizing: 'border-box',
         }}
       />
+
+      <button
+        onClick={() => setLinkClient(v => !v)}
+        style={{
+          width: '100%', background: linkClient ? C.goldSoft : 'transparent',
+          border: `1px solid ${linkClient ? C.goldBorder : C.border}`,
+          borderRadius: '12px', padding: '11px 14px',
+          fontSize: '12px', color: linkClient ? C.goldDeep : C.muted,
+          fontFamily: 'DM Sans, sans-serif',
+          textAlign: 'left', cursor: 'pointer',
+          marginBottom: '10px',
+        }}
+      >
+        {linkClient ? '✓ Linked to a client (will create calendar event)' : '+ Link to a client (optional)'}
+      </button>
+
+      {linkClient && (
+        <div style={{ marginBottom: '14px' }}>
+          <FieldLabel>Client name</FieldLabel>
+          <input
+            type="text" value={clientName} onChange={e => setClientName(e.target.value)}
+            placeholder="e.g. Pooja Sharma"
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '10px', boxSizing: 'border-box',
+            }}
+          />
+          <FieldLabel>Client phone (optional)</FieldLabel>
+          <input
+            type="tel" value={clientPhone} onChange={e => setClientPhone(e.target.value)}
+            placeholder="e.g. 9876543210"
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ fontSize: '10px', color: C.light, marginTop: '6px', fontStyle: 'italic' }}>
+            If phone is provided, a new client will be added to your CRM.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -3909,49 +4324,49 @@ function QuickBlockDateSheet({
 // ══════════════════════════════════════════════════════════════════════════
 
 function QuickReminderSheet({
-  invoices, paymentSchedules, vendorName, onClose,
+  invoices, paymentSchedules, clients, events, bookings, vendorName, onClose,
 }: {
-  invoices: any[]; paymentSchedules: any[]; vendorName: string; onClose: () => void;
+  invoices: any[]; paymentSchedules: any[];
+  clients: any[]; events: any[]; bookings: any[];
+  vendorName: string; onClose: () => void;
 }) {
-  // Build a unified list of items that can have a reminder sent
-  type ReminderItem = {
-    id: string;
-    client_name: string;
-    client_phone: string;
-    amount: number;
-    label: string;
-    source: 'invoice' | 'schedule';
-    is_overdue: boolean;
-  };
+  // Branched flow: pick a category first, then pick a recipient + tap to send
+  type Mode = 'menu' | 'payment' | 'event' | 'custom';
+  const [mode, setMode] = useState<Mode>('menu');
+  const [customClientId, setCustomClientId] = useState<string>('');
+  const [customMessage, setCustomMessage] = useState<string>('');
 
-  const items: ReminderItem[] = [];
+  // ── PAYMENT items ──────────────────────────────────────────
+  type PaymentItem = {
+    id: string; client_name: string; client_phone: string;
+    amount: number; label: string; is_overdue: boolean;
+  };
+  const paymentItems: PaymentItem[] = [];
   for (const inv of invoices) {
     if (!inv.client_phone) continue;
-    items.push({
+    paymentItems.push({
       id: `inv-${inv.id}`,
       client_name: inv.client_name || 'Client',
       client_phone: inv.client_phone,
       amount: parseInt(inv.amount) || 0,
       label: inv.invoice_number || 'Invoice',
-      source: 'invoice',
       is_overdue: false,
     });
   }
   for (const sched of paymentSchedules) {
     const overdueInst = (sched.instalments || []).filter((i: any) => !i.paid && i.due_date && new Date(i.due_date) < new Date());
     if (overdueInst.length === 0 || !sched.client_phone) continue;
-    items.push({
+    paymentItems.push({
       id: `sched-${sched.id}`,
       client_name: sched.client_name || 'Client',
       client_phone: sched.client_phone,
       amount: overdueInst.reduce((s: number, i: any) => s + (parseInt(i.amount) || 0), 0),
       label: `${overdueInst.length} overdue instalment${overdueInst.length > 1 ? 's' : ''}`,
-      source: 'schedule',
       is_overdue: true,
     });
   }
 
-  const sendReminder = (item: ReminderItem) => {
+  const sendPaymentReminder = (item: PaymentItem) => {
     const cleanPhone = String(item.client_phone).replace(/\D/g, '');
     const amountFmt = item.amount.toLocaleString('en-IN');
     const msg = item.is_overdue
@@ -3960,82 +4375,275 @@ function QuickReminderSheet({
     window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
+  // ── EVENT items: upcoming events from vendor_calendar_events + booked events ──
+  type EventItem = {
+    id: string; client_name: string; client_phone: string;
+    event_title: string; event_date: string;
+  };
+  const eventItems: EventItem[] = [];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  // From vendor_calendar_events (Turn 7b)
+  for (const ev of events) {
+    if (!ev.event_date || new Date(ev.event_date) < today) continue;
+    const matchedClient = clients.find((c: any) => c.id === ev.client_id);
+    const phone = matchedClient?.phone || '';
+    if (!phone) continue;
+    eventItems.push({
+      id: `ev-${ev.id}`,
+      client_name: ev.client_name || matchedClient?.name || 'Client',
+      client_phone: phone,
+      event_title: ev.title || 'Event',
+      event_date: ev.event_date,
+    });
+  }
+  // From bookings (existing data)
+  for (const b of bookings) {
+    if (!b.event_date || new Date(b.event_date) < today) continue;
+    if (!b.client_phone) continue;
+    eventItems.push({
+      id: `bk-${b.id}`,
+      client_name: b.client_name || 'Client',
+      client_phone: b.client_phone,
+      event_title: b.event_type || 'Wedding event',
+      event_date: b.event_date,
+    });
+  }
+  eventItems.sort((a, b) => a.event_date.localeCompare(b.event_date));
+
+  const [eventTemplateOpen, setEventTemplateOpen] = useState<string | null>(null);
+  const eventTemplates = ['Final Briefing', 'Dress / Outfit Trial', 'Venue Visit', 'Custom'];
+  const sendEventReminder = (item: EventItem, template: string) => {
+    const cleanPhone = String(item.client_phone).replace(/\D/g, '');
+    const dateFmt = new Date(item.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    let msg = '';
+    if (template === 'Final Briefing') {
+      msg = `Hi ${item.client_name}! Just a reminder — your ${item.event_title} is on ${dateFmt}. Let's do a final briefing this week to align on everything. — ${vendorName}`;
+    } else if (template === 'Dress / Outfit Trial') {
+      msg = `Hi ${item.client_name}! Reminder — for your ${item.event_title} on ${dateFmt}, let's schedule the outfit trial soon. — ${vendorName}`;
+    } else if (template === 'Venue Visit') {
+      msg = `Hi ${item.client_name}! Reminder — your ${item.event_title} is on ${dateFmt}. Shall we plan a venue visit before the event? — ${vendorName}`;
+    } else {
+      msg = `Hi ${item.client_name}! Reminder regarding your ${item.event_title} on ${dateFmt}. Looking forward to it! — ${vendorName}`;
+    }
+    window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    setEventTemplateOpen(null);
+  };
+
+  // ── CUSTOM ──
+  const sendCustom = () => {
+    const c = clients.find((x: any) => x.id === customClientId);
+    if (!c || !c.phone || !customMessage.trim()) return;
+    const cleanPhone = String(c.phone).replace(/\D/g, '');
+    window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(customMessage.trim())}`, '_blank');
+  };
+
   return (
     <SheetOverlay onClose={onClose}>
-      <SheetHeader eyebrow="Quick Action" title="Send Payment Reminder" onClose={onClose} />
+      <SheetHeader
+        eyebrow="Quick Action"
+        title={mode === 'menu' ? 'Send a Reminder' :
+               mode === 'payment' ? 'Payment Reminder' :
+               mode === 'event' ? 'Event Reminder' : 'Custom Reminder'}
+        onClose={onClose}
+      />
 
-      {items.length === 0 ? (
-        <div style={{
-          background: C.greenSoft, border: `1px solid rgba(76,175,80,0.22)`,
-          borderRadius: '12px', padding: '20px',
-          textAlign: 'center', marginBottom: '14px',
-        }}>
-          <CheckCircle size={28} color={C.green} />
-          <div style={{
-            fontFamily: "'Playfair Display', serif",
-            fontSize: '18px', color: C.dark, fontWeight: 400,
-            marginTop: '10px',
-          }}>All clear.</div>
-          <div style={{
-            fontFamily: 'DM Sans, sans-serif',
-            fontSize: '12px', color: C.muted, marginTop: '4px',
-          }}>No outstanding invoices or overdue payments.</div>
-        </div>
-      ) : (
+      {mode === 'menu' && (
         <>
           <div style={{
             fontFamily: 'DM Sans, sans-serif',
             fontSize: '11px', color: C.muted,
             marginBottom: '14px', fontStyle: 'italic',
           }}>
-            Tap to open WhatsApp with a polite, pre-written message. Review before sending.
+            What kind of reminder would you like to send?
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
-            {items.map((item) => (
+          {[
+            { key: 'payment' as Mode, label: 'Payment Reminder', desc: 'Unpaid invoices · overdue instalments', icon: CreditCard },
+            { key: 'event' as Mode, label: 'Event Reminder', desc: 'Trials · briefings · venue visits', icon: Calendar },
+            { key: 'custom' as Mode, label: 'Custom Reminder', desc: 'Pick a client · write your own', icon: Edit2 },
+          ].map(opt => {
+            const Icon = opt.icon;
+            return (
               <button
-                key={item.id}
-                onClick={() => sendReminder(item)}
+                key={opt.key}
+                onClick={() => setMode(opt.key)}
                 style={{
-                  background: item.is_overdue ? C.redSoft : C.pearl,
-                  border: `1px solid ${item.is_overdue ? C.redBorder : C.border}`,
-                  borderRadius: '12px',
-                  padding: '14px',
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  textAlign: 'left', cursor: 'pointer',
+                  width: '100%', background: C.pearl, border: `1px solid ${C.border}`,
+                  borderRadius: '14px', padding: '16px',
+                  display: 'flex', alignItems: 'center', gap: '14px',
+                  textAlign: 'left', cursor: 'pointer', marginBottom: '10px',
                   fontFamily: 'inherit',
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: '13px', color: C.dark, fontWeight: 500,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{item.client_name}</div>
-                  <div style={{
-                    fontSize: '11px', color: item.is_overdue ? C.red : C.muted,
-                    marginTop: '2px',
-                  }}>{item.label}{item.is_overdue ? ' · Overdue' : ''}</div>
-                </div>
                 <div style={{
-                  fontFamily: "'Playfair Display', serif",
-                  fontSize: '15px', color: C.dark,
-                }}>₹{item.amount.toLocaleString('en-IN')}</div>
-                <div style={{
-                  background: '#25D366', borderRadius: '50%',
-                  width: '32px', height: '32px',
+                  width: '40px', height: '40px', borderRadius: '10px',
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                 }}>
-                  <MessageCircle size={14} color="#FFFFFF" />
+                  <Icon size={16} color={C.goldDeep} />
                 </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', color: C.dark, fontWeight: 500 }}>{opt.label}</div>
+                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{opt.desc}</div>
+                </div>
+                <ChevronRight size={16} color={C.light} />
               </button>
+            );
+          })}
+        </>
+      )}
+
+      {mode === 'payment' && (
+        <>
+          {paymentItems.length === 0 ? (
+            <div style={{
+              background: C.greenSoft, border: `1px solid rgba(76,175,80,0.22)`,
+              borderRadius: '12px', padding: '20px', textAlign: 'center', marginBottom: '14px',
+            }}>
+              <CheckCircle size={28} color={C.green} />
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '18px', color: C.dark, fontWeight: 400, marginTop: '10px' }}>All clear.</div>
+              <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, marginTop: '4px' }}>No outstanding invoices or overdue payments.</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+              {paymentItems.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => sendPaymentReminder(item)}
+                  style={{
+                    background: item.is_overdue ? C.redSoft : C.pearl,
+                    border: `1px solid ${item.is_overdue ? C.redBorder : C.border}`,
+                    borderRadius: '12px', padding: '14px',
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', color: C.dark, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.client_name}</div>
+                    <div style={{ fontSize: '11px', color: item.is_overdue ? C.red : C.muted, marginTop: '2px' }}>{item.label}{item.is_overdue ? ' · Overdue' : ''}</div>
+                  </div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '15px', color: C.dark }}>₹{item.amount.toLocaleString('en-IN')}</div>
+                  <div style={{ background: '#25D366', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <MessageCircle size={14} color="#FFFFFF" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === 'event' && (
+        <>
+          {eventItems.length === 0 ? (
+            <div style={{
+              background: C.pearl, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '20px', textAlign: 'center', marginBottom: '14px',
+            }}>
+              <Calendar size={28} color={C.muted} />
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '18px', color: C.dark, fontWeight: 400, marginTop: '10px' }}>No upcoming events.</div>
+              <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, marginTop: '4px' }}>Add events from your Calendar tab to send reminders.</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+              {eventItems.map(item => (
+                <div key={item.id}>
+                  <button
+                    onClick={() => setEventTemplateOpen(eventTemplateOpen === item.id ? null : item.id)}
+                    style={{
+                      width: '100%', background: C.pearl, border: `1px solid ${C.border}`,
+                      borderRadius: '12px', padding: '14px',
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', color: C.dark, fontWeight: 500 }}>{item.client_name}</div>
+                      <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{item.event_title} · {new Date(item.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                    </div>
+                    <ChevronDown size={14} color={C.light} style={{ transform: eventTemplateOpen === item.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                  </button>
+                  {eventTemplateOpen === item.id && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px', marginBottom: '8px', paddingLeft: '8px' }}>
+                      {eventTemplates.map(tpl => (
+                        <button
+                          key={tpl}
+                          onClick={() => sendEventReminder(item, tpl)}
+                          style={{
+                            background: C.ivory, border: `1px solid ${C.border}`,
+                            borderRadius: '10px', padding: '10px 12px',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.dark,
+                          }}
+                        >
+                          <span>{tpl}</span>
+                          <div style={{ background: '#25D366', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MessageCircle size={11} color="#FFFFFF" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === 'custom' && (
+        <>
+          <FieldLabel>Client</FieldLabel>
+          <select
+            value={customClientId}
+            onChange={e => setCustomClientId(e.target.value)}
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '12px', boxSizing: 'border-box',
+            }}
+          >
+            <option value="">Pick a client…</option>
+            {clients.filter((c: any) => c.phone).map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>
             ))}
-          </div>
+          </select>
+
+          <FieldLabel>Your message</FieldLabel>
+          <textarea
+            value={customMessage}
+            onChange={e => setCustomMessage(e.target.value)}
+            placeholder="Write what you want to say…"
+            rows={5}
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '14px',
+              boxSizing: 'border-box', resize: 'vertical',
+            }}
+          />
+
+          <button
+            onClick={sendCustom}
+            disabled={!customClientId || !customMessage.trim()}
+            style={{
+              width: '100%',
+              background: customClientId && customMessage.trim() ? '#25D366' : C.border,
+              color: customClientId && customMessage.trim() ? C.ivory : C.light,
+              border: 'none', borderRadius: '12px', padding: '14px',
+              fontSize: '12px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase',
+              cursor: customClientId && customMessage.trim() ? 'pointer' : 'not-allowed',
+              fontFamily: 'DM Sans, sans-serif', marginBottom: '10px',
+            }}
+          >
+            Send via WhatsApp
+          </button>
         </>
       )}
 
       <button
-        onClick={onClose}
+        onClick={() => mode === 'menu' ? onClose() : setMode('menu')}
         style={{
           width: '100%',
           background: 'transparent', color: C.muted,
@@ -4044,7 +4652,300 @@ function QuickReminderSheet({
           letterSpacing: '1.5px', textTransform: 'uppercase',
           cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
         }}
-      >Done</button>
+      >{mode === 'menu' ? 'Done' : '← Back'}</button>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUICK TO-DO SHEET (Turn 7b) — inline to-do creation
+// ══════════════════════════════════════════════════════════════════════════
+
+function QuickTodoSheet({
+  vendorId, onClose, onSaved,
+}: {
+  vendorId: string; onClose: () => void; onSaved: (todo: any) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [priority, setPriority] = useState<'low' | 'med' | 'high'>('med');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const canSave = !!title.trim() && !submitting;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setError(''); setSubmitting(true);
+    try {
+      const r = await fetch(API + '/api/todos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          title: title.trim(),
+          due_date: dueDate || null,
+          priority,
+          done: false,
+        }),
+      });
+      const d = await r.json();
+      if (d.success && d.data) onSaved(d.data);
+      else setError(d.error || 'Could not create to-do');
+    } catch {
+      setError('Network error. Please try again.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Quick Action" title="Add a To-Do" onClose={onClose} />
+
+      <FieldLabel>What needs doing?</FieldLabel>
+      <input
+        type="text" value={title} onChange={e => setTitle(e.target.value)}
+        placeholder="e.g. Confirm Saturday's venue"
+        autoFocus
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '14px', boxSizing: 'border-box',
+        }}
+      />
+
+      <FieldLabel>Due date (optional)</FieldLabel>
+      <input
+        type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '14px', boxSizing: 'border-box',
+        }}
+      />
+
+      <FieldLabel>Priority</FieldLabel>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+        {(['low', 'med', 'high'] as const).map(p => (
+          <button
+            key={p}
+            onClick={() => setPriority(p)}
+            style={{
+              flex: 1,
+              background: priority === p ? (p === 'high' ? C.redSoft : p === 'med' ? C.goldSoft : C.pearl) : C.ivory,
+              color: priority === p ? (p === 'high' ? C.red : p === 'med' ? C.goldDeep : C.dark) : C.muted,
+              border: `1px solid ${priority === p ? (p === 'high' ? C.redBorder : p === 'med' ? C.goldBorder : C.border) : C.border}`,
+              borderRadius: '10px', padding: '10px',
+              fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px',
+              cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+            }}
+          >{p === 'med' ? 'Medium' : p}</button>
+        ))}
+      </div>
+
+      {error && (
+        <div style={{
+          background: C.redSoft, border: `1px solid ${C.redBorder}`,
+          borderRadius: '10px', padding: '10px 12px',
+          fontSize: '11px', color: C.red, marginBottom: '12px',
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1, background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`, borderRadius: '12px',
+            padding: '13px', fontSize: '11px', fontWeight: 500,
+            letterSpacing: '1.5px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >Cancel</button>
+        <button
+          onClick={handleSave} disabled={!canSave}
+          style={{
+            flex: 2,
+            background: canSave ? C.gold : C.border,
+            color: canSave ? C.ivory : C.light,
+            border: 'none', borderRadius: '12px', padding: '14px',
+            fontSize: '11px', fontWeight: 600, letterSpacing: '1.8px', textTransform: 'uppercase',
+            cursor: canSave ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >{submitting ? 'Saving…' : 'Add To-Do'}</button>
+      </div>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUICK EVENT SHEET (Turn 7b) — inline calendar event creation
+// ══════════════════════════════════════════════════════════════════════════
+
+function QuickEventSheet({
+  vendorId, clients, onClose, onSaved,
+}: {
+  vendorId: string; clients: any[];
+  onClose: () => void; onSaved: (event: any) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventTime, setEventTime] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [type, setType] = useState<'generic' | 'booking' | 'trial' | 'briefing' | 'venue_visit'>('generic');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const canSave = !!title.trim() && !!eventDate && !submitting;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setError(''); setSubmitting(true);
+    try {
+      const matchedClient = clients.find((c: any) => c.id === clientId);
+      const r = await fetch(API + '/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          title: title.trim(),
+          event_date: eventDate,
+          event_time: eventTime || null,
+          client_id: clientId || null,
+          client_name: matchedClient?.name || null,
+          notes: notes.trim() || null,
+          type,
+        }),
+      });
+      const d = await r.json();
+      if (d.success && d.data) onSaved(d.data);
+      else setError(d.error || 'Could not create event');
+    } catch {
+      setError('Network error. Please try again.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Quick Action" title="Create Event" onClose={onClose} />
+
+      <FieldLabel>Event title</FieldLabel>
+      <input
+        type="text" value={title} onChange={e => setTitle(e.target.value)}
+        placeholder="e.g. Pooja's outfit trial"
+        autoFocus
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '12px', boxSizing: 'border-box',
+        }}
+      />
+
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>Date</FieldLabel>
+          <input
+            type="date" value={eventDate} onChange={e => setEventDate(e.target.value)}
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '13px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>Time (optional)</FieldLabel>
+          <input
+            type="time" value={eventTime} onChange={e => setEventTime(e.target.value)}
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '12px', padding: '13px 14px', fontSize: '13px', color: C.dark,
+              fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+      </div>
+
+      <FieldLabel>Type</FieldLabel>
+      <select
+        value={type} onChange={e => setType(e.target.value as any)}
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '12px', boxSizing: 'border-box',
+        }}
+      >
+        <option value="generic">General</option>
+        <option value="booking">Booking / Wedding day</option>
+        <option value="trial">Outfit / Dress trial</option>
+        <option value="briefing">Briefing</option>
+        <option value="venue_visit">Venue visit</option>
+      </select>
+
+      <FieldLabel>Link to client (optional)</FieldLabel>
+      <select
+        value={clientId} onChange={e => setClientId(e.target.value)}
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '12px', boxSizing: 'border-box',
+        }}
+      >
+        <option value="">— No client —</option>
+        {clients.map((c: any) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+
+      <FieldLabel>Notes (optional)</FieldLabel>
+      <textarea
+        value={notes} onChange={e => setNotes(e.target.value)}
+        placeholder="Anything to remember…"
+        rows={2}
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '14px', boxSizing: 'border-box', resize: 'vertical',
+        }}
+      />
+
+      {error && (
+        <div style={{
+          background: C.redSoft, border: `1px solid ${C.redBorder}`,
+          borderRadius: '10px', padding: '10px 12px',
+          fontSize: '11px', color: C.red, marginBottom: '12px',
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1, background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`, borderRadius: '12px',
+            padding: '13px', fontSize: '11px', fontWeight: 500,
+            letterSpacing: '1.5px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >Cancel</button>
+        <button
+          onClick={handleSave} disabled={!canSave}
+          style={{
+            flex: 2,
+            background: canSave ? C.gold : C.border,
+            color: canSave ? C.ivory : C.light,
+            border: 'none', borderRadius: '12px', padding: '14px',
+            fontSize: '11px', fontWeight: 600, letterSpacing: '1.8px', textTransform: 'uppercase',
+            cursor: canSave ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif',
+          }}
+        >{submitting ? 'Saving…' : 'Create Event'}</button>
+      </div>
     </SheetOverlay>
   );
 }
@@ -4276,6 +5177,420 @@ const EXPENSE_CATEGORIES = [
   'Travel', 'Equipment', 'Assistant', 'Venue', 'Supplies',
   'Props', 'Food', 'Software', 'Marketing', 'Other',
 ];
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAYMENT SCHEDULES PANEL — list view + 3-stage creator
+// ══════════════════════════════════════════════════════════════════════════
+
+function PaymentSchedulesPanel({ session, paymentSchedules, clients, onSavePaymentSchedule }: any) {
+  const [showCreate, setShowCreate] = useState(false);
+
+  return (
+    <div style={{ padding: '16px 0' }}>
+      {/* Header + new button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '10px', letterSpacing: '1.5px', color: C.muted, fontWeight: 600, textTransform: 'uppercase' }}>Payment Schedules</div>
+          <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>Stage payments across the booking journey</div>
+        </div>
+        <button onClick={() => setShowCreate(true)} style={{
+          background: C.gold, color: C.ivory, border: 'none',
+          borderRadius: '50px', padding: '8px 14px',
+          fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+          fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: '4px',
+          letterSpacing: '0.5px',
+        }}><Plus size={12} /> New</button>
+      </div>
+
+      {/* List */}
+      {paymentSchedules.length === 0 ? (
+        <div style={{
+          background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`,
+          padding: '40px 20px', textAlign: 'center',
+        }}>
+          <CreditCard size={28} color={C.light} style={{ marginBottom: '12px' }} />
+          <div style={{ fontSize: '14px', fontFamily: "'Playfair Display', serif", color: C.dark, marginBottom: '4px' }}>
+            No payment schedules
+          </div>
+          <div style={{ fontSize: '12px', color: C.muted }}>
+            Tap New to stage payments per client.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {paymentSchedules.map((s: any) => {
+            const insts = s.instalments || [];
+            const overdue = insts.some((inst: any) => !inst.paid && inst.due_date && new Date(inst.due_date) < new Date());
+            const totalAmt = insts.reduce((sum: number, i: any) => sum + (parseInt(i.amount) || 0), 0);
+            const paidAmt = insts.filter((i: any) => i.paid).reduce((sum: number, i: any) => sum + (parseInt(i.amount) || 0), 0);
+            return (
+              <div key={s.id} style={{
+                background: C.card, borderRadius: '12px',
+                border: `1px solid ${overdue ? C.redBorder : C.border}`,
+                padding: '14px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', marginBottom: '10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', color: C.dark, fontWeight: 500 }}>{s.client_name || 'Client'}</div>
+                    <div style={{ fontSize: '11px', color: overdue ? C.red : C.muted, marginTop: '2px' }}>
+                      {insts.filter((i: any) => !i.paid).length} of {insts.length} pending
+                      {overdue && ' · OVERDUE'}
+                    </div>
+                  </div>
+                  {s.client_phone && (
+                    <a
+                      href={`https://wa.me/91${s.client_phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + (s.client_name || 'there') + '! Gentle reminder about pending payment.')}`}
+                      target="_blank" rel="noreferrer"
+                      style={{
+                        background: '#25D366', borderRadius: '50%',
+                        width: '32px', height: '32px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, textDecoration: 'none',
+                      }}>
+                      <MessageCircle size={14} color="#fff" />
+                    </a>
+                  )}
+                </div>
+                {/* Mini progress bar */}
+                <div style={{ height: '6px', background: C.borderSoft, borderRadius: '3px', overflow: 'hidden', marginBottom: '8px' }}>
+                  <div style={{ height: '100%', width: totalAmt > 0 ? `${(paidAmt / totalAmt) * 100}%` : '0%', background: overdue ? C.red : C.green, transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '11px', color: C.muted, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>₹{paidAmt.toLocaleString('en-IN')} paid</span>
+                  <span>₹{totalAmt.toLocaleString('en-IN')} total</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Footer hint */}
+      <div style={{
+        marginTop: '16px', padding: '12px 14px',
+        background: C.pearl, borderRadius: '10px',
+        fontSize: '11px', color: C.muted, lineHeight: 1.55,
+        textAlign: 'center', fontStyle: 'italic',
+      }}>
+        Need more than 3 instalments? Use the
+        <a href="/vendor/dashboard?intent=mobile" target="_blank" rel="noreferrer" style={{ color: C.goldDeep, textDecoration: 'underline', marginLeft: '4px' }}>business portal →</a>
+      </div>
+
+      {/* Create modal */}
+      {showCreate && (
+        <PaymentScheduleCreator
+          session={session}
+          clients={clients}
+          onClose={() => setShowCreate(false)}
+          onSaved={(newSched: any) => { onSavePaymentSchedule && onSavePaymentSchedule(newSched); setShowCreate(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
+  const [clientId, setClientId] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [advance, setAdvance] = useState({ amount: '', due_date: '' });
+  const [preEvent, setPreEvent] = useState({ amount: '', due_date: '' });
+  const [final, setFinal] = useState({ amount: '', due_date: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const totalEntered = (parseInt(advance.amount) || 0) + (parseInt(preEvent.amount) || 0) + (parseInt(final.amount) || 0);
+  const canSave = !!clientName && (parseInt(advance.amount) > 0 || parseInt(preEvent.amount) > 0 || parseInt(final.amount) > 0) && !submitting;
+
+  const handleClientPick = (id: string) => {
+    setClientId(id);
+    const c = clients.find((cl: any) => cl.id === id);
+    if (c) {
+      setClientName(c.name || '');
+      setClientPhone(c.phone || '');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setError(''); setSubmitting(true);
+    const instalments: any[] = [];
+    if (parseInt(advance.amount) > 0)   instalments.push({ label: 'Advance',   amount: parseInt(advance.amount),   due_date: advance.due_date || null,   paid: false });
+    if (parseInt(preEvent.amount) > 0)  instalments.push({ label: 'Pre-Event', amount: parseInt(preEvent.amount),  due_date: preEvent.due_date || null,  paid: false });
+    if (parseInt(final.amount) > 0)     instalments.push({ label: 'Final',     amount: parseInt(final.amount),     due_date: final.due_date || null,     paid: false });
+    try {
+      const r = await fetch(API + '/api/payment-schedules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: session.vendorId,
+          client_id: clientId || null,
+          client_name: clientName,
+          client_phone: clientPhone || null,
+          instalments,
+        }),
+      });
+      const d = await r.json();
+      if (d.success && d.data) onSaved(d.data);
+      else setError(d.error || 'Could not create schedule');
+    } catch {
+      setError('Network error. Please try again.');
+    } finally { setSubmitting(false); }
+  };
+
+  const stage = (label: string, val: any, set: any, hint: string) => (
+    <div style={{
+      background: C.pearl, border: `1px solid ${C.border}`,
+      borderRadius: '12px', padding: '14px', marginBottom: '10px',
+    }}>
+      <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, letterSpacing: '1px', marginBottom: '4px', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: '10px', color: C.light, marginBottom: '10px', fontStyle: 'italic' }}>{hint}</div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>Amount (₹)</FieldLabel>
+          <input
+            type="number" inputMode="numeric"
+            value={val.amount} onChange={e => set({ ...val, amount: e.target.value })}
+            placeholder="0"
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '10px', padding: '11px 12px',
+              fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
+              outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>Due date</FieldLabel>
+          <input
+            type="date" value={val.due_date}
+            onChange={e => set({ ...val, due_date: e.target.value })}
+            style={{
+              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: '10px', padding: '11px 12px',
+              fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
+              outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader eyebrow="Payment Schedule" title="Stage 3 payments" onClose={onClose} />
+
+      <FieldLabel>Client</FieldLabel>
+      {clients.length > 0 ? (
+        <select value={clientId} onChange={e => handleClientPick(e.target.value)} style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '8px', boxSizing: 'border-box',
+        }}>
+          <option value="">— Pick existing client —</option>
+          {clients.map((c: any) => (
+            <option key={c.id} value={c.id}>{c.name}{c.phone ? ' · ' + c.phone : ''}</option>
+          ))}
+        </select>
+      ) : null}
+      <input
+        type="text" value={clientName} onChange={e => setClientName(e.target.value)}
+        placeholder="…or type a name"
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '8px', boxSizing: 'border-box',
+        }}
+      />
+      <input
+        type="tel" inputMode="tel" value={clientPhone}
+        onChange={e => setClientPhone(e.target.value)}
+        placeholder="Phone (for WhatsApp reminders)"
+        style={{
+          width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: '18px', boxSizing: 'border-box',
+        }}
+      />
+
+      {stage('Advance', advance, setAdvance, 'Booking confirmation deposit')}
+      {stage('Pre-Event', preEvent, setPreEvent, 'Due 7-30 days before event')}
+      {stage('Final', final, setFinal, 'Balance after the event')}
+
+      <div style={{
+        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+        borderRadius: '10px', padding: '12px 14px',
+        fontSize: '12px', color: C.goldDeep, fontWeight: 600,
+        marginBottom: '14px', display: 'flex', justifyContent: 'space-between',
+      }}>
+        <span>Total</span>
+        <span>₹{totalEntered.toLocaleString('en-IN')}</span>
+      </div>
+
+      {error && <div style={{ fontSize: '12px', color: C.red, marginBottom: '12px' }}>{error}</div>}
+
+      <button
+        onClick={handleSave}
+        disabled={!canSave}
+        style={{
+          width: '100%', background: canSave ? C.dark : C.border,
+          color: canSave ? C.ivory : C.light,
+          border: 'none', borderRadius: '12px', padding: '14px',
+          fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px',
+          textTransform: 'uppercase', cursor: canSave ? 'pointer' : 'not-allowed',
+          fontFamily: 'DM Sans, sans-serif',
+        }}>{submitting ? 'Creating…' : 'Create Schedule'}</button>
+
+      <div style={{
+        marginTop: '12px',
+        fontSize: '10px', color: C.light, textAlign: 'center',
+        fontStyle: 'italic', lineHeight: 1.5,
+      }}>
+        More instalments? Use the business portal →
+      </div>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// TO-DO PANEL — Personal task list, prioritized + due-date sorted
+// ══════════════════════════════════════════════════════════════════════════
+
+function TodoPanel({ todos, onOpenTodo, onToggleTodo, onDeleteTodo }: any) {
+  const [filter, setFilter] = useState<'all' | 'pending' | 'done'>('pending');
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const visible = (todos || []).filter((t: any) => {
+    if (filter === 'pending') return !t.done;
+    if (filter === 'done') return t.done;
+    return true;
+  });
+
+  const grouped = {
+    overdue: visible.filter((t: any) => !t.done && t.due_date && new Date(t.due_date) < today),
+    today: visible.filter((t: any) => !t.done && t.due_date && new Date(t.due_date).toDateString() === today.toDateString()),
+    upcoming: visible.filter((t: any) => !t.done && t.due_date && new Date(t.due_date) > today),
+    someday: visible.filter((t: any) => !t.done && !t.due_date),
+    done: visible.filter((t: any) => t.done),
+  };
+
+  const renderTodoCard = (t: any) => {
+    const isOverdue = !t.done && t.due_date && new Date(t.due_date) < today;
+    const priorityColor = t.priority === 'high' ? C.red : t.priority === 'low' ? C.light : C.gold;
+    return (
+      <div key={t.id} style={{
+        background: C.ivory, border: `1px solid ${isOverdue ? C.redBorder : C.border}`,
+        borderRadius: '12px', padding: '14px',
+        display: 'flex', alignItems: 'flex-start', gap: '12px',
+        opacity: t.done ? 0.55 : 1,
+      }}>
+        <button
+          onClick={() => onToggleTodo && onToggleTodo(t.id, !t.done)}
+          style={{
+            width: '20px', height: '20px', flexShrink: 0,
+            borderRadius: '6px',
+            border: `1.5px solid ${t.done ? C.green : C.border}`,
+            background: t.done ? C.green : 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0, marginTop: '2px',
+          }}>
+          {t.done && <CheckCircle size={12} color="#fff" />}
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: '13.5px', color: C.dark, fontWeight: 500,
+            textDecoration: t.done ? 'line-through' : 'none',
+            lineHeight: 1.4, marginBottom: t.due_date ? '4px' : 0,
+            wordBreak: 'break-word',
+          }}>{t.title}</div>
+          {t.due_date && (
+            <div style={{ fontSize: '11px', color: isOverdue ? C.red : C.muted, fontWeight: isOverdue ? 600 : 400 }}>
+              {isOverdue ? 'Overdue · ' : ''}
+              {new Date(t.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+            </div>
+          )}
+        </div>
+        <div style={{
+          width: '6px', height: '40px', borderRadius: '3px',
+          background: priorityColor, flexShrink: 0,
+        }} />
+        <button
+          onClick={() => { if (confirm('Delete this to-do?') && onDeleteTodo) onDeleteTodo(t.id); }}
+          style={{ background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', flexShrink: 0 }}>
+          <Trash2 size={14} color={C.light} />
+        </button>
+      </div>
+    );
+  };
+
+  const sectionHeader = (label: string, count: number) => count > 0 && (
+    <div style={{
+      fontSize: '10px', fontWeight: 600, letterSpacing: '1.5px',
+      textTransform: 'uppercase', color: C.muted,
+      marginTop: '20px', marginBottom: '10px',
+    }}>{label} · {count}</div>
+  );
+
+  return (
+    <div style={{ padding: '16px 0' }}>
+      {/* Filter pills + Add button */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', alignItems: 'center' }}>
+        {(['pending', 'all', 'done'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            background: filter === f ? C.dark : 'transparent',
+            color: filter === f ? C.ivory : C.muted,
+            border: `1px solid ${filter === f ? C.dark : C.border}`,
+            borderRadius: '50px', padding: '6px 14px',
+            fontSize: '11px', fontWeight: 500, cursor: 'pointer',
+            fontFamily: 'inherit', textTransform: 'capitalize',
+          }}>{f}</button>
+        ))}
+        <button onClick={onOpenTodo} style={{
+          marginLeft: 'auto',
+          background: C.gold, color: C.ivory, border: 'none',
+          borderRadius: '50px', padding: '8px 14px',
+          fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+          fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: '4px',
+          letterSpacing: '0.5px',
+        }}><Plus size={12} /> New</button>
+      </div>
+
+      {/* Empty state */}
+      {visible.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: C.muted }}>
+          <CheckCircle size={32} color={C.light} style={{ marginBottom: '12px' }} />
+          <div style={{ fontSize: '14px', fontFamily: "'Playfair Display', serif", color: C.dark, marginBottom: '4px' }}>
+            {filter === 'done' ? 'Nothing completed yet' : 'All clear'}
+          </div>
+          <div style={{ fontSize: '12px' }}>
+            {filter === 'done' ? 'Finished to-dos will appear here.' : 'Tap New to add your first to-do.'}
+          </div>
+        </div>
+      )}
+
+      {/* Sections */}
+      {sectionHeader('Overdue', grouped.overdue.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{grouped.overdue.map(renderTodoCard)}</div>
+
+      {sectionHeader('Today', grouped.today.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{grouped.today.map(renderTodoCard)}</div>
+
+      {sectionHeader('Upcoming', grouped.upcoming.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{grouped.upcoming.map(renderTodoCard)}</div>
+
+      {sectionHeader('Someday', grouped.someday.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{grouped.someday.map(renderTodoCard)}</div>
+
+      {sectionHeader('Done', grouped.done.length)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{grouped.done.map(renderTodoCard)}</div>
+    </div>
+  );
+}
 
 function ExpensesPanel({ session, tier, clients }: any) {
   const [expenses, setExpenses] = useState<any[]>([]);

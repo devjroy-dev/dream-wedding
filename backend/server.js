@@ -1399,6 +1399,118 @@ app.get('/api/tds/:vendorId/export', async (req, res) => {
 });
 
 // ==================
+// TO-DO ROUTES (Turn 7b)
+// ==================
+
+app.get('/api/todos/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_todos')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('done', { ascending: true })
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/todos', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_todos')
+      .insert([req.body])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/todos/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_todos')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/todos/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_todos').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
+// CALENDAR EVENT ROUTES (Turn 7b)
+// ==================
+
+app.get('/api/events/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_calendar_events')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('event_date', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/events', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_calendar_events')
+      .insert([req.body])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/events/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_calendar_events')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/events/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_calendar_events').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
 // PAYMENT SCHEDULE ROUTES
 // ==================
 
@@ -4694,3 +4806,4 @@ app.get('/api/waitlist', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
