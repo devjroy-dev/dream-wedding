@@ -373,8 +373,26 @@ function SectionHeader({ title, action }: { title: string; action?: React.ReactN
 // ── Main Dashboard ───────────────────────────────────────────────
 export default function VendorDashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'overview';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (!tabParam) return 'overview';
+      const aliases: Record<string, string> = {
+        'deluxe': 'ds-event-dashboard', 'deluxe-suite': 'ds-event-dashboard',
+        'referral': 'referral', 'referrals': 'referral',
+        'invoices': 'invoices', 'invoice': 'invoices',
+        'clients': 'clients', 'calendar': 'calendar',
+        'team': 'team', 'overview': 'overview',
+      };
+      return aliases[tabParam] || tabParam;
+    } catch { return 'overview'; }
+  });
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768;
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -1477,26 +1495,18 @@ export default function VendorDashboard() {
   // BUT: If the vendor arrived with ?intent=mobile in the URL (a deliberate
   // click from the PWA More tab, or the landing page "Business Portal" button),
   // skip the gate entirely — they explicitly asked for the desktop experience.
-  const [mobileGateDismissed, setMobileGateDismissed] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('intent') === 'mobile') setMobileGateDismissed(true);
-    // Deep-link: ?tab=X switches the active tab so tiles like Deluxe Suite land on the right page
-    const tabParam = params.get('tab');
-    if (tabParam) {
-      // Map short aliases to real tab IDs
-      const aliases: Record<string, string> = {
-        'deluxe': 'ds-event-dashboard', 'deluxe-suite': 'ds-event-dashboard',
-        'referral': 'referral', 'referrals': 'referral',
-        'invoices': 'invoices', 'invoice': 'invoices',
-        'clients': 'clients', 'calendar': 'calendar',
-        'team': 'team', 'overview': 'overview',
-      };
-      const resolved = aliases[tabParam] || tabParam;
-      setActiveTab(resolved);
-    }
-  }, []);
+  // Read ?intent=mobile synchronously from URL during initial state.
+  // Doing this inside useEffect caused a race: the gate would render first (because
+  // mobileGateDismissed defaulted to false), then the effect would flip it true and
+  // re-render — but on PWA/service-worker setups the gate would sometimes stick.
+  const getInitialGateDismissed = () => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('intent') === 'mobile';
+    } catch { return false; }
+  };
+  const [mobileGateDismissed, setMobileGateDismissed] = useState(getInitialGateDismissed);
   if (isMobile && !mobileGateDismissed) {
     return (
       <div style={{
