@@ -14,7 +14,7 @@ const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-type Tab = 'Home' | 'Inquiries' | 'Calendar' | 'Clients' | 'More';
+type Tab = 'Home' | 'Inquiries' | 'Calendar' | 'Tools';
 type Tier = 'essential' | 'signature' | 'prestige';
 
 interface VendorSession {
@@ -34,20 +34,20 @@ const ESSENTIAL_TOOLS = [
   { id: 'overview',     icon: Grid,         label: 'Overview',     tab: 'Home' as Tab },
   { id: 'inquiries',    icon: Mail,         label: 'Enquiries',    tab: 'Inquiries' as Tab },
   { id: 'calendar',     icon: Calendar,     label: 'Calendar',     tab: 'Calendar' as Tab },
-  { id: 'clients',      icon: Users,        label: 'Clients',      tab: 'Clients' as Tab, sub: 'clients' },
-  { id: 'invoices',     icon: FileText,     label: 'Invoices',     tab: 'Clients' as Tab, sub: 'invoices' },
-  { id: 'contracts',    icon: Briefcase,    label: 'Contracts',    tab: 'Clients' as Tab, sub: 'contracts' },
-  { id: 'payments',     icon: CreditCard,   label: 'Payments',     tab: 'Clients' as Tab, sub: 'payments' },
+  { id: 'clients',      icon: Users,        label: 'Clients',      tab: 'Tools' as Tab, sub: 'clients' },
+  { id: 'invoices',     icon: FileText,     label: 'Invoices',     tab: 'Tools' as Tab, sub: 'invoices' },
+  { id: 'contracts',    icon: Briefcase,    label: 'Contracts',    tab: 'Tools' as Tab, sub: 'contracts' },
+  { id: 'payments',     icon: CreditCard,   label: 'Payments',     tab: 'Tools' as Tab, sub: 'payments' },
   { id: 'availability', icon: Clock,        label: 'Availability', tab: 'Calendar' as Tab },
 ];
 
 const SIGNATURE_TOOLS = [
-  { id: 'expenses',  icon: TrendingDown,  label: 'Expenses',  tab: 'Clients' as Tab, sub: 'expenses' },
-  { id: 'tax',       icon: Percent,       label: 'Tax & TDS', tab: 'Clients' as Tab, sub: 'tax' },
-  { id: 'team',      icon: Users,         label: 'My Team',   tab: 'Clients' as Tab, sub: 'team' },
-  { id: 'referral',  icon: Share2,        label: 'Referrals', tab: 'Clients' as Tab, sub: 'referral' },
-  { id: 'whatsapp',  icon: MessageCircle, label: 'Broadcast', tab: 'Clients' as Tab, sub: 'whatsapp' },
-  { id: 'analytics', icon: BarChart2,     label: 'Analytics', tab: 'Clients' as Tab, sub: 'analytics' },
+  { id: 'expenses',  icon: TrendingDown,  label: 'Expenses',  tab: 'Tools' as Tab, sub: 'expenses' },
+  { id: 'tax',       icon: Percent,       label: 'Tax & TDS', tab: 'Tools' as Tab, sub: 'tax' },
+  { id: 'team',      icon: Users,         label: 'My Team',   tab: 'Tools' as Tab, sub: 'team' },
+  { id: 'referral',  icon: Share2,        label: 'Referrals', tab: 'Tools' as Tab, sub: 'referral' },
+  { id: 'whatsapp',  icon: MessageCircle, label: 'Broadcast', tab: 'Tools' as Tab, sub: 'whatsapp' },
+  { id: 'analytics', icon: BarChart2,     label: 'Analytics', tab: 'Tools' as Tab, sub: 'analytics' },
 ];
 
 // ── Brand Tokens (match React Native theme) ──────────────────────────────
@@ -99,6 +99,8 @@ export default function VendorMobilePage() {
   const [session, setSession] = useState<VendorSession | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('Home');
   const [activeSubTool, setActiveSubTool] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Data
   const [bookings, setBookings] = useState<any[]>([]);
@@ -128,14 +130,15 @@ export default function VendorMobilePage() {
   };
 
   // Respect ?sub=<subtool> query param — lets external entry points
-  // (like MoreTab ToolsGrid) deep-link into a specific Clients sub-tool
+  // deep-link into a specific Tools sub-tool
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const params = new URLSearchParams(window.location.search);
       const sub = params.get('sub');
-      if (sub && ['clients', 'invoices', 'contracts', 'payments', 'expenses'].includes(sub)) {
-        setActiveTab('Clients');
+      const validSubs = ['clients', 'invoices', 'contracts', 'payments', 'expenses', 'tax', 'team', 'referral', 'whatsapp', 'analytics', 'chat'];
+      if (sub && validSubs.includes(sub)) {
+        setActiveTab('Tools');
         setActiveSubTool(sub);
       }
     } catch { /* ignore */ }
@@ -277,7 +280,7 @@ export default function VendorMobilePage() {
         }
       `}</style>
       {/* ── HEADER ── */}
-      <Header session={session} tier={tier} />
+      <Header session={session} tier={tier} onOpenProfile={() => setShowProfile(true)} />
 
       {/* ── BODY ── */}
       <div style={{ padding: '8px 16px 24px' }}>
@@ -295,7 +298,7 @@ export default function VendorMobilePage() {
               setActiveTab(t);
               if (typeof window !== 'undefined') {
                 const pending = localStorage.getItem('tdw_pwa_open_sub');
-                if (t === 'Clients' && pending) {
+                if (t === 'Tools' && pending) {
                   setActiveSubTool(pending);
                   localStorage.removeItem('tdw_pwa_open_sub');
                 }
@@ -339,7 +342,7 @@ export default function VendorMobilePage() {
             }}
           />
         )}
-        {activeTab === 'Clients' && (
+        {activeTab === 'Tools' && (
           <ToolsTab
             session={session}
             tier={tier}
@@ -355,17 +358,6 @@ export default function VendorMobilePage() {
             vendorName={session?.vendorName}
           />
         )}
-        {activeTab === 'More' && (
-          <MoreTab
-            session={session}
-            tier={tier}
-            vendorData={vendorData}
-            aiStatus={aiStatus}
-            buyingTokens={buyingTokens}
-            setBuyingTokens={setBuyingTokens}
-            onAiStatusUpdate={(next: any) => setAiStatus(next)}
-          />
-        )}
       </div>
 
       {/* ── BOTTOM NAV ── */}
@@ -377,7 +369,7 @@ export default function VendorMobilePage() {
           // Respect a pending sub-tool hint set by a Quick Action (e.g. "Expense")
           if (typeof window !== 'undefined') {
             const pending = localStorage.getItem('tdw_pwa_open_sub');
-            if (t === 'Clients' && pending) {
+            if (t === 'Tools' && pending) {
               setActiveSubTool(pending);
               localStorage.removeItem('tdw_pwa_open_sub');
             } else {
@@ -456,6 +448,32 @@ export default function VendorMobilePage() {
           onClose={() => setShowQuickReminder(false)}
         />
       )}
+
+      {/* ── PROFILE OVERLAY ── */}
+      {showProfile && (
+        <ProfileScreen
+          session={session}
+          tier={tier}
+          vendorData={vendorData}
+          aiStatus={aiStatus}
+          onClose={() => setShowProfile(false)}
+          onToast={(msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); }}
+        />
+      )}
+
+      {/* ── TOAST ── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(92px + env(safe-area-inset-bottom))', left: '50%',
+          transform: 'translateX(-50%)',
+          background: C.dark, color: C.ivory,
+          padding: '11px 18px', borderRadius: '50px',
+          fontSize: '12px', fontFamily: 'DM Sans, sans-serif',
+          letterSpacing: '0.3px', maxWidth: 'calc(100% - 40px)',
+          boxShadow: '0 4px 20px rgba(26,20,16,0.3)',
+          zIndex: 300, textAlign: 'center',
+        }}>{toast}</div>
+      )}
     </div>
   );
 }
@@ -464,9 +482,16 @@ export default function VendorMobilePage() {
 // HEADER
 // ══════════════════════════════════════════════════════════════════════════
 
-function Header({ session, tier }: { session: VendorSession; tier: Tier }) {
+function Header({ session, tier, onOpenProfile }: { session: VendorSession; tier: Tier; onOpenProfile: () => void }) {
   const tierLabel = tier === 'prestige' ? 'PRESTIGE' : tier === 'signature' ? 'SIGNATURE' : 'ESSENTIAL';
-  const tierColor = tier === 'prestige' ? C.dark : C.gold;
+  const name = session.vendorName || 'Vendor';
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || 'V';
+
+  // Tier-coloured avatar ring
+  const avatarBg = tier === 'prestige' ? C.dark : tier === 'signature' ? C.goldSoft : C.pearl;
+  const avatarBorder = tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldBorder : C.border;
+  const avatarText = tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldDeep : C.muted;
+
   return (
     <div style={{
       padding: 'calc(env(safe-area-inset-top) + 16px) 20px 12px',
@@ -476,25 +501,39 @@ function Header({ session, tier }: { session: VendorSession; tier: Tier }) {
       top: 0,
       zIndex: 10,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        <button
+          onClick={onOpenProfile}
+          aria-label="Open profile"
+          style={{
+            width: '42px', height: '42px', borderRadius: '50%',
+            background: avatarBg, border: `1.5px solid ${avatarBorder}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', flexShrink: 0,
+            fontFamily: "'Playfair Display', serif",
+            fontSize: '15px', fontWeight: 500, color: avatarText,
+            letterSpacing: '0.5px', padding: 0,
+          }}
+        >{initials}</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '2px', color: C.gold, textTransform: 'uppercase' }}>
             THE DREAM WEDDING
           </div>
-          <div style={{ fontSize: '18px', fontWeight: 600, color: C.dark, marginTop: '2px', fontFamily: 'Playfair Display, serif' }}>
-            {session.vendorName || 'Vendor'}
+          <div style={{ fontSize: '16px', fontWeight: 600, color: C.dark, marginTop: '1px', fontFamily: 'Playfair Display, serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {name}
           </div>
         </div>
         <div style={{
-          padding: '4px 12px',
+          padding: '4px 10px',
           borderRadius: '50px',
           background: tier === 'prestige' ? C.goldMist : C.goldSoft,
           border: `1px solid ${tier === 'prestige' ? C.gold : C.goldBorder}`,
+          flexShrink: 0,
         }}>
           <span style={{
             fontFamily: 'DM Sans, sans-serif',
-            fontSize: '9px', fontWeight: 600, letterSpacing: '2px',
-            color: tier === 'prestige' ? C.goldDeep : tierColor,
+            fontSize: '9px', fontWeight: 600, letterSpacing: '1.8px',
+            color: tier === 'prestige' ? C.goldDeep : C.gold,
           }}>
             {tierLabel}
           </span>
@@ -1192,7 +1231,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           </div>
           {unpaidInvoices.length > 3 && (
             <button
-              onClick={() => onJumpToTab('Clients')}
+              onClick={() => onJumpToTab('Tools')}
               style={{
                 background: 'none', border: 'none',
                 fontSize: '11px', color: C.goldDeep, fontWeight: 600,
@@ -1257,7 +1296,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           { icon: Send,        label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
           { icon: Calendar,    label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: Users,       label: 'Add Client', onClick: () => onAddClient && onAddClient() },
-          { icon: TrendingDown, label: 'Expense',   onClick: () => { onJumpToTab('Clients'); if (typeof window !== 'undefined') { localStorage.setItem('tdw_pwa_open_sub', 'expenses'); } } },
+          { icon: TrendingDown, label: 'Expense',   onClick: () => { onJumpToTab('Tools'); if (typeof window !== 'undefined') { localStorage.setItem('tdw_pwa_open_sub', 'expenses'); } } },
           { icon: MessageCircle, label: 'Broadcast', onClick: () => { window.location.href = '/vendor/dashboard?intent=mobile'; } },
         ];
         const prestigeActions = [
@@ -1511,7 +1550,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
             <SectionLabel>Recent Clients</SectionLabel>
             <button
-              onClick={() => onJumpToTab('Clients')}
+              onClick={() => onJumpToTab('Tools')}
               style={{
                 background: 'none', border: 'none',
                 fontSize: '10px', color: C.goldDeep, fontWeight: 600,
@@ -1841,53 +1880,157 @@ function CalendarTab({ session, bookings, blockedDates, onRefresh, onAddClient }
 // TOOLS TAB (launcher grid → opens individual tool views)
 // ══════════════════════════════════════════════════════════════════════════
 
-function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, onAddClient, onOpenInvoice, vendorName }: any) {
+function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, onAddClient, onOpenInvoice, vendorName, onToast }: any) {
   if (activeSubTool) {
     return <ToolDetailView session={session} tier={tier} sub={activeSubTool} clients={clients} invoices={invoices} bookings={bookings} leads={leads} paymentSchedules={paymentSchedules} onBack={() => setActiveSubTool(null)} onAddClient={onAddClient} onOpenInvoice={onOpenInvoice} vendorName={vendorName} />;
   }
 
-  const allTools = [
-    ...ESSENTIAL_TOOLS.filter(t => t.sub),
-    ...(tier !== 'essential' ? SIGNATURE_TOOLS : []),
+  const [lockedModal, setLockedModal] = useState<any>(null);
+  const vendorRank = TIER_RANK[tier] || 1;
+
+  type ToolEntry = {
+    id: string;
+    label: string;
+    icon: any;
+    sub?: string;                   // PWA sub-tool id
+    href?: string;                  // external link (business portal)
+    minTier: Tier;
+    desc?: string;
+  };
+
+  const SECTIONS: { title: string; tools: ToolEntry[] }[] = [
+    {
+      title: 'Client Management',
+      tools: [
+        { id: 'clients',   label: 'Clients',   icon: Users,      sub: 'clients',   minTier: 'essential', desc: 'Your full client list. Tap any client to see their file.' },
+        { id: 'invoices',  label: 'Invoices',  icon: FileText,   sub: 'invoices',  minTier: 'essential', desc: 'Create, send, and track invoices. GST auto-calculated.' },
+        { id: 'payments',  label: 'Payments',  icon: CreditCard, sub: 'payments',  minTier: 'essential', desc: 'Payment schedules and outstanding amounts.' },
+        { id: 'contracts', label: 'Contracts', icon: Briefcase,  sub: 'contracts', minTier: 'essential', desc: 'Service agreements, generated and tracked per client.' },
+      ],
+    },
+    {
+      title: 'Finance',
+      tools: [
+        { id: 'expenses',  label: 'Expenses',  icon: TrendingDown, sub: 'expenses',  minTier: 'signature', desc: 'Track every expense. See where your money goes. P&L view.' },
+        { id: 'tax',       label: 'Tax & TDS', icon: Percent,      sub: 'tax',       minTier: 'signature', desc: 'GST invoices. Quarterly TDS summary. CA-ready exports.' },
+        { id: 'analytics', label: 'Analytics', icon: BarChart2,    sub: 'analytics', minTier: 'signature', desc: 'Revenue trends. Lead conversion. What\'s working.' },
+      ],
+    },
+    {
+      title: 'Growth',
+      tools: [
+        { id: 'whatsapp',  label: 'Broadcast', icon: Send,    sub: 'whatsapp',                              minTier: 'signature', desc: 'Send WhatsApp updates to client groups. Templates included.' },
+        { id: 'referral',  label: 'Referrals', icon: Share2,  href: '/vendor/dashboard?intent=mobile&tab=referral', minTier: 'signature', desc: 'Past Client Discount Loop. 10% off per 10 clients who join.' },
+      ],
+    },
+    {
+      title: 'Team & Ops',
+      tools: [
+        { id: 'team',   label: 'Team',         icon: Users,         sub: 'team', minTier: 'signature', desc: 'Add assistants. Assign roles. Shared calendar.' },
+        { id: 'chat',   label: 'Team Chat',    icon: MessageCircle, sub: 'chat', minTier: 'prestige',  desc: 'Real-time messaging with your team. Channels and direct messages.' },
+        { id: 'deluxe', label: 'Deluxe Suite', icon: Award,         href: '/vendor/dashboard?intent=mobile&tab=deluxe', minTier: 'prestige', desc: 'Tasks, procurement, deliveries, photo approvals, client sentiment. For ops teams.' },
+      ],
+    },
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '12px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingTop: '12px' }}>
       <div>
-        <div style={{ fontSize: '20px', fontWeight: 600, color: C.dark, fontFamily: 'Playfair Display, serif' }}>Tools</div>
-        <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>Run your business</div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>Tools</div>
+        <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, marginTop: '4px', fontStyle: 'italic' }}>Every tool to run your business, in one place.</div>
       </div>
 
-      {/* Tool grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-        {allTools.map((t: any) => {
-          const I = t.icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActiveSubTool(t.sub)}
-              style={{
-                background: C.card, border: `1px solid ${C.border}`, borderRadius: '14px',
-                padding: '18px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+      {SECTIONS.map((section) => (
+        <div key={section.title}>
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif',
+            fontSize: '9px', fontWeight: 600,
+            letterSpacing: '2.5px', textTransform: 'uppercase',
+            color: C.goldDeep, marginBottom: '10px', paddingLeft: '4px',
+          }}>{section.title}</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '10px',
+          }}>
+            {section.tools.map((tool) => {
+              const required = TIER_RANK[tool.minTier] || 1;
+              const locked = vendorRank < required;
+              const I = tool.icon;
+
+              if (locked) {
+                return (
+                  <button
+                    key={tool.id}
+                    onClick={() => setLockedModal(tool)}
+                    style={{
+                      position: 'relative',
+                      background: C.pearl, border: `1px solid ${C.borderSoft}`,
+                      borderRadius: '14px', padding: '18px 8px 16px',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', gap: '8px',
+                      cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden',
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
+                      background: `linear-gradient(90deg, transparent 0%, ${C.goldBorder} 50%, transparent 100%)`,
+                    }} />
+                    <div style={{
+                      position: 'absolute', top: '6px', right: '6px',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}><Lock size={9} color={C.goldDeep} /></div>
+                    <I size={18} color={C.goldBorder} />
+                    <span style={{
+                      fontFamily: 'DM Sans, sans-serif',
+                      fontSize: '10px', fontWeight: 500,
+                      letterSpacing: '1.5px', textTransform: 'uppercase',
+                      color: C.muted, textAlign: 'center', lineHeight: 1.3,
+                    }}>{tool.label}</span>
+                  </button>
+                );
+              }
+
+              const commonStyle: React.CSSProperties = {
+                background: C.ivory, border: `1px solid ${C.goldBorder}`,
+                borderRadius: '14px', padding: '18px 8px 16px',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: '8px',
                 cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              <div style={{ width: 38, height: 38, borderRadius: '12px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <I size={18} color={C.gold} />
-              </div>
-              <span style={{ fontSize: '11px', color: C.dark, fontWeight: 500, textAlign: 'center', lineHeight: 1.3 }}>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+                textDecoration: 'none',
+              };
+              const inner = (
+                <>
+                  <I size={18} color={C.gold} />
+                  <span style={{
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontSize: '10px', fontWeight: 500,
+                    letterSpacing: '1.5px', textTransform: 'uppercase',
+                    color: C.dark, textAlign: 'center', lineHeight: 1.3,
+                  }}>{tool.label}</span>
+                </>
+              );
 
-      {/* Tier upsell — editorial invitation, not tech banner */}
+              if (tool.sub) {
+                return (
+                  <button key={tool.id} onClick={() => setActiveSubTool(tool.sub!)} style={commonStyle}>{inner}</button>
+                );
+              }
+              return (
+                <a key={tool.id} href={tool.href} style={commonStyle}>{inner}</a>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {/* Tier upsell */}
       {tier === 'essential' && (
         <div style={{
-          background: C.champagne,
-          borderRadius: '18px', padding: '24px 22px',
-          border: `1px solid ${C.goldBorder}`,
-          position: 'relative', overflow: 'hidden',
+          background: C.champagne, borderRadius: '18px', padding: '24px 22px',
+          border: `1px solid ${C.goldBorder}`, position: 'relative', overflow: 'hidden',
         }}>
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
@@ -1895,34 +2038,69 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
           }} />
           <div style={{
             fontFamily: 'DM Sans, sans-serif',
-            fontSize: '9px', fontWeight: 600,
-            letterSpacing: '2.5px', textTransform: 'uppercase',
+            fontSize: '9px', fontWeight: 600, letterSpacing: '2.5px', textTransform: 'uppercase',
             color: C.goldDeep, marginBottom: '10px',
           }}>Upgrade to Signature</div>
           <div style={{
-            fontFamily: "'Playfair Display', serif",
-            fontSize: '20px', fontWeight: 400,
-            color: C.dark, letterSpacing: '0.2px',
-            lineHeight: 1.3, marginBottom: '10px',
+            fontFamily: "'Playfair Display', serif", fontSize: '20px', fontWeight: 400,
+            color: C.dark, letterSpacing: '0.2px', lineHeight: 1.3, marginBottom: '10px',
           }}>Your business, uncompromised.</div>
-          <div style={{
-            fontFamily: 'DM Sans, sans-serif',
-            fontSize: '12px', color: C.muted,
-            lineHeight: 1.6, marginBottom: '18px',
-          }}>
+          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, lineHeight: 1.6, marginBottom: '18px' }}>
             Expenses, Tax &amp; TDS, Team, Referrals, WhatsApp Broadcast, and Analytics — all unlocked.
           </div>
           <a href="/vendor/dashboard?intent=mobile" style={{
-            display: 'inline-block',
-            background: C.gold, color: C.ivory,
-            textDecoration: 'none',
-            padding: '10px 18px', borderRadius: '10px',
-            fontFamily: 'DM Sans, sans-serif',
-            fontSize: '11px', fontWeight: 600,
+            display: 'inline-block', background: C.gold, color: C.ivory,
+            textDecoration: 'none', padding: '10px 18px', borderRadius: '10px',
+            fontFamily: 'DM Sans, sans-serif', fontSize: '11px', fontWeight: 600,
             letterSpacing: '1.8px', textTransform: 'uppercase',
-          }}>
-            View Plans
-          </a>
+          }}>View Plans</a>
+        </div>
+      )}
+
+      {/* Locked upgrade modal */}
+      {lockedModal && (
+        <div
+          onClick={() => setLockedModal(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(26,20,16,0.62)', zIndex: 200,
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: '480px',
+              background: C.ivory,
+              borderTopLeftRadius: '24px', borderTopRightRadius: '24px',
+              padding: '28px 22px calc(env(safe-area-inset-bottom) + 22px)',
+              boxShadow: '0 -8px 40px rgba(26,20,16,0.24)',
+            }}
+          >
+            <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: C.border, margin: '0 auto 18px' }} />
+            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+              <div style={{
+                width: '54px', height: '54px', borderRadius: '16px',
+                background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                marginBottom: '12px',
+              }}>
+                {lockedModal.icon && <lockedModal.icon size={20} color={C.gold} />}
+              </div>
+              <div style={{ fontSize: '9px', fontWeight: 600, letterSpacing: '2.5px', textTransform: 'uppercase', color: C.goldDeep, marginBottom: '4px' }}>
+                {lockedModal.minTier === 'prestige' ? 'Prestige' : 'Signature'} Tool
+              </div>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: C.dark, marginBottom: '10px' }}>{lockedModal.label}</div>
+              <div style={{ fontSize: '13px', color: C.muted, lineHeight: 1.6, maxWidth: '320px', margin: '0 auto' }}>{lockedModal.desc}</div>
+            </div>
+            <a href="/vendor/dashboard?intent=mobile" style={{
+              display: 'block', textAlign: 'center',
+              background: C.gold, color: C.ivory, textDecoration: 'none',
+              padding: '14px', borderRadius: '12px',
+              fontFamily: 'DM Sans, sans-serif', fontSize: '11px', fontWeight: 600,
+              letterSpacing: '1.8px', textTransform: 'uppercase',
+            }}>View Plans</a>
+          </div>
         </div>
       )}
     </div>
@@ -2424,8 +2602,7 @@ function BottomNav({ active, pending, onChange }: { active: Tab; pending: number
     { id: 'Home',      label: 'Home',      icon: Grid },
     { id: 'Inquiries', label: 'Inquiries', icon: Mail },
     { id: 'Calendar',  label: 'Calendar',  icon: Calendar },
-    { id: 'Clients',   label: 'Clients',   icon: Users },
-    { id: 'More',      label: 'More',      icon: MoreHorizontal },
+    { id: 'Tools',     label: 'Tools',     icon: Tool },
   ];
 
   return (
@@ -5754,5 +5931,224 @@ function FormLabel({ children }: { children: React.ReactNode }) {
       letterSpacing: '2px', textTransform: 'uppercase',
       color: C.muted, marginBottom: '6px',
     }}>{children}</div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PROFILE SCREEN — full-screen overlay opened by tapping the avatar
+// Replaces the old More tab. Contains: identity, subscription, key actions,
+// beta mocks for Dream Ai / Power Mode, sign out.
+// ══════════════════════════════════════════════════════════════════════════
+
+function ProfileScreen({
+  session, tier, vendorData, aiStatus,
+  onClose, onToast,
+}: {
+  session: VendorSession;
+  tier: Tier;
+  vendorData: any;
+  aiStatus: any;
+  onClose: () => void;
+  onToast: (msg: string) => void;
+}) {
+  const tierLabel = tier === 'prestige' ? 'Prestige' : tier === 'signature' ? 'Signature' : 'Essential';
+  const tierPrice = tier === 'prestige' ? '₹3,999/mo' : tier === 'signature' ? '₹1,999/mo' : '₹499/mo';
+  const name = session.vendorName || 'Vendor';
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || 'V';
+
+  const handleLogout = () => {
+    if (!confirm('Sign out?')) return;
+    localStorage.removeItem('vendor_web_session');
+    window.location.href = '/vendor/mobile/login';
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0,
+      background: C.cream,
+      zIndex: 250,
+      overflowY: 'auto',
+      maxWidth: '480px', margin: '0 auto',
+      paddingBottom: 'calc(40px + env(safe-area-inset-bottom))',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: 'calc(env(safe-area-inset-top) + 14px) 18px 12px',
+        background: C.cream,
+        borderBottom: `1px solid ${C.borderSoft}`,
+        position: 'sticky', top: 0, zIndex: 2,
+        display: 'flex', alignItems: 'center', gap: '12px',
+      }}>
+        <button
+          onClick={onClose}
+          aria-label="Close profile"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px',
+            display: 'flex', alignItems: 'center',
+          }}
+        ><X size={20} color={C.dark} /></button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '10px', color: C.muted, letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 500 }}>Profile</div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '18px', color: C.dark, lineHeight: 1.15, letterSpacing: '0.2px' }}>Settings & Account</div>
+        </div>
+      </div>
+
+      <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* Identity card */}
+        <div style={{
+          background: C.ivory, borderRadius: '18px',
+          border: `1px solid ${C.goldBorder}`, padding: '22px 20px',
+          display: 'flex', alignItems: 'center', gap: '16px',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+            background: `linear-gradient(90deg, transparent 0%, ${C.gold} 50%, transparent 100%)`,
+          }} />
+          <div style={{
+            width: '64px', height: '64px', borderRadius: '50%',
+            background: tier === 'prestige' ? C.dark : tier === 'signature' ? C.goldSoft : C.pearl,
+            border: `2px solid ${tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldBorder : C.border}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+            fontFamily: "'Playfair Display', serif",
+            fontSize: '22px', fontWeight: 500,
+            color: tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldDeep : C.muted,
+          }}>{initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: C.dark, letterSpacing: '0.2px', lineHeight: 1.2 }}>{name}</div>
+            <div style={{ fontSize: '12px', color: C.muted, marginTop: '3px', fontStyle: 'italic' }}>
+              {(session.category || 'Vendor').replace(/-/g, ' ')}{session.city ? ` · ${session.city}` : ''}
+            </div>
+          </div>
+        </div>
+
+        {/* Subscription */}
+        <div style={{
+          background: C.ivory, borderRadius: '16px',
+          border: `1px solid ${C.border}`, padding: '18px 20px',
+        }}>
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif',
+            fontSize: '9px', fontWeight: 600,
+            letterSpacing: '2.5px', textTransform: 'uppercase',
+            color: C.goldDeep, marginBottom: '10px',
+          }}>Subscription</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '18px', color: C.dark }}>{tierLabel}</div>
+              <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{tierPrice}</div>
+            </div>
+            {session.trialEnd && (
+              <div style={{ background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: '50px', padding: '4px 10px' }}>
+                <span style={{ fontSize: '10px', color: C.goldDeep, fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>
+                  Trial ends {new Date(session.trialEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Actions list */}
+        <div style={{ background: C.ivory, borderRadius: '16px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          {[
+            { icon: SettingsIcon, label: 'Edit profile',          href: '/vendor/mobile/profile/edit' },
+            { icon: Briefcase,    label: 'Open business portal', href: '/vendor/dashboard?intent=mobile' },
+          ].map((item, idx, arr) => {
+            const I = item.icon;
+            return (
+              <a
+                key={idx}
+                href={item.href}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '14px',
+                  padding: '16px 18px',
+                  borderBottom: idx < arr.length - 1 ? `1px solid ${C.borderSoft}` : 'none',
+                  color: C.dark, textDecoration: 'none',
+                }}
+              >
+                <div style={{
+                  width: '32px', height: '32px', borderRadius: '8px',
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}><I size={14} color={C.goldDeep} /></div>
+                <span style={{ flex: 1, fontSize: '14px', fontWeight: 500 }}>{item.label}</span>
+                <ChevronRight size={14} color={C.light} />
+              </a>
+            );
+          })}
+        </div>
+
+        {/* Beta features (mock) */}
+        <div style={{
+          fontFamily: 'DM Sans, sans-serif',
+          fontSize: '9px', fontWeight: 600,
+          letterSpacing: '2.5px', textTransform: 'uppercase',
+          color: C.goldDeep, marginTop: '4px', paddingLeft: '4px',
+        }}>Beta Features</div>
+        <div style={{ background: C.ivory, borderRadius: '16px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          {[
+            { icon: Zap,          label: 'Dream Ai',   desc: 'WhatsApp AI assistant' },
+            { icon: TrendingDown, label: 'Power Mode', desc: 'Boost discoverability' },
+          ].map((item, idx, arr) => {
+            const I = item.icon;
+            return (
+              <button
+                key={idx}
+                onClick={() => onToast(`${item.label} — coming soon. We'll notify you when it's live.`)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '14px',
+                  padding: '16px 18px', width: '100%',
+                  borderBottom: idx < arr.length - 1 ? `1px solid ${C.borderSoft}` : 'none',
+                  color: C.dark, textDecoration: 'none',
+                  background: 'transparent', border: 'none', textAlign: 'left',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <div style={{
+                  width: '32px', height: '32px', borderRadius: '8px',
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}><I size={14} color={C.goldDeep} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {item.label}
+                    <span style={{
+                      background: C.dark, color: C.gold,
+                      fontSize: '8px', fontWeight: 700,
+                      letterSpacing: '1.2px', textTransform: 'uppercase',
+                      padding: '2px 6px', borderRadius: '3px',
+                    }}>Beta</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px', fontStyle: 'italic' }}>{item.desc}</div>
+                </div>
+                <ChevronRight size={14} color={C.light} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sign out */}
+        <button
+          onClick={handleLogout}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${C.redBorder}`,
+            borderRadius: '14px', padding: '14px',
+            color: C.red, fontWeight: 600, fontSize: '11px',
+            letterSpacing: '1.8px', textTransform: 'uppercase',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+            fontFamily: 'DM Sans, sans-serif', marginTop: '6px',
+          }}
+        ><LogOut size={14} /> Sign Out</button>
+
+        <div style={{ fontSize: '10px', color: C.light, textAlign: 'center', marginTop: '4px' }}>
+          thedreamwedding.in · v2.1
+        </div>
+      </div>
+    </div>
   );
 }

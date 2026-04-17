@@ -1482,6 +1482,20 @@ export default function VendorDashboard() {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('intent') === 'mobile') setMobileGateDismissed(true);
+    // Deep-link: ?tab=X switches the active tab so tiles like Deluxe Suite land on the right page
+    const tabParam = params.get('tab');
+    if (tabParam) {
+      // Map short aliases to real tab IDs
+      const aliases: Record<string, string> = {
+        'deluxe': 'ds-event-dashboard', 'deluxe-suite': 'ds-event-dashboard',
+        'referral': 'referral', 'referrals': 'referral',
+        'invoices': 'invoices', 'invoice': 'invoices',
+        'clients': 'clients', 'calendar': 'calendar',
+        'team': 'team', 'overview': 'overview',
+      };
+      const resolved = aliases[tabParam] || tabParam;
+      setActiveTab(resolved);
+    }
   }, []);
   if (isMobile && !mobileGateDismissed) {
     return (
