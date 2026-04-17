@@ -1297,15 +1297,15 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           { icon: Calendar,    label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: Users,       label: 'Add Client', onClick: () => onAddClient && onAddClient() },
           { icon: TrendingDown, label: 'Expense',   onClick: () => { onJumpToTab('Tools'); if (typeof window !== 'undefined') { localStorage.setItem('tdw_pwa_open_sub', 'expenses'); } } },
-          { icon: MessageCircle, label: 'Broadcast', onClick: () => { window.location.href = '/vendor/dashboard?intent=mobile'; } },
+          { icon: MessageCircle, label: 'Broadcast', onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
         ];
         const prestigeActions = [
-          { icon: CheckCircle,   label: 'Delegate',   onClick: () => { window.location.href = '/vendor/dashboard?intent=mobile'; } },
-          { icon: MessageCircle, label: 'Team Chat',  onClick: () => { window.location.href = '/vendor/dashboard?intent=mobile'; } },
+          { icon: CheckCircle,   label: 'Delegate',   onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
+          { icon: MessageCircle, label: 'Team Chat',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
           { icon: Send,          label: 'Reminder',   onClick: () => onOpenReminder && onOpenReminder() },
           { icon: Calendar,      label: 'Block Date', onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: FileText,      label: 'Invoice',    onClick: () => onOpenInvoice && onOpenInvoice() },
-          { icon: Award,         label: 'Approvals',  onClick: () => { window.location.href = '/vendor/dashboard?intent=mobile'; } },
+          { icon: Award,         label: 'Approvals',  onClick: () => { window.open('/vendor/dashboard?intent=mobile', '_blank'); } },
         ];
         const actions = tier === 'prestige' ? prestigeActions : tier === 'signature' ? signatureActions : essentialActions;
         const cols = actions.length === 4 ? 4 : 3;
@@ -2018,8 +2018,9 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
                   <button key={tool.id} onClick={() => setActiveSubTool(tool.sub!)} style={commonStyle}>{inner}</button>
                 );
               }
+              // External link (business portal) — open in browser, not the PWA
               return (
-                <a key={tool.id} href={tool.href} style={commonStyle}>{inner}</a>
+                <a key={tool.id} href={tool.href} target="_blank" rel="noreferrer" style={commonStyle}>{inner}</a>
               );
             })}
           </div>
@@ -2048,7 +2049,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
           <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, lineHeight: 1.6, marginBottom: '18px' }}>
             Expenses, Tax &amp; TDS, Team, Referrals, WhatsApp Broadcast, and Analytics — all unlocked.
           </div>
-          <a href="/vendor/dashboard?intent=mobile" style={{
+          <a href="/vendor/dashboard?intent=mobile" target="_blank" rel="noreferrer" style={{
             display: 'inline-block', background: C.gold, color: C.ivory,
             textDecoration: 'none', padding: '10px 18px', borderRadius: '10px',
             fontFamily: 'DM Sans, sans-serif', fontSize: '11px', fontWeight: 600,
@@ -2093,7 +2094,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
               <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: C.dark, marginBottom: '10px' }}>{lockedModal.label}</div>
               <div style={{ fontSize: '13px', color: C.muted, lineHeight: 1.6, maxWidth: '320px', margin: '0 auto' }}>{lockedModal.desc}</div>
             </div>
-            <a href="/vendor/dashboard?intent=mobile" style={{
+            <a href="/vendor/dashboard?intent=mobile" target="_blank" rel="noreferrer" style={{
               display: 'block', textAlign: 'center',
               background: C.gold, color: C.ivory, textDecoration: 'none',
               padding: '14px', borderRadius: '12px',
@@ -2335,7 +2336,7 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
         }}>
           The full {titles[sub].toLowerCase()} experience lives on the business portal.
         </div>
-        <a href="/vendor/dashboard?intent=mobile" style={{
+        <a href="/vendor/dashboard?intent=mobile" target="_blank" rel="noreferrer" style={{
           display: 'inline-block',
           background: C.goldSoft, color: C.goldDeep,
           border: `1px solid ${C.goldBorder}`,
@@ -3405,6 +3406,8 @@ function ToolsGrid({ tier }: { tier: Tier }) {
             {/* CTA */}
             <a
               href="/vendor/dashboard?intent=mobile"
+              target="_blank"
+              rel="noreferrer"
               style={{
                 display: 'block', textAlign: 'center',
                 background: C.gold, color: C.ivory,
@@ -4165,6 +4168,8 @@ function TeamActivityFeed({ vendorId }: { vendorId: string }) {
           </div>
           <a
             href="/vendor/dashboard?intent=mobile"
+            target="_blank"
+            rel="noreferrer"
             style={{
               display: 'block', textAlign: 'center',
               background: C.gold, color: C.ivory,
@@ -6052,14 +6057,15 @@ function ProfileScreen({
         {/* Actions list */}
         <div style={{ background: C.ivory, borderRadius: '16px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
           {[
-            { icon: SettingsIcon, label: 'Edit profile',          href: '/vendor/mobile/profile/edit' },
-            { icon: Briefcase,    label: 'Open business portal', href: '/vendor/dashboard?intent=mobile' },
+            { icon: SettingsIcon, label: 'Edit profile',          href: '/vendor/mobile/profile/edit',       external: false },
+            { icon: Briefcase,    label: 'Open business portal', href: '/vendor/dashboard?intent=mobile',    external: true },
           ].map((item, idx, arr) => {
             const I = item.icon;
             return (
               <a
                 key={idx}
                 href={item.href}
+                {...(item.external ? { target: '_blank', rel: 'noreferrer' } : {})}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '14px',
                   padding: '16px 18px',

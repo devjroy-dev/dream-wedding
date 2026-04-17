@@ -376,32 +376,11 @@ export default function VendorDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  // `hydrated` flips to true only after the first client render completes.
-  // This lets us safely read window.* values without causing SSR hydration
-  // mismatches (which would crash the whole dashboard into an error page).
-  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    // Runs once on client mount — safe to touch window here.
-    setHydrated(true);
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    // Read ?tab=X and map aliases to real tab IDs
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab');
-      if (tabParam) {
-        const aliases: Record<string, string> = {
-          'deluxe': 'ds-event-dashboard', 'deluxe-suite': 'ds-event-dashboard',
-          'referral': 'referral', 'referrals': 'referral',
-          'invoices': 'invoices', 'invoice': 'invoices',
-          'clients': 'clients', 'calendar': 'calendar',
-          'team': 'team', 'overview': 'overview',
-        };
-        setActiveTab(aliases[tabParam] || tabParam);
-      }
-    } catch { /* ignore */ }
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   const [toasts, setToasts] = useState<{id:number, msg:string, type:'success'|'error'|'info'}[]>([]);
@@ -1495,20 +1474,30 @@ export default function VendorDashboard() {
   // On narrow viewports we invite the vendor to the mobile PWA instead,
   // while preserving a "Continue anyway" escape hatch.
   //
-  // If the vendor arrived with ?intent=mobile in the URL (a deliberate click
-  // from the PWA Profile screen, or the landing page "Business Portal" button),
+  // BUT: If the vendor arrived with ?intent=mobile in the URL (a deliberate
+  // click from the PWA More tab, or the landing page "Business Portal" button),
   // skip the gate entirely — they explicitly asked for the desktop experience.
   const [mobileGateDismissed, setMobileGateDismissed] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('intent') === 'mobile') setMobileGateDismissed(true);
-    } catch { /* ignore */ }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('intent') === 'mobile') setMobileGateDismissed(true);
+    // Deep-link: ?tab=X switches the active tab so tiles like Deluxe Suite land on the right page
+    const tabParam = params.get('tab');
+    if (tabParam) {
+      // Map short aliases to real tab IDs
+      const aliases: Record<string, string> = {
+        'deluxe': 'ds-event-dashboard', 'deluxe-suite': 'ds-event-dashboard',
+        'referral': 'referral', 'referrals': 'referral',
+        'invoices': 'invoices', 'invoice': 'invoices',
+        'clients': 'clients', 'calendar': 'calendar',
+        'team': 'team', 'overview': 'overview',
+      };
+      const resolved = aliases[tabParam] || tabParam;
+      setActiveTab(resolved);
+    }
   }, []);
-  // Only show the gate once we're hydrated (client-side), so server and
-  // client produce identical first-paint HTML (no hydration mismatch).
-  if (hydrated && isMobile && !mobileGateDismissed) {
+  if (isMobile && !mobileGateDismissed) {
     return (
       <div style={{
         minHeight: '100dvh',
