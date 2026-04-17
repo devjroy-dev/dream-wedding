@@ -14,15 +14,34 @@ const API = 'https://dream-wedding-production-89ae.up.railway.app';
 type Screen = 'gate' | 'code' | 'request' | 'requested';
 type CodeTab = 'dreamer' | 'vendor';
 type VendorMode = 'code' | 'signin';
+type DreamerMode = 'signup' | 'login';
+type SignupStep = 1 | 2 | 3;
+type DreamerType = '' | 'couple' | 'family' | 'friend';
 
 export default function LoginScreen() {
   const router = useRouter();
   const [screen, setScreen] = useState<Screen>('gate');
   const [codeTab, setCodeTab] = useState<CodeTab>('dreamer');
   const [vendorMode, setVendorMode] = useState<VendorMode>('code');
+  const [dreamerMode, setDreamerMode] = useState<DreamerMode>('signup');
+  const [signupStep, setSignupStep] = useState<SignupStep>(1);
   const [code, setCode] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Dreamer signup state (mirrors PWA)
+  const [codeData, setCodeData] = useState<any>(null);
+  const [dName, setDName] = useState('');
+  const [dPhone, setDPhone] = useState('');
+  const [dEmail, setDEmail] = useState('');
+  const [dInstagram, setDInstagram] = useState('');
+  const [dPassword, setDPassword] = useState('');
+  const [dConfirmPassword, setDConfirmPassword] = useState('');
+  const [dreamerType, setDreamerType] = useState<DreamerType>('');
+
+  // Dreamer login state
+  const [loginId, setLoginId] = useState('');
+  const [loginPass, setLoginPass] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,38 +86,155 @@ export default function LoginScreen() {
     } catch (e) {}
   };
 
-  const clearForm = () => { setCode(''); setError(''); setUsername(''); setPassword(''); };
+  const clearForm = () => {
+    setCode(''); setError(''); setUsername(''); setPassword('');
+    setCodeData(null); setSignupStep(1);
+    setDName(''); setDPhone(''); setDEmail(''); setDInstagram('');
+    setDPassword(''); setDConfirmPassword(''); setDreamerType('');
+    setLoginId(''); setLoginPass('');
+  };
 
-  // ── Dreamer Code ─────────────────────────────────────────────────────────
+  // ── Dreamer Signup (3-step PWA parity) ─────────────────────────────────────
 
-  const handleDreamerCode = async () => {
-    if (!code.trim()) { setError('Please enter your invite code'); return; }
+  const handleDreamerValidateCode = async () => {
+    if (!code.trim()) { setError('Please enter your invite or referral code'); return; }
     try {
       setLoading(true); setError('');
-      const res = await fetch(`${API}/api/dreamer-codes/redeem`, {
+      const res = await fetch(`${API}/api/signup/validate-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code.trim().toUpperCase() }),
+        body: JSON.stringify({ code: code.trim() }),
       });
       const data = await res.json();
       if (data.success && data.data) {
-        await AsyncStorage.setItem('user_session', JSON.stringify({
-          userId: data.data.id, uid: data.data.id,
-          name: data.data.name || '', userType: 'couple',
-          couple_tier: data.data.couple_tier || 'free',
-          budget: data.data.budget || 0,
-          wedding_date: data.data.wedding_date || '',
-        }));
-        if (!data.data.wedding_date) {
-          router.replace('/user-type');
-        } else {
-          router.replace('/home');
-        }
+        setCodeData(data.data);
+        setSignupStep(2);
       } else {
         setError(data.error || 'Invalid or expired code.');
       }
     } catch (e) {
-      setError('Could not verify code. Please try again.');
+      setError('Network error. Please try again.');
+    } finally { setLoading(false); }
+  };
+
+  const handleDreamerGoToPassword = () => {
+    if (!dName.trim()) { setError('Name is required'); return; }
+    if (!dreamerType) { setError('Please select what describes you'); return; }
+    if (!dPhone || dPhone.length < 10) { setError('Valid 10-digit phone required'); return; }
+    if (!dEmail || !dEmail.includes('@')) { setError('Valid email required'); return; }
+    if (!dInstagram.trim()) { setError('Instagram handle required'); return; }
+    setError('');
+    setSignupStep(3);
+  };
+
+  const handleDreamerInstagramBlur = async () => {
+    const h = dInstagram.replace('@', '').trim();
+    if (h.length <= 2) return;
+    try {
+      const r = await fetch(`${API}/api/verify/check-instagram`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: h }),
+      });
+      const d = await r.json();
+      if (d.success && d.exists === false) setError('Instagram handle not found');
+    } catch {}
+  };
+
+  const handleDreamerCompleteSignup = async () => {
+    if (!dPassword || dPassword.length < 6) { setError('Password must be at least 6 characters'); return; }
+    if (dPassword !== dConfirmPassword) { setError('Passwords do not match'); return; }
+    try {
+      setLoading(true); setError('');
+      const res = await fetch(`${API}/api/signup/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: code.trim(),
+          name: dName.trim(),
+          phone: dPhone,
+          email: dEmail.trim(),
+          instagram: dInstagram.trim(),
+          password: dPassword,
+          code_type: codeData?.type,
+          code_id: codeData?.code_id,
+          tier: codeData?.tier,
+          vendor_id: codeData?.vendor_id,
+          referral_code: codeData?.referral_code,
+          dreamer_type: dreamerType,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        if (data.data.type === 'vendor') {
+          await AsyncStorage.setItem('vendor_session', JSON.stringify({
+            vendorId: data.data.id, vendorName: data.data.name,
+            category: data.data.category, city: data.data.city,
+            tier: data.data.tier, trialEnd: data.data.trial_end,
+            userType: 'vendor', onboarded: true,
+          }));
+          router.replace('/vendor-dashboard');
+        } else {
+          await AsyncStorage.setItem('user_session', JSON.stringify({
+            userId: data.data.id, uid: data.data.id,
+            name: data.data.name || dName, userType: 'couple',
+            couple_tier: data.data.couple_tier || 'free',
+            tier_label: data.data.tier_label || '',
+            tokens: data.data.tokens,
+            phone: dPhone, email: dEmail.trim(),
+            wedding_date: '', budget: 0,
+          }));
+          if (!data.data.wedding_date) router.replace('/user-type');
+          else router.replace('/home');
+        }
+      } else {
+        setError(data.error || 'Signup failed.');
+      }
+    } catch (e) {
+      setError('Network error. Please try again.');
+    } finally { setLoading(false); }
+  };
+
+  // ── Dreamer Login (returning user) ────────────────────────────────────────
+
+  const handleDreamerLogin = async () => {
+    if (!loginId.trim()) { setError('Enter your email or phone number'); return; }
+    if (!loginPass) { setError('Enter your password'); return; }
+    try {
+      setLoading(true); setError('');
+      const res = await fetch(`${API}/api/signup/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: loginId.trim(), password: loginPass }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        if (data.data.type === 'vendor') {
+          await AsyncStorage.setItem('vendor_session', JSON.stringify({
+            vendorId: data.data.id, vendorName: data.data.name,
+            category: data.data.category, city: data.data.city,
+            tier: data.data.tier, trialEnd: data.data.trial_end,
+            userType: 'vendor', onboarded: true,
+          }));
+          router.replace('/vendor-dashboard');
+        } else {
+          await AsyncStorage.setItem('user_session', JSON.stringify({
+            userId: data.data.id, uid: data.data.id,
+            name: data.data.name || '', userType: 'couple',
+            couple_tier: data.data.couple_tier || 'free',
+            tier_label: data.data.tier_label || '',
+            tokens: data.data.tokens,
+            wedding_date: data.data.wedding_date || '',
+            budget: data.data.budget || 0,
+          }));
+          if (!data.data.wedding_date) router.replace('/user-type');
+          else router.replace('/home');
+        }
+      } else {
+        setError(data.error || 'Invalid credentials.');
+      }
+    } catch (e) {
+      setError('Could not sign in. Please try again.');
     } finally { setLoading(false); }
   };
 
@@ -285,31 +421,227 @@ export default function LoginScreen() {
               {/* ── Dreamer code entry ── */}
               {codeTab === 'dreamer' && (
                 <>
-                  <Text style={s.codeLabel}>Invite Code</Text>
-                  <TextInput
-                    style={[s.codeInput, error && s.codeInputError]}
-                    placeholder="e.g. DREAM-XXXX"
-                    placeholderTextColor="#C4B8AC"
-                    value={code}
-                    onChangeText={(t) => { setCode(t.toUpperCase()); setError(''); }}
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    returnKeyType="go"
-                    onSubmitEditing={handleDreamerCode}
-                  />
-                  {error ? <Text style={s.errorText}>{error}</Text> : null}
-                  <TouchableOpacity
-                    style={[s.submitBtn, (!code.trim() || loading) && s.submitBtnDisabled]}
-                    onPress={handleDreamerCode}
-                    disabled={!code.trim() || loading}
-                  >
-                    {loading ? <ActivityIndicator color="#FAF6F0" /> : (
-                      <Text style={s.submitBtnText}>Enter</Text>
-                    )}
-                  </TouchableOpacity>
-                  <Text style={s.hintText}>
-                    This code was shared by The Dream Wedding team or a vendor you know.
-                  </Text>
+                  {/* Dreamer sub-tabs: Sign Up / Sign In */}
+                  <View style={s.vendorSubTabs}>
+                    <TouchableOpacity
+                      style={[s.vendorSubTab, dreamerMode === 'signup' && s.vendorSubTabActive]}
+                      onPress={() => { setDreamerMode('signup'); setSignupStep(1); clearForm(); }}
+                    >
+                      <Text style={[s.vendorSubTabText, dreamerMode === 'signup' && s.vendorSubTabTextActive]}>Sign Up</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.vendorSubTab, dreamerMode === 'login' && s.vendorSubTabActive]}
+                      onPress={() => { setDreamerMode('login'); clearForm(); }}
+                    >
+                      <Text style={[s.vendorSubTabText, dreamerMode === 'login' && s.vendorSubTabTextActive]}>Sign In</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* ── Sign Up: Step 1 — invite code ── */}
+                  {dreamerMode === 'signup' && signupStep === 1 && (
+                    <>
+                      <Text style={s.codeLabel}>Invite / Referral Code</Text>
+                      <TextInput
+                        style={[s.codeInput, error && s.codeInputError]}
+                        placeholder="e.g. ABKMNQ"
+                        placeholderTextColor="#C4B8AC"
+                        value={code}
+                        onChangeText={(t) => { setCode(t.toUpperCase()); setError(''); }}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        returnKeyType="go"
+                        onSubmitEditing={handleDreamerValidateCode}
+                      />
+                      {error ? <Text style={s.errorText}>{error}</Text> : null}
+                      <TouchableOpacity
+                        style={[s.submitBtn, (!code.trim() || loading) && s.submitBtnDisabled]}
+                        onPress={handleDreamerValidateCode}
+                        disabled={!code.trim() || loading}
+                      >
+                        {loading ? <ActivityIndicator color="#FAF6F0" /> : (
+                          <Text style={s.submitBtnText}>Continue</Text>
+                        )}
+                      </TouchableOpacity>
+                      <Text style={s.hintText}>
+                        This code was shared by The Dream Wedding team or a vendor you know.
+                      </Text>
+                    </>
+                  )}
+
+                  {/* ── Sign Up: Step 2 — profile fields ── */}
+                  {dreamerMode === 'signup' && signupStep === 2 && (
+                    <>
+                      <Text style={s.codeLabel}>Your Details</Text>
+                      <Text style={s.subLabel}>Tell us about yourself.</Text>
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="Full Name"
+                        placeholderTextColor="#C4B8AC"
+                        value={dName}
+                        onChangeText={(t) => { setDName(t); setError(''); }}
+                        autoCapitalize="words"
+                        returnKeyType="next"
+                      />
+
+                      <Text style={s.fieldHelper}>I am a...</Text>
+                      <View style={s.dreamerTypeRow}>
+                        {(['couple', 'family', 'friend'] as const).map(t => (
+                          <TouchableOpacity
+                            key={t}
+                            style={[s.dreamerTypeBtn, dreamerType === t && s.dreamerTypeBtnActive]}
+                            onPress={() => { setDreamerType(t); setError(''); }}
+                          >
+                            <Text style={[s.dreamerTypeText, dreamerType === t && s.dreamerTypeTextActive]}>
+                              {t.charAt(0).toUpperCase() + t.slice(1)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <View style={s.phoneRow}>
+                        <View style={s.phonePrefix}><Text style={s.phonePrefixText}>+91</Text></View>
+                        <TextInput
+                          style={[s.fieldInput, s.phoneInput]}
+                          placeholder="10-digit phone"
+                          placeholderTextColor="#C4B8AC"
+                          value={dPhone}
+                          onChangeText={(t) => { setDPhone(t.replace(/\D/g, '').slice(0, 10)); setError(''); }}
+                          keyboardType="phone-pad"
+                          returnKeyType="next"
+                        />
+                      </View>
+                      <Text style={s.fieldHelperItalic}>This will be your login ID</Text>
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="your@email.com"
+                        placeholderTextColor="#C4B8AC"
+                        value={dEmail}
+                        onChangeText={(t) => { setDEmail(t); setError(''); }}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="next"
+                      />
+                      <Text style={s.fieldHelperItalic}>Or use this to log in</Text>
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="@yourhandle"
+                        placeholderTextColor="#C4B8AC"
+                        value={dInstagram}
+                        onChangeText={(t) => { setDInstagram(t); setError(''); }}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        onBlur={handleDreamerInstagramBlur}
+                        returnKeyType="next"
+                      />
+
+                      {error ? <Text style={s.errorText}>{error}</Text> : null}
+
+                      <TouchableOpacity style={s.submitBtn} onPress={handleDreamerGoToPassword}>
+                        <Text style={s.submitBtnText}>Continue</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.backBtn} onPress={() => { setSignupStep(1); setError(''); }}>
+                        <Text style={s.backBtnText}>Back</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* ── Sign Up: Step 3 — password ── */}
+                  {dreamerMode === 'signup' && signupStep === 3 && (
+                    <>
+                      <Text style={s.codeLabel}>Create Password</Text>
+                      <Text style={s.subLabel}>
+                        Your email or phone will be your username.
+                      </Text>
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="Password (min 6 characters)"
+                        placeholderTextColor="#C4B8AC"
+                        value={dPassword}
+                        onChangeText={(t) => { setDPassword(t); setError(''); }}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="Confirm password"
+                        placeholderTextColor="#C4B8AC"
+                        value={dConfirmPassword}
+                        onChangeText={(t) => { setDConfirmPassword(t); setError(''); }}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="go"
+                        onSubmitEditing={handleDreamerCompleteSignup}
+                      />
+
+                      {error ? <Text style={s.errorText}>{error}</Text> : null}
+
+                      <TouchableOpacity
+                        style={[s.submitBtn, loading && s.submitBtnDisabled]}
+                        onPress={handleDreamerCompleteSignup}
+                        disabled={loading}
+                      >
+                        {loading ? <ActivityIndicator color="#FAF6F0" /> : (
+                          <Text style={s.submitBtnText}>Create Account</Text>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.backBtn} onPress={() => { setSignupStep(2); setError(''); }}>
+                        <Text style={s.backBtnText}>Back</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* ── Sign In: returning dreamer ── */}
+                  {dreamerMode === 'login' && (
+                    <>
+                      <Text style={s.codeLabel}>Sign In</Text>
+                      <Text style={s.subLabel}>Enter your email or phone and password.</Text>
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="your@email.com or 9876543210"
+                        placeholderTextColor="#C4B8AC"
+                        value={loginId}
+                        onChangeText={(t) => { setLoginId(t); setError(''); }}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="next"
+                      />
+
+                      <TextInput
+                        style={s.fieldInput}
+                        placeholder="Password"
+                        placeholderTextColor="#C4B8AC"
+                        value={loginPass}
+                        onChangeText={(t) => { setLoginPass(t); setError(''); }}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="go"
+                        onSubmitEditing={handleDreamerLogin}
+                      />
+
+                      {error ? <Text style={s.errorText}>{error}</Text> : null}
+
+                      <TouchableOpacity
+                        style={[s.submitBtn, (!loginId.trim() || !loginPass || loading) && s.submitBtnDisabled]}
+                        onPress={handleDreamerLogin}
+                        disabled={!loginId.trim() || !loginPass || loading}
+                      >
+                        {loading ? <ActivityIndicator color="#FAF6F0" /> : (
+                          <Text style={s.submitBtnText}>Sign In</Text>
+                        )}
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </>
               )}
 
@@ -337,7 +669,7 @@ export default function LoginScreen() {
                       <Text style={s.codeLabel}>Vendor Code</Text>
                       <TextInput
                         style={[s.codeInput, error && s.codeInputError]}
-                        placeholder="e.g. SIG-A3KF9M"
+                        placeholder="e.g. ABKMNQ"
                         placeholderTextColor="#C4B8AC"
                         value={code}
                         onChangeText={(t) => { setCode(t.toUpperCase()); setError(''); }}
@@ -659,4 +991,65 @@ const s = StyleSheet.create({
     paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#FFF8EC',
   },
   requestedBtnText: { fontSize: 13, color: '#C9A84C', fontFamily: 'DMSans_400Regular' },
+
+  // ── Dreamer signup additions ────────────────────────────
+  subLabel: {
+    fontSize: 12, color: '#8C7B6E', fontFamily: 'DMSans_300Light',
+    marginTop: 4, marginBottom: 14, lineHeight: 18,
+  },
+  fieldInput: {
+    width: '100%', backgroundColor: '#FAFAFA',
+    borderWidth: 1.5, borderColor: '#E8DDD4', borderRadius: 8,
+    paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 14, color: '#0F1117', fontFamily: 'DMSans_400Regular',
+    marginBottom: 8,
+  },
+  fieldHelper: {
+    fontSize: 11, color: '#8C7B6E', fontFamily: 'DMSans_400Regular',
+    letterSpacing: 0.6, textTransform: 'uppercase',
+    marginTop: 6, marginBottom: 8,
+  },
+  fieldHelperItalic: {
+    fontSize: 10, color: '#B8ADA4', fontFamily: 'DMSans_300Light',
+    fontStyle: 'italic', marginTop: 0, marginBottom: 8,
+  },
+  dreamerTypeRow: {
+    flexDirection: 'row', gap: 8, marginBottom: 14,
+  },
+  dreamerTypeBtn: {
+    flex: 1, paddingVertical: 12, paddingHorizontal: 8,
+    borderRadius: 8, borderWidth: 1.5, borderColor: '#E8DDD4',
+    backgroundColor: '#FAFAFA', alignItems: 'center',
+  },
+  dreamerTypeBtnActive: {
+    borderColor: '#C9A84C', backgroundColor: 'rgba(201,168,76,0.08)',
+  },
+  dreamerTypeText: {
+    fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_400Regular',
+  },
+  dreamerTypeTextActive: {
+    color: '#C9A84C', fontFamily: 'DMSans_500Medium',
+  },
+  phoneRow: {
+    flexDirection: 'row', gap: 8, alignItems: 'flex-start',
+  },
+  phonePrefix: {
+    paddingHorizontal: 14, paddingVertical: 14,
+    backgroundColor: '#FAFAFA', borderWidth: 1.5, borderColor: '#E8DDD4',
+    borderRadius: 8,
+  },
+  phonePrefixText: {
+    fontSize: 14, color: '#8C7B6E', fontFamily: 'DMSans_400Regular',
+  },
+  phoneInput: {
+    flex: 1, marginBottom: 0,
+  },
+  backBtn: {
+    width: '100%', paddingVertical: 12, marginTop: 8,
+    borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB',
+    alignItems: 'center', backgroundColor: 'transparent',
+  },
+  backBtnText: {
+    fontSize: 13, color: '#8C7B6E', fontFamily: 'DMSans_400Regular',
+  },
 });
