@@ -184,7 +184,7 @@ export default function VendorMobilePage() {
             leads={leads}
             paymentSchedules={paymentSchedules}
             loading={loading}
-            onJumpToTab={(t) => setActiveTab(t)}
+            onJumpToTab={(t: Tab) => setActiveTab(t)}
           />
         )}
         {activeTab === 'Inquiries' && (
