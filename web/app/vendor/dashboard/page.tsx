@@ -118,6 +118,17 @@ function hasTabAccess(tier: string, tabId: string): boolean {
   return (TIER_LEVEL[tier] || 1) >= (TIER_LEVEL[required] || 1);
 }
 
+// Profile-phase gating with grace period:
+// Track A incomplete → all tools open (vendor just signed up, give them time)
+// Track B incomplete after grace deadline → read-only mode (can view, can't create)
+// Grace deadline: trial_end_date from vendor_subscriptions
+// During founding phase (before Aug 1 2026): all tools open regardless
+function hasProfileAccess(profilePhase: number, tabId: string): boolean {
+  // During founding phase, no restrictions — all tools open
+  // Grace period enforcement will be activated post-launch
+  return true;
+}
+
 // ── Deluxe Suite Preview Modal (for non-VV vendors) ─────────────
 function DeluxeSuiteModal({ tab, onClose }: { tab: any; onClose: () => void }) {
   if (!tab) return null;
@@ -183,7 +194,7 @@ function DeluxeSuiteModal({ tab, onClose }: { tab: any; onClose: () => void }) {
           fontFamily: 'Inter, sans-serif',
           fontSize: '14px',
           fontWeight: 300,
-          color: '#8C7B6E',
+          color: 'var(--text-muted)',
           lineHeight: 1.8,
           marginBottom: '32px',
         }}>
@@ -211,7 +222,7 @@ function DeluxeSuiteModal({ tab, onClose }: { tab: any; onClose: () => void }) {
           <button onClick={onClose} style={{
             flex: 1,
             background: 'rgba(255,255,255,0.06)',
-            color: '#8C7B6E',
+            color: 'var(--text-muted)',
             fontFamily: 'Inter, sans-serif',
             fontSize: '12px',
             fontWeight: 500,
@@ -363,6 +374,15 @@ function SectionHeader({ title, action }: { title: string; action?: React.ReactN
 export default function VendorDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [toasts, setToasts] = useState<{id:number, msg:string, type:'success'|'error'|'info'}[]>([]);
   const toast = {
     success: (msg:string) => { const id = Date.now(); setToasts(p => [...p, {id, msg, type:'success'}]); setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500); },
@@ -413,7 +433,65 @@ export default function VendorDashboard() {
   const [referralRewards, setReferralRewards] = useState<any>(null);
   const [vendorData, setVendorData] = useState<any>(null);
   const [vendorTier, setVendorTier] = useState<'essential' | 'signature' | 'prestige'>('essential');
+  const [profilePhase, setProfilePhase] = useState(0);
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiRequestSent, setAiRequestSent] = useState(false);
+  const [aiStatus, setAiStatus] = useState<any>(null);
+  const [buyingTokens, setBuyingTokens] = useState('');
+
+  // Load AI status when vendor loaded
+  useEffect(() => {
+    if (!vendorData?.id || !vendorData?.ai_enabled) return;
+    fetch(API + '/ai-tokens/status/' + vendorData.id)
+      .then(r => r.json()).then(d => { if (d.success) setAiStatus(d.data); })
+      .catch(() => {});
+  }, [vendorData?.id, vendorData?.ai_enabled]);
+
+  const buyAiTokens = async (pack: string) => {
+    if (!vendorData?.id) return;
+    setBuyingTokens(pack);
+    try {
+      const r = await fetch(API + '/ai-tokens/create-order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor_id: vendorData.id, pack }),
+      });
+      const d = await r.json();
+      if (!d.success) { alert(d.error || 'Could not create order'); setBuyingTokens(''); return; }
+      // @ts-ignore
+      if (typeof window.Razorpay === 'undefined') {
+        alert('Razorpay not loaded. Please refresh.'); setBuyingTokens(''); return;
+      }
+      // @ts-ignore
+      const rzp = new window.Razorpay({
+        key: d.data.key_id, amount: d.data.amount, currency: d.data.currency,
+        order_id: d.data.order_id, name: 'The Dream Wedding',
+        description: d.data.tokens + ' Dream Ai tokens — ' + d.data.label,
+        theme: { color: '#C9A84C' },
+        handler: async (resp: any) => {
+          const vr = await fetch(API + '/ai-tokens/verify-payment', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vendor_id: vendorData.id, pack, ...resp }),
+          });
+          const vd = await vr.json();
+          if (vd.success) {
+            toast.success('Added ' + vd.data.tokens_added + ' tokens. Balance: ' + vd.data.new_balance);
+            fetch(API + '/ai-tokens/status/' + vendorData.id)
+              .then(r => r.json()).then(d => { if (d.success) setAiStatus(d.data); });
+          } else alert('Payment verification failed: ' + (vd.error || ''));
+          setBuyingTokens('');
+        },
+        modal: { ondismiss: () => setBuyingTokens('') },
+      });
+      rzp.open();
+    } catch { alert('Network error'); setBuyingTokens(''); }
+  };
+  const [hiddenTools, setHiddenTools] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('tdw_hidden_tools') || '[]'); } catch { return []; } });
+  const toggleTool = (id: string) => { setHiddenTools(prev => { const next = prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]; localStorage.setItem('tdw_hidden_tools', JSON.stringify(next)); return next; }); }; // 0=incomplete, 1=phase1 done (essential unlocked), 2=phase2 done (signature unlocked), 3=phase3 done (live)
+  const [profileCompletion, setProfileCompletion] = useState(0);
+  const [showProfileGate, setShowProfileGate] = useState(false);
   const [foundingBadge, setFoundingBadge] = useState(false);
+  const [teamRole, setTeamRole] = useState<'owner' | 'manager' | 'staff'>('owner');
+  const [teamMemberName, setTeamMemberName] = useState<string | null>(null);
   const [packages, setPackages] = useState<any[]>([
     { id: '1', name: 'Silver', price: 80000, inclusions: ['1 day coverage', '300 edited photos', 'Online gallery'] },
     { id: '2', name: 'Gold', price: 150000, inclusions: ['2 day coverage', '600 edited photos', 'Highlight reel', 'Online gallery'] },
@@ -520,6 +598,10 @@ export default function VendorDashboard() {
   const [showDateInput, setShowDateInput] = useState(false);
   const [showTDSForm, setShowTDSForm] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
+  const [featuredPhotos, setFeaturedPhotos] = useState<string[]>([]);
+  const [featuredStatus, setFeaturedStatus] = useState<Record<string, string>>({});
+  const [uploadingWebPhoto, setUploadingWebPhoto] = useState(false);
 
   // Invoice form
   const [invClient, setInvClient] = useState('Aisha & Kabir Malhotra');
@@ -787,6 +869,41 @@ export default function VendorDashboard() {
         setBankAccount(vendor.bank_account || '');
         setBankIfsc(vendor.bank_ifsc || '');
         setBankHolder(vendor.bank_holder || '');
+        // ── Track A / Track B Profile System ──
+        const photos = vendor.portfolio_images?.length || 0;
+        const featured = vendor.featured_photos?.length || 0;
+        
+        // Track A: Business Setup (5 fields — 3 pre-filled from signup)
+        const trackAChecks = [
+          !!vendor.name,       // Business name
+          !!vendor.category,   // Category
+          !!vendor.city,       // City
+          !!vendor.phone,      // Phone (from signup)
+          !!vendor.email,      // Email (from signup)
+        ];
+        const trackADone = trackAChecks.every(Boolean);
+
+        // Track B: Discovery Profile (6 requirements)
+        const hasPricing = !!vendor.starting_price || vendor.price_on_request === true;
+        const hasIG = !!vendor.instagram_url || vendor.no_instagram === true;
+        const trackBChecks = [
+          photos >= 8,                                    // 8 portfolio photos
+          featured >= 3,                                  // 3 featured photos
+          !!vendor.about && vendor.about.length >= 100,   // Bio ≥100 chars
+          (vendor.vibe_tags?.length || 0) >= 3,           // 3 vibe tags
+          hasPricing,                                     // Price or "Price on request"
+          hasIG,                                          // Instagram or "No Instagram"
+        ];
+        const trackBDone = trackBChecks.every(Boolean);
+
+        // Phase mapping (backward compat): 0=nothing, 1=trackA done, 3=both done
+        const phase = trackBDone ? 3 : trackADone ? 1 : 0;
+        setProfilePhase(phase);
+
+        // Completion percentage (all 11 checks combined)
+        const allChecks = [...trackAChecks, ...trackBChecks];
+        setProfileCompletion(Math.round(allChecks.filter(Boolean).length / allChecks.length * 100));
+
         loadBookings(vendor.id);
         loadInvoices(vendor.id);
         loadClients(vendor.id);
@@ -798,6 +915,10 @@ export default function VendorDashboard() {
           if (webSession.tier && ['essential', 'signature', 'prestige'].includes(webSession.tier)) {
             setVendorTier(webSession.tier as any);
           }
+          if (webSession.teamRole && ['owner', 'manager', 'staff'].includes(webSession.teamRole)) {
+            setTeamRole(webSession.teamRole as any);
+          }
+          if (webSession.teamMemberName) setTeamMemberName(webSession.teamMemberName);
         } catch(e) {}
         if (!isDemo) {
           try {
@@ -1350,14 +1471,39 @@ export default function VendorDashboard() {
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--content-bg)' }}>
+    <div data-portal="vendor" style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--content-bg)' }}>
+
+      {/* ── Mobile Header Bar ── */}
+      {isMobile && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 60,
+          height: '56px',
+          backgroundColor: 'var(--sidebar-bg)',
+          borderBottom: '1px solid var(--sidebar-border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px',
+        }}>
+          <button onClick={() => setMobileMenuOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', display: 'flex', alignItems: 'center' }}>
+            <List size={20} color="var(--cream)" />
+          </button>
+          <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, color: 'var(--cream)', letterSpacing: '2px', textTransform: 'uppercase' }}>
+            THE DREAM WEDDING
+          </div>
+          <div style={{ width: '36px' }} />
+        </div>
+      )}
+
+      {/* ── Mobile Overlay ── */}
+      {isMobile && mobileMenuOpen && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 90 }} onClick={() => setMobileMenuOpen(false)} />
+      )}
 
       {/* ── Sidebar ── */}
       <aside style={{
-        width: sidebarCollapsed ? '64px' : '260px',
+        width: isMobile ? '280px' : (sidebarCollapsed ? '64px' : '260px'),
         minHeight: '100vh',
         backgroundColor: 'var(--sidebar-bg)',
-        transition: 'width 0.2s ease',
+        transition: isMobile ? 'transform 0.25s ease' : 'width 0.2s ease',
         display: 'flex',
         flexDirection: 'column',
         position: 'fixed',
@@ -1365,7 +1511,8 @@ export default function VendorDashboard() {
         left: 0,
         bottom: 0,
         overflowY: 'auto',
-        zIndex: 50,
+        zIndex: isMobile ? 100 : 50,
+        transform: isMobile ? (mobileMenuOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
       }}>
         {/* Logo */}
         <div style={{
@@ -1375,16 +1522,16 @@ export default function VendorDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             {!sidebarCollapsed && (
               <div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--cream)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 600, color: '#F1F5F9', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>
                   THE DREAM WEDDING
                 </div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 300, color: 'var(--sidebar-text)', letterSpacing: '0.3px' }}>
-                  {vendorData?.name || 'Vendor Dashboard'}
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 400, color: 'var(--sidebar-text)', letterSpacing: '0.3px' }}>
+                  {teamMemberName ? `${teamMemberName} · ${teamRole.charAt(0).toUpperCase() + teamRole.slice(1)}` : (vendorData?.name || 'Business Portal')}
                 </div>
               </div>
             )}
-            <button onClick={() => setSidebarCollapsed((p: boolean) => !p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sidebar-text)', padding: '4px', display: 'flex', alignItems: 'center', flexShrink: 0, fontSize: '16px' }}>
-              {sidebarCollapsed ? '→' : '←'}
+            <button onClick={() => isMobile ? setMobileMenuOpen(false) : setSidebarCollapsed((p: boolean) => !p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sidebar-text)', padding: '4px', display: 'flex', alignItems: 'center', flexShrink: 0, fontSize: '16px' }}>
+              {isMobile ? <X size={18} color="var(--cream)" /> : (sidebarCollapsed ? '→' : '←')}
             </button>
           </div>
         </div>
@@ -1397,8 +1544,8 @@ export default function VendorDashboard() {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              background: isLive ? 'rgba(76,175,80,0.12)' : 'rgba(255,255,255,0.05)',
-              border: `1px solid ${isLive ? 'rgba(76,175,80,0.3)' : 'rgba(255,255,255,0.1)'}`,
+              background: isLive ? 'rgba(22,163,74,0.12)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${isLive ? 'rgba(22,163,74,0.3)' : 'rgba(255,255,255,0.08)'}`,
               borderRadius: '50px',
               padding: '8px 16px',
               cursor: 'pointer',
@@ -1408,13 +1555,13 @@ export default function VendorDashboard() {
             <div style={{
               width: '7px', height: '7px',
               borderRadius: '50%',
-              backgroundColor: isLive ? '#4CAF50' : 'var(--grey)',
+              backgroundColor: isLive ? '#16A34A' : 'var(--sidebar-text)',
             }} />
             <span style={{
               fontFamily: 'Inter, sans-serif',
               fontSize: '12px',
               fontWeight: 500,
-              color: isLive ? '#4CAF50' : 'var(--grey)',
+              color: isLive ? '#16A34A' : 'var(--sidebar-text)',
             }}>
               {isLive ? 'Live on Platform' : 'Paused'}
             </span>
@@ -1448,45 +1595,52 @@ export default function VendorDashboard() {
               { id: 'equipment', label: 'Equipment Checklist', icon: Tool },
               { id: 'packages', label: 'Package Builder', icon: Package },
             ];
-            const signatureSections = [
-              { title: 'Client Management', tabs: [
-                { id: 'overview', label: 'Overview', icon: Grid },
+            // ── Universal workflow-based sidebar (same for all tiers) ──
+            // Tier locking shows as gold lock icon on tools above vendor's tier.
+            // Grouping is by workflow, not by tier.
+            const workflowSections = [
+              { title: 'Overview', tabs: [
+                { id: 'overview', label: 'Dashboard', icon: Grid },
+              ]},
+              { title: 'Clients', tabs: [
                 { id: 'clients', label: 'Clients', icon: Users },
                 { id: 'inquiries', label: 'Inquiries', icon: MessageCircle },
-                { id: 'portal', label: 'Client Portal', icon: Share2 },
                 { id: 'timeline', label: 'Client Timeline', icon: Activity },
+                { id: 'portal', label: 'Client Portal', icon: Share2 },
                 { id: 'templates', label: 'Message Templates', icon: MessageCircle },
               ]},
-              { title: 'Calendar & Planning', tabs: [
+              { title: 'Calendar', tabs: [
                 { id: 'calendar', label: 'Calendar', icon: Calendar },
                 { id: 'availability', label: 'Availability', icon: Calendar },
                 { id: 'runsheet', label: 'Day-of Runsheet', icon: List },
                 { id: 'checklist', label: 'Pre-Wedding Checklist', icon: CheckSquare },
-                { id: 'equipment', label: 'Equipment Checklist', icon: Tool },
               ]},
               { title: 'Finance', tabs: [
                 { id: 'invoices', label: 'Invoices', icon: FileText },
                 { id: 'payments', label: 'Payment Schedules', icon: CreditCard },
-                { id: 'outstanding', label: 'Outstanding Payments', icon: DollarSign },
-                { id: 'expenses', label: 'Expense Tracker', icon: MinusCircle },
-                { id: 'profit', label: 'Profit per Booking', icon: Target },
+                { id: 'outstanding', label: 'Outstanding', icon: DollarSign },
                 { id: 'cash', label: 'Cash Payments', icon: DollarSign },
+                { id: 'paymentshield', label: 'Payment Shield', icon: Shield },
+                { id: 'expenses', label: 'Expenses', icon: MinusCircle },
+                { id: 'profit', label: 'Profit per Booking', icon: Target },
                 { id: 'tax', label: 'Tax & Finance', icon: Percent },
                 { id: 'advancetax', label: 'Advance Tax', icon: BookOpen },
                 { id: 'forecast', label: 'Revenue Forecast', icon: TrendingUp },
-                { id: 'paymentshield', label: 'Payment Shield', icon: Shield },
               ]},
-              { title: 'Growth', tabs: [
-                { id: 'referral', label: 'Referral Tracker', icon: Gift },
-                { id: 'whatsapp', label: 'WhatsApp Broadcast', icon: Send },
-                { id: 'analytics', label: 'Analytics', icon: BarChart2 },
-                { id: 'csvimport', label: 'Import / Export', icon: Upload },
-              ]},
-              { title: 'Team & Packages', tabs: [
-                { id: 'team', label: 'My Team', icon: Users },
+              { title: 'Delivery', tabs: [
+                { id: 'contracts', label: 'Contracts', icon: FileText },
                 { id: 'packages', label: 'Package Builder', icon: Package },
                 { id: 'delivery', label: 'Delivery Tracker', icon: Truck },
-                { id: 'contracts', label: 'Contracts', icon: FileText },
+                { id: 'equipment', label: 'Equipment Checklist', icon: Tool },
+              ]},
+              { title: 'Growth', tabs: [
+                { id: 'analytics', label: 'Analytics', icon: BarChart2 },
+                { id: 'referral', label: 'Referral Tracker', icon: Gift },
+                { id: 'whatsapp', label: 'WhatsApp Broadcast', icon: Send },
+                { id: 'csvimport', label: 'Import / Export', icon: Upload },
+              ]},
+              { title: 'Team', tabs: [
+                { id: 'team', label: 'My Team', icon: Users },
               ]},
             ];
             const dsSection = { title: 'Deluxe Suite', tabs: DELUXE_SUITE_TABS.map(t => ({ id: t.id, label: t.label, icon: t.icon })) };
@@ -1496,7 +1650,7 @@ export default function VendorDashboard() {
             // Build section rendering helper
             const renderSection = (section: any, opts?: { locked?: boolean; gold?: boolean; collapsed?: boolean }) => {
               const isOpen = openSections[section.title] === true;
-              const filteredTabs = section.tabs.filter((tab: any) => !sidebarSearch || tab.label.toLowerCase().includes(sidebarSearch.toLowerCase()));
+              const filteredTabs = section.tabs.filter((tab: any) => (!sidebarSearch || tab.label.toLowerCase().includes(sidebarSearch.toLowerCase())) && !hiddenTools.includes(tab.id));
               if (sidebarSearch && filteredTabs.length === 0) return null;
               return (
                 <div key={section.title} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -1510,7 +1664,7 @@ export default function VendorDashboard() {
                       letterSpacing: '1.5px', textTransform: 'uppercase', flex: 1,
                       color: opts?.gold ? 'rgba(201,168,76,0.7)' : opts?.locked ? 'rgba(140,123,110,0.4)' : 'rgba(140,123,110,0.6)',
                     }}>{section.title}</span>
-                    {opts?.locked && !sidebarCollapsed && <Lock size={9} color={opts?.gold ? '#B8963A' : '#8C7B6E'} />}
+                    {opts?.locked && !sidebarCollapsed && <Lock size={9} color='var(--sidebar-text)' />}
                     {!sidebarCollapsed && <ChevronDown size={10} color="rgba(140,123,110,0.3)" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />}
                   </button>
                   {isOpen && filteredTabs.map((tab: any) => {
@@ -1520,10 +1674,12 @@ export default function VendorDashboard() {
                     return (
                       <button key={tab.id} onClick={() => {
                         if (opts?.locked && opts.gold) setDeluxeSuiteTab(DELUXE_SUITE_TABS.find(t => t.id === tab.id) || tab);
-                        else if (tabLocked) {
+                        else if (!hasProfileAccess(profilePhase, tab.id)) {
+                          toast.error('This tool requires a higher tier. Upgrade to access it.');
+                        } else if (tabLocked) {
                           const req = TAB_TIER[tab.id] || 'signature';
                           setDeluxeSuiteTab({ ...tab, desc: `This feature is available on the ${req.charAt(0).toUpperCase() + req.slice(1)} plan. Upgrade to unlock.` });
-                        } else setActiveTab(tab.id);
+                        } else { setActiveTab(tab.id); if (isMobile) setMobileMenuOpen(false); }
                       }} style={{
                         display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
                         padding: '9px 24px 9px 36px', background: isActive ? 'rgba(201,168,76,0.1)' : 'transparent',
@@ -1537,8 +1693,8 @@ export default function VendorDashboard() {
                           fontWeight: isActive ? 500 : 300, flex: 1,
                           color: isActive ? (opts?.gold ? '#C9A84C' : 'var(--gold)') : opts?.gold ? 'rgba(201,168,76,0.5)' : 'var(--grey)',
                         }}>{!sidebarCollapsed && tab.label}</span>
-                        {tabLocked && !sidebarCollapsed && <Lock size={9} color={opts?.gold ? '#B8963A' : '#8C7B6E'} />}
-                        {!tabLocked && opts?.gold && !sidebarCollapsed && <Award size={9} color={isActive ? '#C9A84C' : 'rgba(201,168,76,0.35)'} />}
+                        {tabLocked && !sidebarCollapsed && <Lock size={9} color='var(--sidebar-text)' />}
+                        {!tabLocked && opts?.gold && !sidebarCollapsed && <Award size={9} color={isActive ? '#FFFFFF' : 'var(--sidebar-text)'} />}
                       </button>
                     );
                   })}
@@ -1546,27 +1702,36 @@ export default function VendorDashboard() {
               );
             };
 
-            // ESSENTIAL TIER SIDEBAR
-            if (vendorTier === 'essential') return (<>
-              {renderSection({ title: 'Essential Tools', tabs: essentialTabs })}
-              {renderSection({ title: 'Signature', tabs: [...signatureSections.flatMap(s => s.tabs.filter(t => !essentialTabs.find(e => e.id === t.id)))] }, { locked: true })}
-              {renderSection(dsSection, { locked: true, gold: true })}
-              {renderSection(accountSection)}
-              {comingSoonSection.tabs.length > 0 && renderSection(comingSoonSection, { locked: true })}
-            </>);
-
-            // SIGNATURE TIER SIDEBAR
-            if (vendorTier === 'signature') return (<>
-              {signatureSections.map(s => renderSection(s))}
-              {renderSection(dsSection, { locked: true, gold: true })}
-              {renderSection(accountSection)}
-              {comingSoonSection.tabs.length > 0 && renderSection(comingSoonSection, { locked: true })}
-            </>);
-
-            // PRESTIGE TIER SIDEBAR
+            // UNIVERSAL SIDEBAR — scoped by team role
+            const isPrestige = vendorTier === 'prestige';
+            
+            // Staff can only see: Overview, Calendar, Deluxe Suite (Chat + Check-in), Account
+            const staffTabs = ['overview', 'calendar', 'ds-team-chat', 'ds-checkin', 'settings'];
+            // Manager can see: everything except Deluxe Suite internals (except Chat) and Growth
+            const managerSections = ['Overview', 'Clients', 'Calendar', 'Finance', 'Delivery', 'Team'];
+            
+            if (teamRole === 'staff') {
+              const staffSections = workflowSections.filter(s => ['Overview', 'Calendar'].includes(s.title));
+              const staffDS = { title: 'Team', tabs: dsSection.tabs.filter(t => ['ds-team-chat', 'ds-checkin'].includes(t.id)) };
+              return (<>
+                {staffSections.map(s => renderSection(s))}
+                {staffDS.tabs.length > 0 && renderSection(staffDS)}
+                {renderSection(accountSection)}
+              </>);
+            }
+            
+            if (teamRole === 'manager') {
+              const mgSections = workflowSections.filter(s => managerSections.includes(s.title));
+              return (<>
+                {mgSections.map(s => renderSection(s))}
+                {renderSection(accountSection)}
+              </>);
+            }
+            
+            // Owner — full access
             return (<>
-              {renderSection(dsSection, { gold: true })}
-              {signatureSections.map(s => renderSection(s))}
+              {workflowSections.map(s => renderSection(s))}
+              {renderSection(dsSection, { locked: !isPrestige, gold: true })}
               {renderSection(accountSection)}
               {comingSoonSection.tabs.length > 0 && renderSection(comingSoonSection, { locked: true })}
             </>);
@@ -1599,35 +1764,38 @@ export default function VendorDashboard() {
 
       {/* ── Main Content ── */}
       <main style={{
-        marginLeft: sidebarCollapsed ? '64px' : '260px',
+        marginLeft: isMobile ? 0 : (sidebarCollapsed ? '64px' : '260px'),
         flex: 1,
         transition: 'margin-left 0.2s ease',
         minHeight: '100vh',
-        padding: '32px 40px',
-        maxWidth: sidebarCollapsed ? 'calc(100vw - 64px)' : 'calc(100vw - 260px)',
+        padding: isMobile ? '72px 20px 24px' : '32px 48px',
+        maxWidth: isMobile ? '100vw' : (sidebarCollapsed ? 'calc(100vw - 64px)' : 'calc(100vw - 260px)'),
         backgroundColor: 'var(--content-bg)',
+        overflowX: 'hidden',
       }}>
 
         {/* Header */}
         <div style={{
           display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
           justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: '36px',
-          paddingBottom: '24px',
+          alignItems: isMobile ? 'flex-start' : 'flex-start',
+          marginBottom: isMobile ? '20px' : '36px',
+          paddingBottom: isMobile ? '16px' : '24px',
           borderBottom: '1px solid var(--header-border)',
+          gap: isMobile ? '12px' : '0',
         }}>
           <div>
             <h1 style={{
               fontFamily: 'Inter, sans-serif',
-              fontSize: '28px',
-              fontWeight: 300,
-              color: 'var(--dark)',
+              fontSize: isMobile ? '20px' : '24px',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
               marginBottom: '4px',
-              letterSpacing: '0.3px',
+              letterSpacing: '-0.02em',
             }}>
               {vendorData?.name || 'Your Business'}
-              {foundingBadge && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#C9A84C', marginLeft: '8px', verticalAlign: 'middle', boxShadow: '0 0 0 2px rgba(201,168,76,0.2)' }} title="Founding Vendor" />}
+              {/* Founding badge hidden on desktop Business Portal — couples see it on discovery */}
 
             </h1>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
@@ -1641,28 +1809,43 @@ export default function VendorDashboard() {
                 {vendorData?.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                 {vendorData?.city ? ` · ${vendorData.city}` : ''}
               </p>
-              <span style={{
-                fontFamily: 'Inter, sans-serif',
-                fontSize: '9px',
-                fontWeight: 600,
-                letterSpacing: '1.5px',
-                textTransform: 'uppercase',
-                padding: '3px 10px',
-                borderRadius: '50px',
-                background: vendorTier === 'prestige' ? '#2C2420' : vendorTier === 'signature' ? 'rgba(201,168,76,0.1)' : 'rgba(140,123,110,0.08)',
-                color: vendorTier === 'prestige' ? '#C9A84C' : vendorTier === 'signature' ? '#C9A84C' : '#8C7B6E',
-                border: vendorTier === 'prestige' ? '1px solid rgba(201,168,76,0.3)' : vendorTier === 'signature' ? '1px solid rgba(201,168,76,0.25)' : '1px solid rgba(140,123,110,0.15)',
-              }}>
-                {vendorTier === 'prestige' ? 'Prestige' : vendorTier === 'signature' ? 'Signature' : 'Essential'}
-              </span>
+              {vendorTier === 'prestige' ? (
+                <span style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  background: 'var(--gold-muted)',
+                  color: 'var(--gold)',
+                  border: '1px solid var(--gold-border)',
+                }}>Prestige</span>
+              ) : (
+                <span style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  letterSpacing: '1.5px',
+                  textTransform: 'uppercase',
+                  padding: '3px 10px',
+                  borderRadius: '50px',
+                  background: 'transparent',
+                  color: vendorTier === 'signature' ? 'var(--gold)' : 'var(--text-muted)',
+                  border: vendorTier === 'signature' ? '1px solid var(--gold-border)' : '1px solid var(--border-primary)',
+                }}>
+                  {vendorTier === 'signature' ? 'Signature' : 'Essential'}
+                </span>
+              )}
             </div>
           </div>
           {pendingBookings.length > 0 && (
             <div style={{
-              background: 'var(--light-gold)',
-              border: '1px solid var(--gold-border)',
-              borderRadius: '10px',
-              padding: '12px 18px',
+              background: 'var(--warning-bg)',
+              border: '1px solid var(--warning-border)',
+              borderRadius: '6px',
+              padding: '10px 16px',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
@@ -1681,128 +1864,546 @@ export default function VendorDashboard() {
           )}
         </div>
 
-        {/* ════ OVERVIEW ════ */}
-        {activeTab === 'overview' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-
-            {/* Greeting */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        {/* ════ OVERVIEW — TIER-BASED URGENCY DASHBOARDS ════ */}
+        {/* ── Profile Completion Nudge Banner ── */}
+        {profilePhase < 3 && vendorData && (
+          <div className="card" style={{
+            padding: '16px 20px', marginBottom: '16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px',
+            flexWrap: 'wrap', borderLeft: '3px solid var(--gold)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--gold)', minWidth: '36px' }}>
+                {profileCompletion}%
+              </div>
               <div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                  Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {vendorData?.name?.split(' ')[0] || 'Dev'}
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {profilePhase === 0 ? 'Complete your business details' : 'Complete your discovery profile to go live on the platform'}
                 </div>
-                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>
-                  {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {profilePhase === 0 
+                    ? 'Add your category and city to get started' 
+                    : `${8 - (vendorData?.portfolio_images?.length || 0) > 0 ? (8 - (vendorData?.portfolio_images?.length || 0)) + ' photos, ' : ''}${3 - (vendorData?.featured_photos?.length || 0) > 0 ? (3 - (vendorData?.featured_photos?.length || 0)) + ' featured, ' : ''}${!vendorData?.about || vendorData.about.length < 100 ? 'bio, ' : ''}${(vendorData?.vibe_tags?.length || 0) < 3 ? 'vibe tags, ' : ''}${!vendorData?.starting_price && !vendorData?.price_on_request ? 'pricing, ' : ''}`.replace(/, $/, ' remaining')}
                 </div>
               </div>
-
             </div>
+            <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('settings')}>Complete Profile</button>
+          </div>
+        )}
 
-            {/* Key metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-              {[
-                { label: 'Total Revenue', value: `Rs.${(totalRevenue/100000).toFixed(1)}L`, sub: 'All time invoiced' },
-                { label: 'Outstanding', value: `Rs.${(paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).reduce((sum:number, i:any) => sum + parseInt(i.amount||0), 0)/100000).toFixed(1)}L`, sub: 'Unpaid instalments' },
-                { label: 'Active Clients', value: String(clients.filter((c:any) => c.status === 'upcoming').length), sub: 'Upcoming weddings' },
-                { label: 'Pending Enquiries', value: String(pendingBookings.filter((b:any) => b.status === 'pending').length), sub: 'Awaiting response' },
-              ].map(stat => (
-                <div key={stat.label} className="card" style={{ padding: '20px 24px', minHeight: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '10px' }}>{stat.label}</div>
-                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '28px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.5px', marginBottom: '4px' }}>{stat.value}</div>
-                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>{stat.sub}</div>
-                </div>
-              ))}
-            </div>
+        {/* ── Profile Gate (Phase 0 — blocks dashboard) ── */}
+        {activeTab === 'overview' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '24px' }}>
 
-            {/* Two column — upcoming events + outstanding payments */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            {/* ── Dream Ai Hero Card (mobile only — desktop users use the full CRM) ── */}
+            {isMobile && <div style={{
+              position: 'relative',
+              background: 'linear-gradient(180deg, #FFFDF7 0%, #FFF8EC 100%)',
+              borderRadius: '10px',
+              padding: isMobile ? '22px 20px' : '28px 32px',
+              border: vendorData?.ai_enabled ? '1.5px solid #C9A84C' : '1px solid rgba(201,168,76,0.32)',
+              boxShadow: vendorData?.ai_enabled
+                ? '0 4px 24px rgba(201,168,76,0.14)'
+                : '0 2px 14px rgba(140,123,110,0.08)',
+              overflow: 'hidden',
+              cursor: 'pointer',
+              transition: 'all 0.4s ease',
+            }}
+            onClick={() => {
+              if (vendorData?.ai_enabled) {
+                const joinCode = 'join acres-eventually';
+                window.open('https://wa.me/14155238886?text=' + encodeURIComponent(joinCode), '_blank');
+              } else {
+                setShowAiModal(true);
+              }
+            }}>
+              {/* Pulsing gold dot (active only) */}
+              {vendorData?.ai_enabled && (
+                <div style={{
+                  position: 'absolute', top: '22px', right: '112px',
+                  width: '6px', height: '6px', borderRadius: '50%',
+                  background: '#C9A84C',
+                  animation: 'tdwAiPulse 2s ease-in-out infinite',
+                  pointerEvents: 'none',
+                }} />
+              )}
 
-              {/* Upcoming events */}
-              <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Upcoming Weddings</span>
-                  <button onClick={() => setActiveTab('calendar')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>View calendar →</button>
-                </div>
-                {clients.filter((c:any) => c.status === 'upcoming').slice(0, 4).map((client:any, idx:number, arr:any[]) => (
-                  <div key={client.id} style={{ padding: '14px 20px', borderBottom: idx < arr.length - 1 ? '1px solid var(--card-border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{client.name}</div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{client.wedding_date}</div>
-                    </div>
-                    <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: '#16A34A', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(22,163,74,0.15)' }}>Upcoming</span>
-                  </div>
-                ))}
-                {clients.filter((c:any) => c.status === 'upcoming').length === 0 && (
-                  <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>No upcoming weddings</div>
-                    <button onClick={() => setActiveTab('clients')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-primary)', background: 'none', border: 'none', cursor: 'pointer', marginTop: '8px', textDecoration: 'underline' }}>Add a client →</button>
-                  </div>
-                )}
+              {/* Status badge — outlined */}
+              <div style={{
+                position: 'absolute', top: '14px', right: '14px',
+                background: 'transparent',
+                border: '1px solid ' + (vendorData?.ai_enabled ? '#C9A84C' : 'rgba(201,168,76,0.45)'),
+                borderRadius: '50px', padding: '4px 12px',
+                fontFamily: 'Inter, sans-serif', fontSize: '9px', fontWeight: 600,
+                letterSpacing: '2px',
+                color: vendorData?.ai_enabled ? '#A88B3A' : 'rgba(168,139,58,0.85)',
+              }}>
+                {vendorData?.ai_enabled ? 'BETA · ACTIVE' : vendorData?.ai_access_requested ? 'BETA · WAITLIST' : 'BETA · INVITE ONLY'}
               </div>
 
-              {/* Outstanding payments */}
-              <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Outstanding Payments</span>
-                  <button onClick={() => setActiveTab('outstanding')} style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>View all →</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '16px' : '22px', position: 'relative', zIndex: 2 }}>
+                {/* Sparkle icon */}
+                <div style={{
+                  width: isMobile ? '54px' : '68px', height: isMobile ? '54px' : '68px',
+                  borderRadius: '16px',
+                  background: vendorData?.ai_enabled ? '#FFF8EC' : '#F5F0E8',
+                  border: '1px solid ' + (vendorData?.ai_enabled ? 'rgba(201,168,76,0.35)' : 'rgba(201,168,76,0.2)'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <svg width={isMobile ? 26 : 32} height={isMobile ? 26 : 32} viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2L14.09 8.26L20.5 9L15.5 13.5L17 20L12 16.5L7 20L8.5 13.5L3.5 9L9.91 8.26L12 2Z"
+                      fill="#C9A84C" opacity={vendorData?.ai_enabled ? '1' : '0.6'} />
+                    <circle cx="5" cy="5" r="1.2" fill="#C9A84C" opacity={vendorData?.ai_enabled ? '0.8' : '0.4'} />
+                    <circle cx="19" cy="19" r="1.2" fill="#C9A84C" opacity={vendorData?.ai_enabled ? '0.8' : '0.4'} />
+                    <circle cx="19" cy="5" r="0.8" fill="#C9A84C" opacity={vendorData?.ai_enabled ? '0.6' : '0.3'} />
+                  </svg>
                 </div>
-                {paymentSchedules.flatMap((s:any) =>
-                  (s.instalments||[]).filter((i:any) => !i.paid).map((inst:any, idx:number) => ({
-                    client: s.client_name, phone: s.client_phone, label: inst.label, amount: parseInt(inst.amount||0), due: inst.due_date,
-                    overdue: inst.due_date && new Date(inst.due_date) < new Date()
-                  }))
-                ).slice(0, 4).map((item:any, idx:number, arr:any[]) => (
-                  <div key={idx} style={{ padding: '14px 20px', borderBottom: idx < arr.length - 1 ? '1px solid var(--card-border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{item.client}</div>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{item.label} · Due {item.due}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: item.overdue ? '#DC2626' : 'var(--text-primary)' }}>Rs.{item.amount.toLocaleString('en-IN')}</div>
-                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: item.overdue ? '#DC2626' : '#D97706', background: item.overdue ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.08)', padding: '2px 6px', borderRadius: '3px' }}>{item.overdue ? 'OVERDUE' : 'DUE'}</span>
-                    </div>
-                  </div>
-                ))}
-                {paymentSchedules.flatMap((s:any) => (s.instalments||[]).filter((i:any) => !i.paid)).length === 0 && (
-                  <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>All payments received</div>
-                  </div>
-                )}
-              </div>
-            </div>
 
-            {/* Quick actions — minimal text links */}
-            <div className="card" style={{ padding: '16px 20px' }}>
-              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '14px' }}>Quick Actions</div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {[
-                  { label: 'New Invoice', tab: 'invoices' },
-                  { label: 'New Contract', tab: 'contracts' },
-                  { label: 'Add Client', tab: 'clients' },
-                  { label: 'Log Expense', tab: 'expenses' },
-                  { label: 'Block Date', tab: 'calendar' },
-                  { label: 'Generate Web Login Code', tab: 'overview' },
-                ].map(a => (
-                  <button key={a.label} onClick={() => a.tab === 'overview' ? setActiveTab('overview') : setActiveTab(a.tab)} style={{
-                    fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
-                    color: '#fff', background: 'var(--dark)',
-                    border: 'none', borderRadius: '6px',
-                    padding: '9px 16px', cursor: 'pointer', transition: 'all 0.15s',
-                    letterSpacing: '0.1px',
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: isMobile ? '22px' : '28px',
+                    color: vendorData?.ai_enabled ? '#2C2420' : '#4A3F38',
+                    letterSpacing: '1.2px', marginBottom: '6px',
+                    fontWeight: 400,
+                  }}>Dream Ai</div>
+                  <div style={{
+                    fontFamily: 'Inter, sans-serif', fontSize: isMobile ? '11px' : '12px',
+                    color: 'var(--text-muted)', fontWeight: 400, lineHeight: 1.55,
                   }}>
-                    {a.label}
-                  </button>
-                ))}
+                    {vendorData?.ai_enabled
+                      ? "Run your business from WhatsApp. Tap to open."
+                      : vendorData?.ai_access_requested
+                        ? "You're on the waitlist. We'll be in touch."
+                        : "World's first wedding AI. By invitation only."}
+                  </div>
+                </div>
+
+                {/* Icon */}
+                <div style={{
+                  width: '34px', height: '34px', borderRadius: '50%',
+                  background: vendorData?.ai_enabled ? 'rgba(201,168,76,0.12)' : 'rgba(140,123,110,0.06)',
+                  border: '1px solid ' + (vendorData?.ai_enabled ? 'rgba(201,168,76,0.25)' : 'rgba(140,123,110,0.15)'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    {vendorData?.ai_enabled ? (
+                      <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke="#C9A84C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    ) : (
+                      <path d="M19 11H17V7C17 4.24 14.76 2 12 2C9.24 2 7 4.24 7 7V11H5C3.9 11 3 11.9 3 13V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V13C21 11.9 20.1 11 19 11ZM9 7C9 5.34 10.34 4 12 4C13.66 4 15 5.34 15 7V11H9V7Z"
+                        fill="#8C7B6E" opacity="0.8"/>
+                    )}
+                  </svg>
+                </div>
               </div>
+            </div>}
+
+            {/* ── Dream Ai Request Access Modal ── */}
+            {showAiModal && (
+              <div style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+                backdropFilter: 'blur(4px)',
+              }} onClick={() => setShowAiModal(false)}>
+                <div onClick={(e) => e.stopPropagation()} style={{
+                  background: 'linear-gradient(135deg, #1A1410 0%, #2C2420 50%, #1A1410 100%)',
+                  borderRadius: '20px', maxWidth: '480px', width: '100%',
+                  padding: isMobile ? '28px 24px' : '36px 40px',
+                  border: '1px solid rgba(201,168,76,0.3)',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(201,168,76,0.1)',
+                  position: 'relative', maxHeight: '90vh', overflowY: 'auto',
+                }}>
+                  {/* Close */}
+                  <button onClick={() => setShowAiModal(false)} style={{
+                    position: 'absolute', top: '16px', right: '16px',
+                    background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '50%',
+                    width: '30px', height: '30px', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                      <path d="M18 6L6 18M6 6L18 18" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round"/>
+                    </svg>
+                  </button>
+
+                  {/* Badge */}
+                  <div style={{
+                    display: 'inline-block',
+                    background: 'rgba(201,168,76,0.12)',
+                    border: '1px solid rgba(201,168,76,0.35)',
+                    borderRadius: '50px', padding: '4px 12px',
+                    fontFamily: 'Inter, sans-serif', fontSize: '9px', fontWeight: 600,
+                    letterSpacing: '2px', color: '#C9A84C',
+                    marginBottom: '18px',
+                  }}>BETA · INVITE ONLY</div>
+
+                  {/* Title */}
+                  <div style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: isMobile ? '30px' : '38px',
+                    color: '#C9A84C', letterSpacing: '1.5px',
+                    marginBottom: '8px', fontWeight: 400,
+                  }}>Dream Ai</div>
+                  <div style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: isMobile ? '18px' : '22px',
+                    color: '#FAF6F0', fontStyle: 'italic', fontWeight: 300,
+                    marginBottom: '24px', lineHeight: 1.3,
+                  }}>Run your business from WhatsApp.</div>
+
+                  {/* Description */}
+                  <div style={{
+                    fontFamily: 'Inter, sans-serif', fontSize: '13px',
+                    color: 'rgba(255,255,255,0.7)', lineHeight: 1.7, marginBottom: '24px',
+                  }}>
+                    The world's first AI assistant built exclusively for wedding professionals.
+                    Text natural language commands to run your entire business — no dashboards, no forms.
+                  </div>
+
+                  {/* Examples */}
+                  <div style={{ marginBottom: '28px' }}>
+                    {[
+                      { cmd: '"Create invoice for Swati Rs.5L"', result: 'GST-compliant invoice created' },
+                      { cmd: '"Nikhil ko payment reminder bhejo"', result: 'Hindi & Hinglish supported' },
+                      { cmd: '"Add Pooja as new client, 1st Jan outfit trial"', result: 'Client added with event details' },
+                      { cmd: '"Block Dec 15 for Kapoor wedding"', result: 'Calendar updated, client logged' },
+                    ].map((ex, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: '10px',
+                        padding: '10px 0',
+                        borderBottom: i < 3 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                      }}>
+                        <div style={{
+                          width: '6px', height: '6px', borderRadius: '50%',
+                          background: '#C9A84C', marginTop: '7px', flexShrink: 0,
+                        }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{
+                            fontFamily: 'Inter, sans-serif', fontSize: '12px',
+                            color: '#FAF6F0', fontWeight: 400, marginBottom: '2px',
+                          }}>{ex.cmd}</div>
+                          <div style={{
+                            fontFamily: 'Inter, sans-serif', fontSize: '11px',
+                            color: 'rgba(201,168,76,0.7)', fontWeight: 300,
+                          }}>→ {ex.result}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* CTA */}
+                  {aiRequestSent || vendorData?.ai_access_requested ? (
+                    <div style={{
+                      background: 'rgba(76,175,80,0.1)',
+                      border: '1px solid rgba(76,175,80,0.3)',
+                      borderRadius: '12px', padding: '14px',
+                      textAlign: 'center',
+                      fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#4CAF50',
+                      marginBottom: '12px',
+                    }}>
+                      ✓ Request submitted. We'll be in touch soon.
+                    </div>
+                  ) : (
+                    <button onClick={async () => {
+                      if (!vendorData?.id) return;
+                      try {
+                        const r = await fetch(API + '/ai-access/request', {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ vendor_id: vendorData.id, use_case: 'Requested from dashboard modal' }),
+                        });
+                        const d = await r.json();
+                        if (d.success) { setAiRequestSent(true); toast.success('Request submitted'); }
+                      } catch { toast.error('Network error'); }
+                    }} style={{
+                      width: '100%',
+                      background: 'linear-gradient(135deg, #C9A84C 0%, #B8963A 100%)',
+                      color: '#1A1410', border: 'none', borderRadius: '12px',
+                      padding: '14px', fontFamily: 'Inter, sans-serif',
+                      fontSize: '12px', fontWeight: 600, letterSpacing: '2px',
+                      textTransform: 'uppercase', cursor: 'pointer',
+                      marginBottom: '12px',
+                      boxShadow: '0 4px 16px rgba(201,168,76,0.25)',
+                    }}>Request Early Access</button>
+                  )}
+
+                  <div style={{
+                    fontFamily: 'Inter, sans-serif', fontSize: '10px',
+                    color: 'rgba(255,255,255,0.35)', textAlign: 'center', lineHeight: 1.6,
+                  }}>
+                    Currently available to select founding vendors.<br/>
+                    Compliant with Meta's WhatsApp Business API policies.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Date line */}
+            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>
+              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </div>
 
-            {/* Spotlight Score — minimal stat bar */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: '#FAFAFA', border: '1px solid var(--card-border)', borderRadius: '8px' }}>
+            {/* ── PRESTIGE: CEO Command Feed ── */}
+            {vendorTier === 'prestige' && (
+              <>
+                {/* Quick Stats Row */}
+                <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                  {[
+                    { label: 'Active Events', value: String(clients.filter((c:any) => c.status === 'upcoming').length), color: 'var(--gold)' },
+                    { label: 'Team Online', value: String(teamMembers.length), color: 'var(--green)' },
+                    { label: 'Overdue Tasks', value: String(dsTasks.filter((t:any) => t.status !== 'completed' && t.due_date && new Date(t.due_date) < new Date()).length), color: dsTasks.filter((t:any) => t.status !== 'completed' && t.due_date && new Date(t.due_date) < new Date()).length > 0 ? 'var(--red)' : 'var(--green)' },
+                    { label: 'Pending Photos', value: String(dsPhotos.filter((p:any) => p.status === 'pending').length), color: 'var(--gold)' },
+                  ].map(s => (
+                    <div key={s.label} className="stat-card">
+                      <div className="stat-number">{s.value}</div>
+                      <div className="stat-label">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Quick Actions Bar */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Create Task', iconId: 'plus', action: () => { setActiveTab('ds-event-dashboard'); setDsShowTaskForm(true); } },
+                    { label: 'Block Date', iconId: 'calendar', action: () => { setActiveTab('calendar'); setShowDateInput(true); } },
+                    { label: 'Add Member', iconId: 'users', action: () => { setActiveTab('ds-team-hub'); setDsShowTeamForm(true); } },
+                  ].map(a => (
+                    <button key={a.label} onClick={a.action} className="btn btn-secondary btn-sm">
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Attention Needed */}
+                {(() => {
+                  const overduePayments = paymentSchedules.filter((s:any) => (s.instalments||[]).some((i:any) => !i.paid && i.due_date && new Date(i.due_date) < new Date()));
+                  const overdueTasks = dsTasks.filter((t:any) => t.status !== 'completed' && t.due_date && new Date(t.due_date) < new Date());
+                  const pendingPhotosArr = dsPhotos.filter((p:any) => p.status === 'pending');
+                  if (overduePayments.length === 0 && overdueTasks.length === 0 && pendingPhotosArr.length === 0) return null;
+                  return (
+                    <div className="card" style={{ padding: '16px', borderLeft: '3px solid var(--danger)' }}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--danger)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '10px' }}>Attention Needed</div>
+                      {overdueTasks.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                          <AlertCircle size={14} color="#E57373" />
+                          <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)' }}>{overdueTasks.length} overdue task{overdueTasks.length > 1 ? 's' : ''}</span>
+                        </div>
+                      )}
+                      {overduePayments.map((sched:any) => (
+                        <div key={sched.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <DollarSign size={14} color="#E57373" />
+                          <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)', flex: 1 }}>{sched.client_name} — overdue</span>
+                          <a href={'https://wa.me/91' + (sched.client_phone || '') + '?text=' + encodeURIComponent('Hi ' + (sched.client_name || '') + '! Gentle reminder about your pending payment.')} target="_blank" rel="noreferrer" style={{ background: '#25D366', borderRadius: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center' }}><Send size={10} color="#fff" /></a>
+                        </div>
+                      ))}
+                      {pendingPhotosArr.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Image size={14} color="var(--gold)" />
+                          <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)' }}>{pendingPhotosArr.length} photo{pendingPhotosArr.length > 1 ? 's' : ''} awaiting approval</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Today section */}
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>TODAY</div>
+                  <div className="card" style={{ padding: '16px' }}>
+                    {clients.filter((c:any) => c.status === 'upcoming').length > 0 ? (
+                      clients.filter((c:any) => c.status === 'upcoming').slice(0, 3).map((c:any) => (
+                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid var(--card-border)' }}>
+                          <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--light-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Calendar size={14} color="var(--gold)" /></div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{c.name}</div>
+                            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{c.wedding_date || 'Date TBD'}</div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>No events scheduled for today</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Deluxe Suite Access */}
+                <button onClick={() => setActiveTab('ds-event-dashboard')} className="btn btn-secondary" style={{ width: '100%', padding: '14px', justifyContent: 'center', gap: '10px', border: '1px solid var(--gold-border)' }}>
+                  <Award size={14} color="var(--gold)" /> <span style={{ color: 'var(--gold)', fontWeight: 500 }}>Deluxe Suite</span>
+                </button>
+              </>
+            )}
+
+            {/* ── SIGNATURE: Morning Briefing ── */}
+            {vendorTier === 'signature' && (
+              <>
+                {/* Business Pulse */}
+                <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                  {[
+                    { label: 'Revenue', value: 'Rs.' + (invoices.reduce((s:number,i:any) => s + (i.amount||0), 0)/100000).toFixed(1) + 'L' },
+                    { label: 'Expenses', value: 'Rs.' + (expenses.reduce((s:number,e:any) => s + (e.amount||0), 0)/100000).toFixed(1) + 'L' },
+                    { label: 'Profit', value: 'Rs.' + ((invoices.reduce((s:number,i:any) => s + (i.amount||0), 0) - expenses.reduce((s:number,e:any) => s + (e.amount||0), 0))/100000).toFixed(1) + 'L' },
+                    { label: 'Referrals', value: String(referralRewards?.active_referrals || 0) },
+                  ].map(s => (
+                    <div key={s.label} className="stat-card">
+                      <div className="stat-number">{s.value}</div>
+                      <div className="stat-label">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Quick Actions */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Invoice', action: () => setActiveTab('invoices') },
+                    { label: 'Broadcast', action: () => setActiveTab('whatsapp') },
+                    { label: 'Block Date', action: () => setShowDateInput(true) },
+                    { label: 'Expense', action: () => setActiveTab('expenses') },
+                    { label: 'Referrals', action: () => setActiveTab('referral') },
+                  ].map(a => (
+                    <button key={a.label} onClick={a.action} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#fff', color: 'var(--dark)', fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, border: '1px solid var(--card-border)', borderRadius: '8px', padding: '10px 14px', cursor: 'pointer' }}>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Overdue Payments */}
+                {paymentSchedules.filter((s:any) => (s.instalments||[]).some((i:any) => !i.paid && i.due_date && new Date(i.due_date) < new Date())).length > 0 && (
+                  <div style={{ background: '#FEF2F2', borderRadius: '12px', padding: '16px', border: '1px solid #FECACA' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: '#E57373', letterSpacing: '1.5px', marginBottom: '10px' }}>OVERDUE PAYMENTS</div>
+                    {paymentSchedules.filter((s:any) => (s.instalments||[]).some((i:any) => !i.paid && i.due_date && new Date(i.due_date) < new Date())).slice(0, 3).map((sched:any) => (
+                      <div key={sched.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)', flex: 1 }}>{sched.client_name}</span>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: '#E57373' }}>Rs.{(sched.total_amount || 0).toLocaleString('en-IN')}</span>
+                        <a href={'https://wa.me/91' + (sched.client_phone || '') + '?text=' + encodeURIComponent('Hi ' + (sched.client_name || '') + '! Gentle reminder about your pending payment.')} target="_blank" rel="noreferrer" style={{ background: '#25D366', borderRadius: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center' }}><Send size={10} color="#fff" /></a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* This Week */}
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>THIS WEEK</div>
+                  <div className="card" style={{ padding: '16px' }}>
+                    {clients.filter((c:any) => c.status === 'upcoming').length > 0 ? (
+                      clients.filter((c:any) => c.status === 'upcoming').slice(0, 4).map((c:any) => (
+                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid var(--card-border)' }}>
+                          <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--light-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Calendar size={14} color="var(--gold)" /></div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{c.name}</div>
+                            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>{c.wedding_date || 'Date TBD'}</div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)' }}>No confirmed bookings yet</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Lead Pipeline */}
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>LEADS</div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {[
+                      { n: pendingBookings.filter((b:any) => b.status === 'pending').length, l: 'New', c: 'var(--gold)' },
+                      { n: clients.filter((c:any) => c.status === 'quoted').length, l: 'Quoted', c: 'var(--grey)' },
+                      { n: clients.filter((c:any) => c.status === 'upcoming').length, l: 'Confirmed', c: 'var(--green)' },
+                    ].map((s, i) => (
+                      <div key={i} className="card" style={{ flex: 1, textAlign: 'center', padding: '12px' }}>
+                        <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, color: s.c }}>{s.n}</div>
+                        <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ── ESSENTIAL: Personal Assistant ── */}
+            {vendorTier === 'essential' && (
+              <>
+                {/* Onboarding checklist */}
+                {clients.length === 0 && invoices.length === 0 && (
+                  <div className="card" style={{ padding: '20px', border: '1px solid var(--gold-border)', background: 'var(--light-gold)' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--gold)', letterSpacing: '1.5px', marginBottom: '10px' }}>GETTING STARTED</div>
+                    {[
+                      { done: !!vendorData?.name, label: 'Set up your profile', tab: 'settings' },
+                      { done: clients.length > 0, label: 'Add your first client', tab: 'clients' },
+                      { done: invoices.length > 0, label: 'Create your first invoice', tab: 'invoices' },
+                      { done: blockedDates.length > 0, label: 'Block your booked dates', tab: 'availability' },
+                    ].map((item, idx) => (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', cursor: 'pointer' }} onClick={() => setActiveTab(item.tab)}>
+                        <div style={{ width: '20px', height: '20px', borderRadius: '50%', border: item.done ? 'none' : '1.5px solid var(--border)', background: item.done ? 'var(--green)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {item.done && <Check size={12} color="#fff" />}
+                        </div>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: item.done ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: item.done ? 'line-through' : 'none' }}>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Next Event Card */}
+                {clients.filter((c:any) => c.status === 'upcoming').length > 0 && (
+                  <div style={{ background: 'var(--dark)', borderRadius: '8px', padding: '20px' }}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1.5px', marginBottom: '6px' }}>NEXT EVENT</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 600, color: 'var(--gold)', marginBottom: '4px' }}>{clients.filter((c:any) => c.status === 'upcoming')[0]?.name || 'Client'}</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>{clients.filter((c:any) => c.status === 'upcoming')[0]?.wedding_date || 'Date TBD'}</div>
+                  </div>
+                )}
+
+                {/* Money Owed */}
+                {invoices.filter((i:any) => i.status !== 'paid').length > 0 && (
+                  <div style={{ background: 'var(--light-gold)', borderRadius: '8px', padding: '16px', border: '1px solid var(--gold-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--gold)', letterSpacing: '1.5px' }}>MONEY OWED TO YOU</span>
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Rs.{invoices.filter((i:any) => i.status !== 'paid').reduce((s:number, i:any) => s + (i.amount||0), 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    {invoices.filter((i:any) => i.status !== 'paid').slice(0, 3).map((inv:any) => (
+                      <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0' }}>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)', flex: 1 }}>{inv.client_name}</span>
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--grey)' }}>Rs.{(inv.amount||0).toLocaleString('en-IN')}</span>
+                        <a href={'https://wa.me/91' + (inv.client_phone || '') + '?text=' + encodeURIComponent('Hi ' + (inv.client_name || '') + '! Reminder for invoice Rs.' + (inv.amount || 0).toLocaleString('en-IN') + '.')} target="_blank" rel="noreferrer" style={{ background: '#25D366', borderRadius: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center' }}><Send size={10} color="#fff" /></a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* New Enquiries */}
+                {pendingBookings.length > 0 && (
+                  <div onClick={() => setActiveTab('inquiries')} style={{ cursor: 'pointer', background: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid var(--gold)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--light-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 700, color: 'var(--gold)' }}>{pendingBookings.length}</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>New enquir{pendingBookings.length > 1 ? 'ies' : 'y'} waiting</div>
+                      <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>Respond within 48 hours</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Actions */}
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {[
+                    { label: 'Invoice', tab: 'invoices' },
+                    { label: 'Block Date', tab: '' },
+                    { label: 'Add Client', tab: 'clients' },
+                  ].map(a => (
+                    <button key={a.label} onClick={() => a.tab ? setActiveTab(a.tab) : setShowDateInput(true)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: '#fff', border: '1px solid var(--card-border)', borderRadius: '12px', padding: '14px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--dark)' }}>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Spotlight Score — all tiers */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: '#FAFAFA', border: '1px solid var(--card-border)', borderRadius: '8px', flexWrap: 'wrap', gap: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase' }}>Spotlight Score</span>
                 <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>2,847</span>
                 <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--gold)', background: 'rgba(201,168,76,0.1)', padding: '2px 8px', borderRadius: '4px' }}>#3 This Month</span>
               </div>
+              {!isMobile && (
               <div style={{ display: 'flex', gap: '24px' }}>
                 {[{ n: '140', l: 'Saves' }, { n: '57', l: 'Enquiries' }, { n: '12', l: 'Bookings' }].map(s => (
                   <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1811,11 +2412,11 @@ export default function VendorDashboard() {
                   </div>
                 ))}
               </div>
+              )}
             </div>
 
           </div>
         )}
-
 
         {/* ════ INVOICES ════ */}
         {activeTab === 'invoices' && (
@@ -1843,7 +2444,7 @@ export default function VendorDashboard() {
             {showInvoiceForm && (
               <div className="card" style={{ padding: '28px' }}>
                 <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 300, color: 'var(--dark)', marginBottom: '20px' }}>New Invoice</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}>
                     <label style={label}>Client Name</label>
                     <input style={inp} placeholder="e.g. Priya & Rahul" value={invClient} onChange={e => setInvClient(e.target.value)} />
@@ -2025,7 +2626,7 @@ export default function VendorDashboard() {
             {showContractForm && (
               <div className="card" style={{ padding: '28px' }}>
                 <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 300, color: 'var(--dark)', marginBottom: '20px' }}>New Service Agreement</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}><label style={label}>Client Name</label><input style={inp} placeholder="e.g. Priya & Rahul" value={conClient} onChange={e => setConClient(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Client Phone</label><input style={inp} placeholder="10-digit number" value={conPhone} onChange={e => setConPhone(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Event Type</label><input style={inp} placeholder="e.g. Wedding" value={conEventType} onChange={e => setConEventType(e.target.value)} /></div>
@@ -2098,7 +2699,7 @@ export default function VendorDashboard() {
                   </div>
                   {editingContractId === con.id && (
                     <div style={{ margin: '0 24px 16px', padding: '16px', background: '#F9FAFB', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                         <div><label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Client Name</label><input style={inp} value={editContractData.client_name || ''} onChange={e => setEditContractData((p:any) => ({ ...p, client_name: e.target.value }))} /></div>
                         <div><label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Event Type</label><input style={inp} value={editContractData.event_type || ''} onChange={e => setEditContractData((p:any) => ({ ...p, event_type: e.target.value }))} /></div>
                         <div><label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Event Date</label><input style={inp} value={editContractData.event_date || ''} onChange={e => setEditContractData((p:any) => ({ ...p, event_date: e.target.value }))} /></div>
@@ -2229,7 +2830,7 @@ export default function VendorDashboard() {
             {showPaymentForm && (
               <div className="card" style={{ padding: '28px' }}>
                 <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 300, color: 'var(--dark)', marginBottom: '20px' }}>New Payment Schedule</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}><label style={label}>Client Name</label><input style={inp} placeholder="e.g. Priya & Rahul" value={payClient} onChange={e => setPayClient(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Client Phone</label><input style={inp} placeholder="10-digit number" value={payPhone} onChange={e => setPayPhone(e.target.value)} /></div>
                   <div style={{ ...formRow, gridColumn: '1 / -1' }}><label style={label}>Total Booking Amount (Rs.)</label><input style={inp} type="number" placeholder="e.g. 200000" value={payTotal} onChange={e => setPayTotal(e.target.value)} /></div>
@@ -2348,7 +2949,7 @@ export default function VendorDashboard() {
             </div>
 
             {expenses.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                 <div className="card-dark" style={{ padding: '20px' }}>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 300, color: 'var(--grey)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '8px' }}>Total Expenses</div>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '32px', fontWeight: 300, color: 'var(--gold)' }}>
@@ -2384,7 +2985,7 @@ export default function VendorDashboard() {
                     </button>
                   ))}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}><label style={label}>Description</label><input style={inp} placeholder="e.g. Equipment rental" value={expDesc} onChange={e => setExpDesc(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Amount (Rs.)</label><input style={inp} type="number" placeholder="e.g. 15000" value={expAmount} onChange={e => setExpAmount(e.target.value)} /></div>
                   <div style={{ ...formRow, gridColumn: '1 / -1' }}><label style={label}>Client (optional)</label><input style={inp} placeholder="Link to a specific client" value={expClient} onChange={e => setExpClient(e.target.value)} /></div>
@@ -2504,7 +3105,7 @@ export default function VendorDashboard() {
             {showTDSForm && (
               <div className="card" style={{ padding: '28px' }}>
                 <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 300, color: 'var(--dark)', marginBottom: '20px' }}>Add TDS Entry</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}><label style={label}>Client Name</label><input style={inp} placeholder="e.g. Priya & Rahul" value={tdsClient} onChange={e => setTdsClient(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Gross Amount (Rs.)</label><input style={inp} type="number" placeholder="e.g. 150000" value={tdsAmount} onChange={e => setTdsAmount(e.target.value)} /></div>
                 </div>
@@ -2623,7 +3224,7 @@ export default function VendorDashboard() {
             {showClientForm && (
               <div className="card" style={{ padding: '28px' }}>
                 <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', fontWeight: 300, color: 'var(--dark)', marginBottom: '20px' }}>Add Client</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div style={formRow}><label style={label}>Client Names</label><input style={inp} placeholder="e.g. Priya & Rahul" value={clientName} onChange={e => setClientName(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Phone Number</label><input style={inp} placeholder="10-digit number" value={clientPhone} onChange={e => setClientPhone(e.target.value)} /></div>
                   <div style={formRow}><label style={label}>Wedding Date</label><input style={inp} placeholder="e.g. March 15, 2026" value={clientDate} onChange={e => setClientDate(e.target.value)} /></div>
@@ -2679,7 +3280,7 @@ export default function VendorDashboard() {
                     </div>
                     {editingClientId === client.id && (
                       <div style={{ marginTop: '12px', padding: '16px', background: '#F9FAFB', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                           <div>
                             <label style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Name</label>
                             <input style={{ ...inp, fontSize: '13px' }} value={editClientData.name || ''} onChange={e => setEditClientData((p:any) => ({ ...p, name: e.target.value }))} />
@@ -2887,8 +3488,63 @@ export default function VendorDashboard() {
         )}
 
         {/* ════ SETTINGS ════ */}
+        {/* Verification Banners — Greyed Out (Coming Soon) */}
+        {activeTab === 'settings' && vendorData && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+            <div style={{
+              background: 'rgba(140,123,110,0.04)', border: '1px solid #EDE8E0',
+              borderRadius: '8px', padding: '12px 16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>Phone Verification</div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>OTP verification launching soon</div>
+              </div>
+              <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '4px 10px', borderRadius: '50px' }}>Coming Soon</span>
+            </div>
+            <div style={{
+              background: 'rgba(140,123,110,0.04)', border: '1px solid #EDE8E0',
+              borderRadius: '8px', padding: '12px 16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>Email Verification</div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>Email verification launching soon</div>
+              </div>
+              <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '4px 10px', borderRadius: '50px' }}>Coming Soon</span>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'settings' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+            {/* ── Visible to Couples — Go Live Toggle ── */}
+            <div className="card" style={{ padding: '24px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Visible to Couples
+                  {profilePhase >= 3 ? (
+                    <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.8px', textTransform: 'uppercase', padding: '3px 10px', borderRadius: '50px', background: 'rgba(76,175,80,0.08)', color: '#4CAF50' }}>Live</span>
+                  ) : (
+                    <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.8px', textTransform: 'uppercase', padding: '3px 10px', borderRadius: '50px', background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>Not Live</span>
+                  )}
+                </div>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  {profilePhase >= 3
+                    ? 'Your profile is live. Couples can discover you in the feed.'
+                    : profilePhase === 2
+                      ? 'Add your bio, vibe tags, and Instagram to go live.'
+                      : profilePhase === 1
+                        ? 'Upload more photos and mark 5 as featured to progress.'
+                        : 'Complete your profile setup to go live.'}
+                </div>
+              </div>
+              <div style={{ position: 'relative', width: '48px', height: '26px', borderRadius: '13px', background: profilePhase >= 3 ? '#4CAF50' : '#E5E7EB', cursor: profilePhase >= 3 ? 'default' : 'not-allowed', opacity: profilePhase >= 3 ? 1 : 0.5, transition: 'background 0.2s' }}>
+                <div style={{ position: 'absolute', top: '3px', left: profilePhase >= 3 ? '25px' : '3px', width: '20px', height: '20px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.15)', transition: 'left 0.2s' }} />
+              </div>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)' }}>Profile Settings</h2>
               <button style={goldBtn} onClick={handleSaveProfile} disabled={savingProfile}>
@@ -2898,7 +3554,7 @@ export default function VendorDashboard() {
             </div>
 
             <div className="card" style={{ padding: '32px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <div style={formRow}>
                   <label style={label}>Business Name</label>
                   <input style={inp} value={editName} onChange={e => setEditName(e.target.value)} placeholder="Your business name" />
@@ -2953,7 +3609,7 @@ export default function VendorDashboard() {
                   {savingBusiness ? 'Saving...' : 'Save'}
                 </button>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div style={formRow}>
                   <label style={label}>GST Number</label>
                   <input style={inp} value={gstNumber} onChange={e => setGstNumber(e.target.value.toUpperCase())} placeholder="e.g. 07AABCU9603R1ZX" maxLength={15} />
@@ -2976,6 +3632,68 @@ export default function VendorDashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Dream Ai Usage Card */}
+            {vendorData?.ai_enabled && aiStatus && (
+              <div className="card" style={{ padding: '32px', border: '1px solid rgba(201,168,76,0.3)', background: 'linear-gradient(135deg, rgba(201,168,76,0.03) 0%, transparent 100%)' }}>
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'inline-block', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.25)', borderRadius: 50, padding: '3px 10px', fontSize: 9, fontWeight: 600, letterSpacing: 2, color: '#16A34A', marginBottom: 10 }}>BETA · ACTIVE</div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', color: '#C9A84C', letterSpacing: '1.5px', marginBottom: '4px' }}>Dream Ai Usage</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)' }}>Your WhatsApp AI assistant usage and top-ups.</div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                  <div style={{ padding: '16px', background: 'rgba(201,168,76,0.06)', borderRadius: '10px', textAlign: 'center' }}>
+                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: '#C9A84C', fontWeight: 500 }}>
+                      {aiStatus.tier === 'prestige' ? '∞' : aiStatus.tier_remaining + '/' + aiStatus.allowance}
+                    </div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '4px' }}>Monthly ({aiStatus.tier})</div>
+                  </div>
+                  <div style={{ padding: '16px', background: 'rgba(201,168,76,0.06)', borderRadius: '10px', textAlign: 'center' }}>
+                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: 'var(--text-primary)', fontWeight: 500 }}>{aiStatus.extra_tokens}</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '4px' }}>Extra Tokens</div>
+                  </div>
+                  <div style={{ padding: '16px', background: aiStatus.total_remaining <= 5 ? 'rgba(229,115,115,0.08)' : 'rgba(76,175,80,0.06)', borderRadius: '10px', textAlign: 'center' }}>
+                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: aiStatus.total_remaining <= 5 ? '#E57373' : '#4CAF50', fontWeight: 500 }}>
+                      {aiStatus.tier === 'prestige' ? '∞' : aiStatus.total_remaining}
+                    </div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '4px' }}>Total Left</div>
+                  </div>
+                </div>
+
+                {aiStatus.packs && (<>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 600, color: 'var(--grey)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '12px' }}>Buy Extra Tokens</div>
+                  <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                    {Object.entries(aiStatus.packs).map(([packKey, pack]: any) => {
+                      const isLoading = buyingTokens === packKey;
+                      const perToken = (pack.price / pack.tokens).toFixed(2);
+                      return (
+                        <button key={packKey} onClick={() => buyAiTokens(packKey)} disabled={!!buyingTokens}
+                          style={{
+                            padding: '16px 14px', borderRadius: '12px',
+                            cursor: buyingTokens ? 'wait' : 'pointer',
+                            background: '#fff', border: '1px solid var(--card-border)',
+                            textAlign: 'left', opacity: buyingTokens && !isLoading ? 0.5 : 1,
+                            transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
+                          }}
+                        >
+                          <div style={{ fontSize: '10px', color: '#C9A84C', letterSpacing: '1.5px', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px' }}>{pack.label}</div>
+                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', color: 'var(--text-primary)', fontWeight: 500 }}>{pack.tokens} tokens</div>
+                          <div style={{ fontSize: '16px', color: 'var(--text-primary)', fontWeight: 600, marginTop: '4px' }}>Rs.{pack.price}</div>
+                          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>Rs.{perToken}/token</div>
+                          {isLoading && <div style={{ fontSize: '10px', color: '#C9A84C', marginTop: '8px' }}>Loading...</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '10px', color: 'var(--grey)', textAlign: 'center', marginTop: '14px', lineHeight: 1.5 }}>
+                    Tokens never expire. Used after monthly allowance runs out.
+                  </div>
+                </>)}
+
+
+              </div>
+            )}
 
             {/* Subscription Management */}
             <div className="card" style={{ padding: '32px', border: vendorTier === 'prestige' ? '1px solid rgba(201,168,76,0.3)' : '1px solid var(--card-border)' }}>
@@ -3021,8 +3739,171 @@ export default function VendorDashboard() {
               </div>
             </div>
 
+
+            {/* ── Quick Actions — Manage Tools ── */}
+            <div className="card" style={{ padding: '32px' }}>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px' }}>Quick Actions</div>
+              <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>Toggle tools on or off. Hidden tools won't appear in your sidebar.</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                {SIDEBAR_SECTIONS.flatMap(s => s.tabs).filter(tab => {
+                  if (tab.id === 'overview' || tab.id === 'settings') return false;
+                  return hasTabAccess(vendorTier, tab.id);
+                }).map((tab: any, idx: number, arr: any[]) => {
+                  const Icon = tab.icon;
+                  const isHidden = hiddenTools.includes(tab.id);
+                  return (
+                    <div key={tab.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: idx < arr.length - 1 ? '1px solid var(--card-border)' : 'none' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Icon size={14} color={isHidden ? '#B8ADA4' : '#C9A84C'} />
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: isHidden ? '#B8ADA4' : 'var(--dark)' }}>{tab.label}</span>
+                      </div>
+                      <button onClick={() => toggleTool(tab.id)} style={{
+                        position: 'relative', width: '40px', height: '22px', borderRadius: '11px',
+                        background: isHidden ? '#E5E7EB' : '#C9A84C', border: 'none', cursor: 'pointer',
+                        transition: 'background 0.2s',
+                      }}>
+                        <div style={{
+                          position: 'absolute', top: '2px', left: isHidden ? '2px' : '20px',
+                          width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.15)', transition: 'left 0.2s',
+                        }} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Portfolio Management */}
+            <div className="card" style={{ padding: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px' }}>Portfolio & Featured Photos</div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {portfolioImages.length} / {vendorTier === 'essential' ? 10 : 20} portfolio · {featuredPhotos.length} / {vendorTier === 'essential' ? 7 : 12} featured
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--dark)', color: 'var(--cream)', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', letterSpacing: '0.5px' }}>
+                  <Upload size={14} />
+                  {uploadingWebPhoto ? 'Uploading...' : 'Upload Photo'}
+                  <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={async (e: any) => {
+                    const files = Array.from(e.target.files || []) as File[];
+                    const maxPortfolio = vendorTier === 'essential' ? 10 : 20;
+                    if (portfolioImages.length + files.length > maxPortfolio) { toast.error('Portfolio limit: ' + maxPortfolio + ' photos'); return; }
+                    setUploadingWebPhoto(true);
+                    for (const file of files) {
+                      // Quality gate: reject over 10MB (bandwidth protection)
+                      if (file.size > 10 * 1024 * 1024) {
+                        toast.error(file.name + ' is too large (max 10MB)');
+                        continue;
+                      }
+                      // Quality gate: reject if longest edge < 1600px (portfolio quality floor)
+                      try {
+                        const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+                          const img = new window.Image();
+                          const url = URL.createObjectURL(file);
+                          img.onload = () => { URL.revokeObjectURL(url); resolve({ w: img.naturalWidth, h: img.naturalHeight }); };
+                          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image')); };
+                          img.src = url;
+                        });
+                        const longestEdge = Math.max(dims.w, dims.h);
+                        if (longestEdge < 1600) {
+                          toast.error(file.name + ': resolution too low (' + dims.w + '×' + dims.h + '). Minimum 1600px on longest side for portfolio quality.');
+                          continue;
+                        }
+                      } catch {
+                        toast.error(file.name + ': could not read image dimensions');
+                        continue;
+                      }
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      formData.append('upload_preset', 'dream_wedding_uploads');
+                      try {
+                        const res = await fetch('https://api.cloudinary.com/v1_1/dccso5ljv/image/upload', { method: 'POST', body: formData });
+                        const data = await res.json();
+                        if (data.secure_url) {
+                          setPortfolioImages(prev => [...prev, data.secure_url]);
+                          if (vendorData?.id) { fetch(API + '/api/vendors/' + vendorData.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portfolio_images: [...portfolioImages, data.secure_url] }) }).catch(() => {}); }
+                          toast.success('Uploaded ' + file.name);
+                        }
+                      } catch (err) { toast.error('Upload failed'); }
+                    }
+                    setUploadingWebPhoto(false);
+                  }} />
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'var(--surface-sunken)', borderRadius: '10px', border: '1px solid rgba(201,168,76,0.2)', marginBottom: '20px' }}>
+                <Star size={14} color="var(--gold)" />
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--dark)', lineHeight: 1.5 }}>Mark your best photos as <strong>Featured</strong> — these appear in the couple's discover feed. Featured photos are reviewed to maintain quality{vendorTier === 'prestige' ? ' (auto-approved for Prestige)' : ''}.</span>
+              </div>
+
+              {portfolioImages.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', border: '2px dashed var(--border)', borderRadius: '12px', color: 'var(--grey)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }}>No photos uploaded yet. Click Upload Photo to get started.</div>
+              ) : (
+                <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                  {portfolioImages.map((url: string, idx: number) => {
+                    const isFeatured = featuredPhotos.includes(url);
+                    const status = featuredStatus[url] || (isFeatured ? 'approved' : '');
+                    const maxFeatured = vendorTier === 'essential' ? 7 : 12;
+                    return (
+                      <div key={idx} style={{ position: 'relative', borderRadius: '10px', overflow: 'hidden', border: isFeatured ? '2px solid var(--gold)' : '1px solid var(--border)', aspectRatio: '1' }}>
+                        <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '8px', display: 'flex', gap: '4px', background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
+                          {!isFeatured && featuredPhotos.length < maxFeatured && (
+                            <button onClick={() => {
+                              const isPrestige = vendorTier === 'prestige';
+                              setFeaturedPhotos(prev => [...prev, url]);
+                              setFeaturedStatus(prev => ({ ...prev, [url]: isPrestige ? 'approved' : 'pending' }));
+                              if (vendorData?.id) {
+                                fetch(API + '/api/vendors/' + vendorData.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ featured_photos: [...featuredPhotos, url] }) }).catch(() => {});
+                                fetch(API + '/api/ds/photos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor_id: vendorData?.id || '', photo_url: url, status: isPrestige ? 'approved' : 'pending', type: 'featured_approval', description: 'Featured photo for swipe deck' }) }).catch(() => {});
+                              }
+                              toast.success(isPrestige ? 'Featured! Live in discover feed.' : 'Submitted for review');
+                            }} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '50px', border: 'none', background: 'var(--gold)', color: 'var(--dark)', cursor: 'pointer', fontWeight: 600 }}>Feature</button>
+                          )}
+                          {isFeatured && (
+                            <span style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '50px', background: status === 'approved' ? '#4CAF50' : status === 'revision_needed' ? '#E57373' : 'rgba(201,168,76,0.8)', color: '#fff', fontWeight: 500 }}>
+                              {status === 'approved' ? 'Live' : status === 'revision_needed' ? 'Rejected' : 'Pending'}
+                            </span>
+                          )}
+                          <button onClick={() => {
+                            setPortfolioImages(prev => prev.filter(p => p !== url));
+                            setFeaturedPhotos(prev => prev.filter(p => p !== url));
+                            if (vendorData?.id) { fetch(API + '/api/vendors/' + vendorData.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portfolio_images: portfolioImages.filter(p => p !== url), featured_photos: featuredPhotos.filter(p => p !== url) }) }).catch(() => {}); }
+                            toast.success('Photo removed');
+                          }} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '50px', border: 'none', background: 'rgba(229,115,115,0.9)', color: '#fff', cursor: 'pointer', fontWeight: 500 }}>Remove</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Invite Vendor — Event Managers */}
+            {vendorData?.category === 'event-managers' && (
+              <div className="card" style={{ padding: '32px', background: 'linear-gradient(135deg, #F0FFF4, #FFFFFF)', border: '1px solid rgba(37,211,102,0.2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px' }}>Invite Your Preferred Vendors</div>
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: 'var(--grey)', lineHeight: 1.6 }}>Bring your photographers, MUAs, decorators onto TDW. Tag them in your destination packages so couples can discover your full team.</div>
+                  </div>
+                  <a href={'https://wa.me/?text=' + encodeURIComponent('Hey! I\'m listing our destination wedding packages on The Dream Wedding — India\'s premium wedding vendor platform. I\'d love to tag you as my preferred vendor. Sign up here:\n\nWeb: https://vendor.thedreamwedding.in\nApp: https://play.google.com/store/apps/details?id=com.thedreamwedding\n\nFree to start!')} target="_blank" style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    background: '#25D366', color: '#FFFFFF',
+                    fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500,
+                    padding: '12px 24px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                    letterSpacing: '0.5px', whiteSpace: 'nowrap', textDecoration: 'none',
+                  }}>
+                    Invite via WhatsApp
+                  </a>
+                </div>
+              </div>
+            )}
+
             {/* Verify Account */}
-            <div className="card" style={{ padding: '32px', background: 'linear-gradient(135deg, #FFFDF7, #FFF8EC)', border: '1px solid rgba(201,168,76,0.2)' }}>
+            <div className="card" style={{ padding: '32px', background: 'var(--surface)', border: '1px solid rgba(201,168,76,0.2)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 600, color: 'var(--dark)', marginBottom: '4px' }}>Verify Your Account</div>
@@ -3232,15 +4113,16 @@ export default function VendorDashboard() {
                 <div key={item.id} className="card" style={{ padding: '24px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                     <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '18px', color: 'var(--dark)' }}>{item.client}</div>
-                    <span className="badge-gold">{stageLabels[item.stage]}</span>
+                    <span style={{ fontSize: '11px', fontWeight: 500, padding: '2px 8px', borderRadius: '4px', border: '1px solid #0F172A', color: '#0F172A' }}>{stageLabels[item.stage]}</span>
                   </div>
                   <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                     {item.stages.map((stage: string, idx: number) => (
                       <div key={stage} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
                         <button onClick={() => setDeliveryItems(prev => prev.map(d => d.id === item.id ? { ...d, stage } : d))} style={{
-                          width: '100%', padding: '8px 4px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, letterSpacing: '0.3px', textAlign: 'center',
-                          background: idx <= currentIdx ? 'var(--dark)' : 'var(--cream)',
-                          color: idx <= currentIdx ? 'var(--gold)' : 'var(--grey)',
+                          width: '100%', padding: '8px 4px', border: idx <= currentIdx ? '1.5px solid #0F172A' : '1px solid var(--border-primary)',
+                          borderRadius: '6px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: idx <= currentIdx ? 600 : 400, letterSpacing: '0.3px', textAlign: 'center',
+                          background: idx <= currentIdx ? 'rgba(15,23,42,0.06)' : 'var(--surface)',
+                          color: idx <= currentIdx ? '#0F172A' : 'var(--text-muted)',
                           transition: 'all 0.2s',
                         }}>
                           {stageLabels[stage]}
@@ -3276,7 +4158,7 @@ export default function VendorDashboard() {
               const maxAmount = Math.max(...sorted.map(([, v]: any) => v.amount), 1);
               return sorted.length > 0 ? (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                  <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                     {sorted.map(([key, data]: any) => (
                       <div key={key} className="card" style={{ padding: '24px', textAlign: 'center' }}>
                         <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '8px' }}>{data.label}</div>
@@ -3316,7 +4198,7 @@ export default function VendorDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)' }}>Package Builder</h2>
             <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', marginTop: '-12px' }}>Define your packages once. Share a professional comparison card with every enquiry.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+            <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
               {packages.map((pkg: any) => (
                 <div key={pkg.id} className="card" style={{ padding: '24px', position: 'relative' }}>
                   <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '22px', color: 'var(--gold)', marginBottom: '8px' }}>{pkg.name}</div>
@@ -3337,7 +4219,7 @@ export default function VendorDashboard() {
             </div>
             <div className="card" style={{ padding: '24px' }}>
               <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: 'var(--grey)', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '16px' }}>Add New Package</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                 <input style={inp} placeholder="Package name (e.g. Diamond)" value={newPkgName} onChange={e => setNewPkgName(e.target.value)} />
                 <input style={inp} placeholder="Price (Rs.)" type="number" value={newPkgPrice} onChange={e => setNewPkgPrice(e.target.value)} />
               </div>
@@ -3370,7 +4252,7 @@ export default function VendorDashboard() {
               ];
               return (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                  <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                     {[
                       { label: 'Total Invoiced Income', value: `Rs.${totalIncome.toLocaleString('en-IN')}` },
                       { label: 'Estimated Taxable (after TDS)', value: `Rs.${Math.round(taxableIncome).toLocaleString('en-IN')}` },
@@ -3413,7 +4295,7 @@ export default function VendorDashboard() {
             <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)' }}>Cash Payment Log</h2>
             <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', marginTop: '-12px' }}>Record offline cash payments for your own records. Not processed by the platform.</p>
             <div className="card" style={{ padding: '24px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                 <input style={inp} placeholder="Client name" value={cashClient} onChange={e => setCashClient(e.target.value)} />
                 <input style={inp} placeholder="Amount received (Rs.)" type="number" value={cashAmount} onChange={e => setCashAmount(e.target.value)} />
               </div>
@@ -3680,7 +4562,7 @@ export default function VendorDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)' }}>Import / Export</h2>
             <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--grey)', marginTop: '-12px' }}>Bring your existing client data in. Take your data out anytime. Your data is always yours.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
               <div className="card" style={{ padding: '32px' }}>
                 <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--light-gold)', border: '1px solid var(--gold-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                   <Upload size={20} color="var(--gold)" />
@@ -3741,7 +4623,34 @@ export default function VendorDashboard() {
         )}
 
 
-        {activeTab === 'referral' && (
+        {activeTab === 'referral' && profilePhase < 3 && (
+          <div style={{ textAlign: 'center', padding: '80px 32px', maxWidth: '420px', margin: '0 auto' }}>
+            <div style={{ position: 'relative', width: '64px', height: '64px', margin: '0 auto 24px' }}>
+              <svg width="64" height="64" viewBox="0 0 64 64">
+                <circle cx="32" cy="32" r="26" fill="none" stroke="rgba(201,168,76,0.15)" strokeWidth="3.5" />
+                <circle cx="32" cy="32" r="26" fill="none" stroke="#C9A84C" strokeWidth="3.5"
+                  strokeDasharray={`${profileCompletion * 1.634} 163.4`}
+                  strokeLinecap="round" transform="rotate(-90 32 32)" style={{ transition: 'stroke-dasharray 0.8s ease' }} />
+              </svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: '#C9A84C' }}>
+                {profileCompletion}%
+              </div>
+            </div>
+            <div style={{ fontFamily: 'Playfair Display, serif', fontSize: '20px', fontWeight: 300, color: 'var(--text-primary)', marginBottom: '8px' }}>
+              Complete your profile to share referrals
+            </div>
+            <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: '28px' }}>
+              Your referral code will be available once your profile is fully complete and visible to couples. This ensures every referred couple sees your best work.
+            </div>
+            <button onClick={() => setActiveTab('settings')} style={{
+              background: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '6px',
+              padding: '12px 28px', fontFamily: 'Inter, sans-serif', fontSize: '13px',
+              fontWeight: 500, cursor: 'pointer', letterSpacing: '0.5px',
+            }}>Complete Profile</button>
+          </div>
+        )}
+
+        {activeTab === 'referral' && profilePhase >= 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <div>
               <h2 style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 500, color: 'var(--dark)', marginBottom: '4px' }}>Referral Tracker</h2>
@@ -3754,7 +4663,7 @@ export default function VendorDashboard() {
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <div style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', background: '#FAFAFA', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)', letterSpacing: '0.3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{referralLink || `https://thedreamwedding.in/ref/${vendorData?.id?.substring(0, 8) || 'loading'}`}</div>
                 <button onClick={() => { const link = referralLink || `https://thedreamwedding.in/ref/${vendorData?.id || ''}`; navigator.clipboard.writeText(link); toast.success('Link copied'); }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '12px 20px', borderRadius: '8px', border: '1px solid var(--card-border)', background: '#fff', color: 'var(--dark)', cursor: 'pointer', whiteSpace: 'nowrap' }}>Copy Link</button>
-                <a href={`https://wa.me/?text=${encodeURIComponent(`Hey! I use The Dream Wedding for all my wedding bookings. You should check it out too: ${referralLink || `https://thedreamwedding.in/ref/${vendorData?.id || ''}`}`)}`} target="_blank" rel="noreferrer" style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '12px 20px', borderRadius: '8px', border: 'none', background: '#25D366', color: '#fff', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}><Send size={12} /> Share</a>
+                <a href={`https://wa.me/?text=${encodeURIComponent(`Congratulations on your wedding! So glad you chose us. Now let's make your journey not just about getting married — but getting married happily.\n\nJoin The Dream Wedding to plan, coordinate, and stay connected with us and all your other vendors in one place.\n\nUse my code to get started: ${referralLink || `https://thedreamwedding.in/ref/${vendorData?.id || ''}`}`)}`} target="_blank" rel="noreferrer" style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '12px 20px', borderRadius: '8px', border: 'none', background: '#25D366', color: '#fff', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}><Send size={12} /> Share</a>
               </div>
             </div>
 
@@ -3801,7 +4710,7 @@ export default function VendorDashboard() {
             )}
 
             {/* Referral stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
                 { num: String(referralRewards?.active || 0), label: 'Active', color: '#4CAF50' },
                 { num: String(referralRewards?.signed_up || 0), label: 'Signed Up', color: 'var(--gold)' },
@@ -3899,7 +4808,7 @@ export default function VendorDashboard() {
             </div>
             <div className="card" style={{ padding: '28px 32px' }}>
               <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '20px' }}>Shield Configuration</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <div>
                   <label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1.2px', textTransform: 'uppercase', marginBottom: '6px' }}>Shield Amount</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -3935,7 +4844,7 @@ export default function VendorDashboard() {
             </div>
             <div style={{ background: '#0F1117', borderRadius: '10px', padding: '28px 32px' }}>
               <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '16px' }}>How Payment Shield Works</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 {[{step:'1',title:'You set the terms',desc:'Choose shield amount (30-100%) and deposit deadline (1-7 days before event).'},{step:'2',title:'Couple deposits',desc:'Before the deadline, couple deposits the shield amount securely via Razorpay.'},{step:'3a',title:'Cash settlement',desc:'Couple pays in cash. You confirm. Digital deposit returns to couple.'},{step:'3b',title:'Digital release',desc:'Couple releases held amount to you. 1% convenience fee applies.'}].map(s => (
                   <div key={s.step} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                     <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, color: '#0F1117' }}>{s.step}</div>
@@ -4020,7 +4929,7 @@ export default function VendorDashboard() {
             </div>
 
             {/* Revenue metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
                 { label: 'Total Revenue', value: `Rs.${invoices.reduce((sum: number, inv: any) => sum + (parseInt(inv.amount) || 0), 0).toLocaleString('en-IN')}`, color: 'var(--gold)' },
                 { label: 'Total Bookings', value: String(bookings.length), color: 'var(--dark)' },
@@ -4037,7 +4946,7 @@ export default function VendorDashboard() {
             {/* Booking conversion */}
             <div className="card" style={{ padding: '28px 32px' }}>
               <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Booking Pipeline</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+              <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
                 {[
                   { label: 'Inquiries', count: bookings.filter((b: any) => b.status === 'pending').length, color: 'var(--gold)' },
                   { label: 'Confirmed', count: bookings.filter((b: any) => b.status === 'confirmed').length, color: '#4CAF50' },
@@ -4102,7 +5011,7 @@ export default function VendorDashboard() {
                           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: 'var(--dark)' }}>{cat}</span>
                           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 500, color: 'var(--dark)' }}>Rs.{amount.toLocaleString('en-IN')}</span>
                         </div>
-                        <div style={{ height: '6px', borderRadius: '3px', background: 'rgba(140,123,110,0.08)' }}>
+                        <div style={{ height: '6px', borderRadius: '3px', background: 'var(--bg-tertiary)' }}>
                           <div style={{ height: '100%', borderRadius: '3px', background: colors[i % colors.length], width: `${(amount / total) * 100}%` }} />
                         </div>
                       </div>
@@ -4154,7 +5063,7 @@ export default function VendorDashboard() {
             {/* Portal features info */}
             <div style={{ background: '#0F1117', borderRadius: '10px', padding: '28px 32px' }}>
               <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '16px' }}>What Your Client Sees</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 {[
                   { title: 'Event Timeline', desc: 'Key dates and milestones for their wedding journey.' },
                   { title: 'Payment Schedule', desc: 'What has been paid, what is due, and when.' },
@@ -4192,7 +5101,7 @@ export default function VendorDashboard() {
             </div>
 
             {/* Team stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsTeam.length), label: 'Total Members' },
                 { num: String(dsTeam.filter(m => m.status === 'active').length), label: 'Active' },
@@ -4244,7 +5153,7 @@ export default function VendorDashboard() {
             {dsShowTeamForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Add Team Member</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div>
                     <label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Name</label>
                     <input value={dsNewTeam.name} onChange={e => setDsNewTeam({ ...dsNewTeam, name: e.target.value })} placeholder="Full name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} />
@@ -4266,7 +5175,7 @@ export default function VendorDashboard() {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
                   <button onClick={() => setDsShowTeamForm(false)} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', padding: '10px 20px', borderRadius: '8px', border: '1px solid var(--card-border)', background: '#fff', cursor: 'pointer', color: 'var(--grey)' }}>Cancel</button>
-                  <button onClick={async () => { if (!dsNewTeam.name) { toast.error('Name is required'); return; } await fetch(`${API}/ds/team`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor_id: vendorData.id, ...dsNewTeam }) }); setDsShowTeamForm(false); loadDsTeam(); toast.success('Team member added'); }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', background: 'var(--dark)', color: 'var(--cream)', cursor: 'pointer' }}>Add Member</button>
+                  <button onClick={async () => { if (!dsNewTeam.name) { toast.error('Name is required'); return; } const addRes = await fetch(`${API}/ds/team`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor_id: vendorData.id, ...dsNewTeam }) }); const addData = await addRes.json(); setDsShowTeamForm(false); loadDsTeam(); if (addData.data?.temp_password) { toast.success(`Member added! Login: ${addData.data.login_id} / Password: ${addData.data.temp_password}`); } else { toast.success('Team member added'); } }} style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', background: 'var(--dark)', color: 'var(--cream)', cursor: 'pointer' }}>Add Member</button>
                 </div>
               </div>
             )}
@@ -4291,7 +5200,7 @@ export default function VendorDashboard() {
             </div>
 
             {/* Task stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsTaskStats.total), label: 'Total', color: 'var(--dark)' },
                 { num: String(dsTaskStats.pending), label: 'Pending', color: 'var(--gold)' },
@@ -4352,9 +5261,9 @@ export default function VendorDashboard() {
 
             {/* Create task form */}
             {dsShowTaskForm && (
-              <div className="card" style={{ padding: '28px 32px' }}>
+              <div ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Create Task</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div style={{ gridColumn: 'span 2' }}>
                     <label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Task Title</label>
                     <input value={dsNewTask.title} onChange={e => setDsNewTask({ ...dsNewTask, title: e.target.value })} placeholder="What needs to be done?" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} />
@@ -4478,7 +5387,7 @@ export default function VendorDashboard() {
             ) : (
               <>
                 {/* Top stats row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
                   {[
                     { num: String(dsBriefing.tasks_today), label: 'Tasks Today', color: 'var(--dark)', icon: CheckSquare },
                     { num: String(dsBriefing.tasks_overdue), label: 'Overdue', color: '#DC2626', icon: AlertCircle },
@@ -4501,7 +5410,7 @@ export default function VendorDashboard() {
                 </div>
 
                 {/* Secondary stats */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                   {[
                     { num: String(dsBriefing.tasks_pending), label: 'Tasks Pending', icon: Clock },
                     { num: String(dsBriefing.procurement_active), label: 'Active Procurement', icon: Box },
@@ -4605,7 +5514,7 @@ export default function VendorDashboard() {
               </div>
               <button onClick={() => { setDsNewProc({ item_name: '', vendor_supplier: '', expected_date: '', cost: '', assigned_to: '', related_client_name: '', notes: '' }); setDsShowProcForm(true); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--dark)', color: 'var(--cream)', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}><Plus size={14} /> Add Item</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsProcurement.filter(p => p.status === 'ordered').length), label: 'Ordered', color: 'var(--gold)' },
                 { num: String(dsProcurement.filter(p => p.status === 'in_transit').length), label: 'In Transit', color: '#1D4ED8' },
@@ -4645,7 +5554,7 @@ export default function VendorDashboard() {
             {dsShowProcForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Add Procurement Item</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Item Name</label><input value={dsNewProc.item_name} onChange={e => setDsNewProc({ ...dsNewProc, item_name: e.target.value })} placeholder="What are you ordering?" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Supplier</label><input value={dsNewProc.vendor_supplier} onChange={e => setDsNewProc({ ...dsNewProc, vendor_supplier: e.target.value })} placeholder="Supplier name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Expected Date</label><input type="date" value={dsNewProc.expected_date} onChange={e => setDsNewProc({ ...dsNewProc, expected_date: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
@@ -4673,7 +5582,7 @@ export default function VendorDashboard() {
               </div>
               <button onClick={() => { setDsNewDelivery({ item_name: '', delivery_date: '', assigned_to: '', related_client_name: '', notes: '' }); setDsShowDeliveryForm(true); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--dark)', color: 'var(--cream)', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}><Plus size={14} /> Add Delivery</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsDeliveries.filter(d => d.status === 'preparing').length), label: 'Preparing', color: 'var(--gold)' },
                 { num: String(dsDeliveries.filter(d => d.status === 'dispatched').length), label: 'Dispatched', color: '#1D4ED8' },
@@ -4711,7 +5620,7 @@ export default function VendorDashboard() {
             {dsShowDeliveryForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Add Delivery</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Item Name</label><input value={dsNewDelivery.item_name} onChange={e => setDsNewDelivery({ ...dsNewDelivery, item_name: e.target.value })} placeholder="What is being delivered?" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Delivery Date</label><input type="date" value={dsNewDelivery.delivery_date} onChange={e => setDsNewDelivery({ ...dsNewDelivery, delivery_date: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Assign To</label><select value={dsNewDelivery.assigned_to} onChange={e => setDsNewDelivery({ ...dsNewDelivery, assigned_to: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', background: '#fff' }}><option value="">Unassigned</option>{dsTeam.filter(m => m.status === 'active').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
@@ -4763,7 +5672,7 @@ export default function VendorDashboard() {
             {dsShowTrialForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Schedule Trial</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Client Name</label><input value={dsNewTrial.client_name} onChange={e => setDsNewTrial({ ...dsNewTrial, client_name: e.target.value })} placeholder="Client name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Trial Type</label><select value={dsNewTrial.trial_type} onChange={e => setDsNewTrial({ ...dsNewTrial, trial_type: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', background: '#fff' }}><option value="consultation">Consultation</option><option value="fitting">Fitting</option><option value="tasting">Tasting</option><option value="walkthrough">Walkthrough</option><option value="other">Other</option></select></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Date and Time</label><input type="datetime-local" value={dsNewTrial.scheduled_date} onChange={e => setDsNewTrial({ ...dsNewTrial, scheduled_date: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
@@ -4789,7 +5698,7 @@ export default function VendorDashboard() {
               </div>
               <button onClick={() => { setDsNewPhoto({ file_url: '', title: '', related_client_name: '', uploader_name: '' }); setDsShowPhotoForm(true); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--dark)', color: 'var(--cream)', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}><Plus size={14} /> Upload</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+            <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsPhotos.filter(p => p.status === 'pending').length), label: 'Pending Review', color: 'var(--gold)' },
                 { num: String(dsPhotos.filter(p => p.status === 'approved').length), label: 'Approved', color: '#4CAF50' },
@@ -4833,7 +5742,7 @@ export default function VendorDashboard() {
             {dsShowPhotoForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Upload for Review</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Title</label><input value={dsNewPhoto.title} onChange={e => setDsNewPhoto({ ...dsNewPhoto, title: e.target.value })} placeholder="e.g. Edited Photos - Batch 1" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>File URL</label><input value={dsNewPhoto.file_url} onChange={e => setDsNewPhoto({ ...dsNewPhoto, file_url: e.target.value })} placeholder="Cloudinary or drive link" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Uploaded By</label><input value={dsNewPhoto.uploader_name} onChange={e => setDsNewPhoto({ ...dsNewPhoto, uploader_name: e.target.value })} placeholder="Team member name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
@@ -4898,7 +5807,7 @@ export default function VendorDashboard() {
             {dsShowCheckinForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Check In Team Member</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Team Member</label><select value={dsNewCheckin.member_id} onChange={e => { const m = dsTeam.find(t => t.id === e.target.value); setDsNewCheckin({ ...dsNewCheckin, member_id: e.target.value, member_name: m?.name || '' }); }} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', background: '#fff' }}><option value="">Select member</option>{dsTeam.filter(m => m.status === 'active').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Event / Client</label><input value={dsNewCheckin.related_client_name} onChange={e => setDsNewCheckin({ ...dsNewCheckin, related_client_name: e.target.value })} placeholder="e.g. Sharma Wedding" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                 </div>
@@ -4922,7 +5831,7 @@ export default function VendorDashboard() {
               </div>
               <button onClick={() => { setDsNewSentiment({ client_name: '', milestone: '', rating: 'happy', logger_name: '', notes: '' }); setDsShowSentimentForm(true); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--dark)', color: 'var(--cream)', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500, padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}><Plus size={14} /> Log Sentiment</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+            <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
               {[
                 { num: String(dsSentiment.filter(s => s.rating === 'happy').length), label: 'Happy', color: '#4CAF50', emoji: 'Good' },
                 { num: String(dsSentiment.filter(s => s.rating === 'neutral').length), label: 'Neutral', color: 'var(--gold)', emoji: 'Okay' },
@@ -4959,7 +5868,7 @@ export default function VendorDashboard() {
             {dsShowSentimentForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Log Client Sentiment</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Client Name</label><input value={dsNewSentiment.client_name} onChange={e => setDsNewSentiment({ ...dsNewSentiment, client_name: e.target.value })} placeholder="Client name" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Milestone</label><input value={dsNewSentiment.milestone} onChange={e => setDsNewSentiment({ ...dsNewSentiment, milestone: e.target.value })} placeholder="e.g. First fitting, Final delivery" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Rating</label><select value={dsNewSentiment.rating} onChange={e => setDsNewSentiment({ ...dsNewSentiment, rating: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', background: '#fff' }}><option value="happy">Happy</option><option value="neutral">Neutral</option><option value="concerned">Concerned</option></select></div>
@@ -5020,7 +5929,7 @@ export default function VendorDashboard() {
             {dsShowTemplateForm && (
               <div className="card" style={{ padding: '28px 32px' }}>
                 <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 600, color: 'var(--dark)', marginBottom: '20px' }}>Create Delegation Template</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Template Name</label><input value={dsNewTemplate.template_name} onChange={e => setDsNewTemplate({ ...dsNewTemplate, template_name: e.target.value })} placeholder="e.g. Destination Wedding - Udaipur" style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px' }} /></div>
                   <div><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Event Type</label><select value={dsNewTemplate.event_type} onChange={e => setDsNewTemplate({ ...dsNewTemplate, event_type: e.target.value })} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', background: '#fff' }}><option value="wedding">Wedding</option><option value="engagement">Engagement</option><option value="reception">Reception</option><option value="destination">Destination Wedding</option><option value="other">Other</option></select></div>
                   <div style={{ gridColumn: 'span 2' }}><label style={{ display: 'block', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 500, color: 'var(--grey)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>Tasks (one per line)</label><textarea value={dsNewTemplate.tasks} onChange={e => setDsNewTemplate({ ...dsNewTemplate, tasks: e.target.value })} placeholder="Venue recce and walkthrough\nConfirm vendor deliverables\nBrief second team\nEquipment check and packing\nTravel and hotel arrangements" rows={6} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--card-border)', fontFamily: 'Inter, sans-serif', fontSize: '13px', resize: 'vertical' }} /></div>

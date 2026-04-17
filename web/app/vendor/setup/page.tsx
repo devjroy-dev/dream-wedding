@@ -10,6 +10,14 @@ export default function VendorSetupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [session, setSession] = useState<any>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     try {
@@ -47,6 +55,7 @@ export default function VendorSetupPage() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
+      {!isMobile && (
       <div style={{ width: '55%', background: '#0F1117', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '48px 56px' }}>
         <div>
           <div style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase' }}>THE DREAM WEDDING</div>
@@ -65,8 +74,15 @@ export default function VendorSetupPage() {
           <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.3px' }}>vendor.thedreamwedding.in</div>
         </div>
       </div>
-      <div style={{ width: '45%', background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '56px 64px' }}>
-        <div style={{ width: '100%', maxWidth: '360px' }}>
+      )}
+      <div style={{ width: isMobile ? '100%' : '45%', background: isMobile ? '#0F1117' : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '32px 24px' : '56px 64px', minHeight: isMobile ? '100vh' : 'auto' }}>
+        {isMobile && (
+          <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase', marginBottom: '6px' }}>THE DREAM WEDDING</div>
+            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.5px' }}>Vendor Business Portal</div>
+          </div>
+        )}
+        <div style={{ width: '100%', maxWidth: '360px', background: isMobile ? '#FFFFFF' : 'transparent', borderRadius: isMobile ? '16px' : '0', padding: isMobile ? '28px 24px' : '0' }}>
           <div style={{ marginBottom: '32px' }}>
             <div style={{ fontSize: '22px', fontWeight: 600, color: '#0F1117', marginBottom: '8px', letterSpacing: '-0.3px' }}>Create your account</div>
             <div style={{ fontSize: '13px', color: '#6B7280', lineHeight: 1.6 }}>Choose a username and password. You will use these to sign in to your portal.</div>

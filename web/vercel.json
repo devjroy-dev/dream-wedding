@@ -9,6 +9,10 @@
       "destination": "/admin"
     },
     {
+      "source": "/admin/:path*",
+      "destination": "/admin"
+    },
+    {
       "source": "/vendor/login",
       "destination": "/vendor/login"
     },
@@ -19,6 +23,22 @@
     {
       "source": "/vendor/demo",
       "destination": "/vendor/demo"
+    },
+    {
+      "source": "/couple",
+      "destination": "/couple"
+    },
+    {
+      "source": "/couple/login",
+      "destination": "/couple/login"
+    },
+    {
+      "source": "/about",
+      "destination": "/about"
+    },
+    {
+      "source": "/join/:code",
+      "destination": "/join/[code]"
     }
   ]
 }
