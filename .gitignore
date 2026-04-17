@@ -44,3 +44,4 @@ app-example
 web/.env.local
 .env.local
 .vercel
+*.patch
