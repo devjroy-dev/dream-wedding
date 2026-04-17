@@ -849,11 +849,32 @@ export default function VendorDashboard() {
         session = JSON.parse(ls);
       } catch(e) {}
       const isDemo = window.location.href.includes('demo=1') || window.location.href.includes('/vendor/demo');
-      if (isDemo || !session.vendorId) {
+      // Only use the demo vendor when explicitly requested (?demo=1 or /vendor/demo path).
+      // If there's no session and no demo flag, send the user to login instead of crashing
+      // on a hardcoded fallback ID that may not exist in the database.
+      if (isDemo) {
         session = { vendorId: '20792c76-b265-4063-a356-133ea1c6933b', vendorName: 'Dev Roy Productions', category: 'content-creators', city: 'Delhi NCR', plan: 'premium' };
+      } else if (!session.vendorId) {
+        // No session and not a demo — redirect to login
+        setLoading(false);
+        router.push('/vendor/login?next=/vendor/dashboard');
+        return;
       }
-      const vendorId = session.vendorId || '4f78ee18-5728-4b80-a4db-f362ed117e4f';
+      const vendorId = session.vendorId;
       const res = await fetch(`${API}/vendors/${vendorId}`);
+      // Handle non-2xx responses (404 missing vendor, 500 server error) without crashing
+      if (!res.ok) {
+        setLoading(false);
+        // If the saved session points at a vendor that no longer exists, clear it and login again
+        if (res.status === 404) {
+          try { localStorage.removeItem('vendor_web_session'); } catch {}
+          router.push('/vendor/login?next=/vendor/dashboard&reason=vendor_missing');
+          return;
+        }
+        // Other errors — show a friendly note instead of crashing the whole React tree
+        toast.error('Could not load vendor data. Please try again.');
+        return;
+      }
       const data = await res.json();
       if (data.success && data.data) {
         const vendor = data.data;

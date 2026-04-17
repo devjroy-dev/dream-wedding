@@ -112,8 +112,12 @@ app.get('/api/vendors', async (req, res) => {
 
 app.get('/api/vendors/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendors').select('*').eq('id', req.params.id).single();
+    const { data, error } = await supabase.from('vendors').select('*').eq('id', req.params.id).maybeSingle();
     if (error) throw error;
+    if (!data) {
+      // Vendor not found — return 404 instead of 500 so the frontend can handle gracefully
+      return res.status(404).json({ success: false, error: 'Vendor not found', code: 'VENDOR_NOT_FOUND' });
+    }
     // Attach tier from vendor_subscriptions
     try {
       const { data: sub } = await supabase
@@ -123,11 +127,9 @@ app.get('/api/vendors/:id', async (req, res) => {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (data) {
-        data.tier = sub?.tier || 'essential';
-        data.subscription_status = sub?.status || 'active';
-        data.founding_badge = !!sub?.founding_badge;
-      }
+      data.tier = sub?.tier || 'essential';
+      data.subscription_status = sub?.status || 'active';
+      data.founding_badge = !!sub?.founding_badge;
     } catch (e) { /* best-effort */ }
     res.json({ success: true, data });
   } catch (error) {
