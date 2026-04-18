@@ -492,23 +492,18 @@ export default function VendorMobilePage() {
         />
       )}
 
-      {/* ── FLOATING DREAM AI BUTTON (Overview only) ── */}
-      {mode === 'Business' && activeTab === 'Overview' && (
-        <button
-          onClick={() => setShowAiModal(true)}
-          aria-label="Open Dream AI"
-          style={{
-            position: 'fixed', bottom: 'calc(72px + env(safe-area-inset-bottom))', right: 'max(20px, calc(50vw - 220px))',
-            width: 52, height: 52, borderRadius: 26,
-            background: C.dark, border: `2px solid ${C.gold}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', zIndex: 40,
-            boxShadow: '0 6px 20px rgba(44,36,32,0.25)',
-          }}
-        >
-          <span style={{ position: 'absolute', inset: 0, borderRadius: 26, border: `1px solid ${C.gold}`, opacity: 0.4, animation: 'tdwAiPulse 2.4s ease-in-out infinite' }} />
-          <Zap size={20} color={C.gold} />
-        </button>
+      {/* ── FLOATING AI BUTTON ──
+          Overview shows Dream AI (WhatsApp chat).
+          All other Business pages show PAi (action assistant).
+          Both draggable on Y-axis, right-edge-snapped, position persists.
+          Hidden entirely in Discovery mode. */}
+      {mode === 'Business' && (
+        <FloatingAssistant
+          kind={activeTab === 'Overview' ? 'dreamai' : 'pai'}
+          userType="vendor"
+          userId={session.vendorId}
+          onDreamAiClick={() => setShowAiModal(true)}
+        />
       )}
 
       {/* ── DREAM AI MODAL ── */}
@@ -4157,6 +4152,550 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
       >
         {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add assistant')}
       </button>
+    </SheetOverlay>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// FLOATING ASSISTANT (Turn 9E) — Dream AI on Overview, PAi elsewhere
+// Both draggable on Y-axis, right-edge-snapped, position persists per user.
+// PAi is invite-only during beta; non-granted users see a Request Access sheet.
+// ══════════════════════════════════════════════════════════════════════════
+
+interface PaiStatus {
+  enabled: boolean;
+  reason?: string;
+  expires_at?: string | null;
+  daily_cap?: number;
+  daily_used?: number;
+  daily_remaining?: number;
+  pending_request?: any;
+}
+
+function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
+  kind: 'dreamai' | 'pai';
+  userType: 'vendor' | 'couple';
+  userId: string;
+  onDreamAiClick?: () => void;
+}) {
+  // Y-position persists in localStorage. X is always right-edge-snapped.
+  const storageKey = `tdw_${kind}_button_y`;
+  const [buttonY, setButtonY] = useState<number>(() => {
+    if (typeof window === 'undefined') return -1;
+    const saved = localStorage.getItem(storageKey);
+    return saved ? parseInt(saved) : -1;
+  });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startY: number; startTop: number; moved: boolean }>({ startY: 0, startTop: 0, moved: false });
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+
+  // PAi state
+  const [paiStatus, setPaiStatus] = useState<PaiStatus | null>(null);
+  const [showPaiSheet, setShowPaiSheet] = useState(false);
+  const [showRequestSheet, setShowRequestSheet] = useState(false);
+
+  // Load PAi status only if this is a PAi button
+  useEffect(() => {
+    if (kind !== 'pai' || !userId) return;
+    let cancelled = false;
+    fetch(`${API}/api/pai/status?user_type=${userType}&user_id=${userId}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.success) setPaiStatus(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [kind, userType, userId]);
+
+  // Default Y position: bottom-right, above bottom nav
+  const defaultY = typeof window !== 'undefined' ? window.innerHeight - 140 : 600;
+  const effectiveY = buttonY < 0 ? defaultY : buttonY;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!btnRef.current) return;
+    btnRef.current.setPointerCapture(e.pointerId);
+    const rect = btnRef.current.getBoundingClientRect();
+    dragRef.current = { startY: e.clientY, startTop: rect.top, moved: false };
+    setDragging(true);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dy) > 3) dragRef.current.moved = true;
+    const newTop = dragRef.current.startTop + dy;
+    const minY = 80;
+    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 800) - 100;
+    setButtonY(Math.min(Math.max(newTop, minY), maxY));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    setDragging(false);
+    if (dragRef.current.moved) {
+      // Save position
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(storageKey, String(buttonY));
+      }
+    } else {
+      // Not a drag — treat as tap
+      handleClick();
+    }
+    if (btnRef.current) btnRef.current.releasePointerCapture(e.pointerId);
+  };
+
+  const handleClick = () => {
+    if (kind === 'dreamai') {
+      onDreamAiClick && onDreamAiClick();
+      return;
+    }
+    // PAi flow
+    if (!paiStatus) return;
+    if (paiStatus.enabled) {
+      setShowPaiSheet(true);
+    } else {
+      setShowRequestSheet(true);
+    }
+  };
+
+  // Button visual
+  const bg = C.dark;
+  const accent = C.gold;
+  const showBetaChip = kind === 'pai' && paiStatus?.enabled;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        aria-label={kind === 'dreamai' ? 'Open Dream AI' : 'Open PAi'}
+        style={{
+          position: 'fixed',
+          top: effectiveY,
+          right: 'max(20px, calc(50vw - 220px))',
+          width: 52, height: 52, borderRadius: 26,
+          background: bg, border: `2px solid ${accent}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: dragging ? 'grabbing' : 'pointer', zIndex: 40,
+          boxShadow: dragging ? '0 10px 28px rgba(44,36,32,0.35)' : '0 6px 20px rgba(44,36,32,0.25)',
+          transition: dragging ? 'none' : 'box-shadow 0.2s ease',
+          touchAction: 'none', // prevents page scroll while dragging
+          padding: 0,
+        }}
+      >
+        <span style={{
+          position: 'absolute', inset: 0, borderRadius: 26,
+          border: `1px solid ${accent}`, opacity: 0.4,
+          animation: 'tdwAiPulse 2.4s ease-in-out infinite',
+          pointerEvents: 'none' as const,
+        }} />
+        {kind === 'dreamai' ? (
+          <Zap size={20} color={accent} />
+        ) : (
+          <span style={{
+            fontFamily: "'Playfair Display', serif",
+            fontSize: 16, fontWeight: 500, color: accent,
+            letterSpacing: '0.5px', lineHeight: 1,
+          }}>PAi</span>
+        )}
+        {showBetaChip && (
+          <span style={{
+            position: 'absolute', bottom: -6, right: -4,
+            background: C.goldDeep, color: '#fff',
+            fontSize: 8, fontWeight: 700, letterSpacing: '0.5px',
+            padding: '2px 5px', borderRadius: 8,
+            fontFamily: 'DM Sans, sans-serif',
+            pointerEvents: 'none' as const,
+          }}>BETA</span>
+        )}
+      </button>
+
+      {showPaiSheet && paiStatus?.enabled && (
+        <PaiSheet
+          userType={userType}
+          userId={userId}
+          status={paiStatus}
+          onClose={() => setShowPaiSheet(false)}
+          onSaved={() => {
+            // Refresh status to update daily counter
+            fetch(`${API}/api/pai/status?user_type=${userType}&user_id=${userId}`)
+              .then(r => r.json()).then(d => { if (d.success) setPaiStatus(d); }).catch(() => {});
+          }}
+        />
+      )}
+
+      {showRequestSheet && !paiStatus?.enabled && (
+        <PaiRequestSheet
+          userType={userType}
+          userId={userId}
+          hasPending={!!paiStatus?.pending_request}
+          onClose={() => setShowRequestSheet(false)}
+          onSubmitted={() => {
+            fetch(`${API}/api/pai/status?user_type=${userType}&user_id=${userId}`)
+              .then(r => r.json()).then(d => { if (d.success) setPaiStatus(d); }).catch(() => {});
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+// ── PAi input sheet + preview flow
+function PaiSheet({ userType, userId, status, onClose, onSaved }: {
+  userType: 'vendor' | 'couple';
+  userId: string;
+  status: PaiStatus;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [input, setInput] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState('');
+  const [parsed, setParsed] = useState<any>(null);
+  const [eventId, setEventId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [listening, setListening] = useState(false);
+  const remaining = status.daily_remaining ?? 5;
+
+  // Voice input via Web Speech API (if available)
+  const startVoice = () => {
+    if (typeof window === 'undefined') return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert('Voice input is not supported on this browser.'); return; }
+    const rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      const text = e.results[0][0].transcript;
+      setInput(prev => prev ? prev + ' ' + text : text);
+      setListening(false);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    setListening(true);
+    rec.start();
+  };
+
+  const handleParse = async () => {
+    if (!input.trim()) return;
+    if (remaining <= 0) { setError('Daily cap reached. Come back tomorrow.'); return; }
+    setParsing(true); setError(''); setParsed(null);
+    try {
+      const r = await fetch(`${API}/api/pai/parse`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: userType, user_id: userId, input_text: input.trim() }),
+      });
+      const d = await r.json();
+      if (!d.success) {
+        setError(d.error || 'Could not parse. Try rephrasing.');
+        setParsing(false); return;
+      }
+      if (d.parsed?.intent === 'unknown') {
+        setError(d.parsed.preview_summary || 'I need more details. Try being more specific.');
+        setParsing(false); return;
+      }
+      setParsed(d.parsed);
+      setEventId(d.event_id || null);
+    } catch {
+      setError('Network error. Try again.');
+    } finally { setParsing(false); }
+  };
+
+  const handleConfirm = async () => {
+    if (!parsed) return;
+    setConfirming(true); setError('');
+    try {
+      const r = await fetch(`${API}/api/pai/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_id: eventId, user_type: userType, user_id: userId,
+          intent: parsed.intent, data: parsed.data,
+        }),
+      });
+      const d = await r.json();
+      if (!d.success) {
+        setError(d.error === 'daily_cap_reached' ? 'Daily cap reached. Come back tomorrow.' : (d.error || 'Could not save.'));
+        setConfirming(false); return;
+      }
+      onSaved();
+      onClose();
+    } catch {
+      setError('Network error.');
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader
+        eyebrow={`PAi · Beta${typeof remaining === 'number' ? ` · ${remaining}/5 today` : ''}`}
+        title="What would you like to add?"
+        onClose={onClose}
+      />
+
+      {!parsed ? (
+        <>
+          <div style={{ position: 'relative', marginBottom: 12 }}>
+            <textarea
+              value={input}
+              onChange={e => { setInput(e.target.value); setError(''); }}
+              placeholder={userType === 'vendor'
+                ? 'e.g. Create task for Vivek to collect consignment on 25 April'
+                : 'e.g. Add toothbrushes to my checklist'}
+              rows={3}
+              style={{
+                width: '100%', boxSizing: 'border-box' as const,
+                padding: '12px 44px 12px 14px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.pearl,
+                fontSize: 14, fontFamily: 'inherit',
+                outline: 'none', resize: 'none' as const,
+              }}
+            />
+            <button
+              onClick={startVoice}
+              disabled={listening}
+              aria-label="Voice input"
+              style={{
+                position: 'absolute' as const, top: 10, right: 10,
+                width: 28, height: 28, borderRadius: 14,
+                background: listening ? C.gold : 'transparent',
+                border: `1px solid ${listening ? C.goldDeep : C.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', padding: 0,
+              }}
+            >
+              <MessageCircle size={13} color={listening ? C.dark : C.muted} />
+            </button>
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+              background: C.redSoft, border: `1px solid ${C.redBorder}`,
+              color: C.red, fontSize: 12,
+            }}>{error}</div>
+          )}
+
+          <button
+            onClick={handleParse}
+            disabled={parsing || !input.trim() || remaining <= 0}
+            style={{
+              width: '100%', padding: 14, borderRadius: 10,
+              background: (parsing || !input.trim() || remaining <= 0) ? C.pearl : C.dark,
+              color: C.gold, border: 'none',
+              cursor: (parsing || !input.trim() || remaining <= 0) ? 'default' : 'pointer',
+              fontSize: 12, fontWeight: 500, letterSpacing: '2px',
+              textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+              opacity: (parsing || !input.trim() || remaining <= 0) ? 0.6 : 1,
+            }}
+          >
+            {parsing ? 'Thinking…' : 'Parse'}
+          </button>
+
+          <div style={{
+            marginTop: 12, padding: '10px 12px',
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10,
+            fontSize: 10, color: C.goldDeep, lineHeight: 1.5,
+          }}>
+            <strong>PAi is in Beta.</strong> 5 confirmed actions per day, 5-day access. We're watching how it works and fixing bugs. Your inputs help us improve.
+          </div>
+        </>
+      ) : (
+        <PaiPreviewCard
+          parsed={parsed}
+          onEdit={() => setParsed(null)}
+          onConfirm={handleConfirm}
+          confirming={confirming}
+          error={error}
+        />
+      )}
+    </SheetOverlay>
+  );
+}
+
+function PaiPreviewCard({ parsed, onEdit, onConfirm, confirming, error }: {
+  parsed: any;
+  onEdit: () => void;
+  onConfirm: () => void;
+  confirming: boolean;
+  error: string;
+}) {
+  const { intent, data, preview_summary } = parsed;
+  const intentLabel: Record<string, string> = {
+    create_todo: 'Task',
+    create_event: 'Event',
+    create_reminder: 'Reminder',
+    create_payment_schedule: 'Payment Schedule',
+    create_invoice: 'Invoice',
+    create_checklist_item: 'Checklist Item',
+    create_expense: data?.kind === 'shagun' ? 'Shagun' : 'Expense',
+    create_guest: 'Guest',
+    create_moodboard_pin: 'Moodboard Pin',
+    update_vendor_stage: 'Vendor Stage Update',
+  };
+
+  // Render data fields as a simple key-value list
+  const fields = Object.entries(data || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
+
+  return (
+    <>
+      <div style={{
+        padding: '14px 16px', borderRadius: 12,
+        background: C.champagne, border: `1px solid ${C.goldBorder}`,
+        marginBottom: 14,
+      }}>
+        <div style={{
+          fontSize: 9, fontWeight: 600, letterSpacing: '2px',
+          color: C.goldDeep, textTransform: 'uppercase' as const, marginBottom: 6,
+        }}>{intentLabel[intent] || intent}</div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif", fontSize: 15,
+          color: C.dark, fontWeight: 500, lineHeight: 1.4,
+        }}>{preview_summary || 'Confirm to save'}</div>
+      </div>
+
+      <div style={{
+        background: C.ivory, border: `1px solid ${C.border}`,
+        borderRadius: 10, overflow: 'hidden', marginBottom: 14,
+      }}>
+        {fields.map(([k, v], i) => (
+          <div key={k} style={{
+            padding: '10px 14px',
+            borderBottom: i < fields.length - 1 ? `1px solid ${C.borderSoft}` : 'none',
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+          }}>
+            <span style={{
+              fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '0.5px',
+              textTransform: 'uppercase' as const, flexShrink: 0, minWidth: 90,
+            }}>{k.replace(/_/g, ' ')}</span>
+            <span style={{ fontSize: 12, color: C.dark, flex: 1, wordBreak: 'break-word' as const }}>
+              {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {error && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+          background: C.redSoft, border: `1px solid ${C.redBorder}`,
+          color: C.red, fontSize: 12,
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onEdit} disabled={confirming} style={{
+          flex: 1, padding: 12, borderRadius: 10,
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, cursor: 'pointer',
+          fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+        }}>Edit</button>
+        <button onClick={onConfirm} disabled={confirming} style={{
+          flex: 2, padding: 12, borderRadius: 10,
+          background: confirming ? C.pearl : C.dark, color: C.gold,
+          border: 'none', cursor: confirming ? 'default' : 'pointer',
+          fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+          opacity: confirming ? 0.6 : 1,
+        }}>{confirming ? 'Saving…' : 'Confirm & Save'}</button>
+      </div>
+    </>
+  );
+}
+
+function PaiRequestSheet({ userType, userId, hasPending, onClose, onSubmitted }: {
+  userType: 'vendor' | 'couple';
+  userId: string;
+  hasPending: boolean;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(hasPending);
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await fetch(`${API}/api/pai/request-access`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: userType, user_id: userId, reason: reason.trim() || null }),
+      });
+      setDone(true);
+      onSubmitted();
+    } catch {} finally { setSubmitting(false); }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader
+        eyebrow="PAi · Beta"
+        title={done ? 'Request received' : 'Request access to PAi'}
+        onClose={onClose}
+      />
+
+      {done ? (
+        <>
+          <div style={{
+            padding: '14px 16px', borderRadius: 12, marginBottom: 14,
+            background: C.champagne, border: `1px solid ${C.goldBorder}`,
+          }}>
+            <div style={{
+              fontFamily: "'Playfair Display', serif", fontSize: 15,
+              color: C.dark, fontWeight: 500, marginBottom: 4,
+            }}>Thanks — we'll be in touch.</div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              PAi is currently invite-only. We're granting access to a small group of founding {userType === 'vendor' ? 'vendors' : 'couples'} during the beta.
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            width: '100%', padding: 14, borderRadius: 10,
+            background: C.dark, color: C.gold, border: 'none',
+            cursor: 'pointer', fontSize: 12, fontWeight: 500,
+            letterSpacing: '2px', textTransform: 'uppercase' as const,
+            fontFamily: 'DM Sans, sans-serif',
+          }}>Close</button>
+        </>
+      ) : (
+        <>
+          <div style={{ marginBottom: 14, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+            <strong style={{ color: C.dark }}>PAi</strong> is your personal assistant. Type or speak what you want, and PAi creates the record for you.
+            <br /><br />
+            "Create task for Vivek to collect consignment on 25 April"
+            <br />
+            "Add ₹50,000 payment due from Sharma on May 3"
+            <br /><br />
+            It's invite-only during beta. Tell us why you'd like early access.
+          </div>
+
+          <FieldLabel>Why you'd like PAi (optional)</FieldLabel>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="I juggle 8-10 weddings a month and want to log things faster…"
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box' as const,
+              padding: '12px 14px', borderRadius: 10,
+              border: `1px solid ${C.border}`, background: C.pearl,
+              fontSize: 14, fontFamily: 'inherit',
+              outline: 'none', resize: 'none' as const, marginBottom: 14,
+            }}
+          />
+
+          <button onClick={submit} disabled={submitting} style={{
+            width: '100%', padding: 14, borderRadius: 10,
+            background: submitting ? C.pearl : C.dark, color: C.gold,
+            border: 'none', cursor: submitting ? 'default' : 'pointer',
+            fontSize: 12, fontWeight: 500, letterSpacing: '2px',
+            textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+            opacity: submitting ? 0.6 : 1,
+          }}>{submitting ? 'Submitting…' : 'Request access'}</button>
+        </>
+      )}
     </SheetOverlay>
   );
 }

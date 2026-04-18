@@ -33,6 +33,7 @@ const TABS = [
   { id: 'founding', label: '💎 Founding Vendors' },
   { id: 'tdw-ai', label: '✨ Dream Ai Access' },
   { id: 'hot-dates', label: '🔥 Hot Dates' },
+  { id: 'pai', label: '🤖 PAi Beta' },
 ];
 
 const s: any = {
@@ -159,6 +160,66 @@ export default function AdminPage() {
     } catch {}
   };
   useEffect(() => { if (activeTab === 'hot-dates') loadHotDates(); }, [activeTab, hotYear]);
+
+  // ── PAi Beta (Turn 9E) ─────────────────────────────────────────
+  const [paiRequests, setPaiRequests] = useState<any[]>([]);
+  const [paiEvents, setPaiEvents] = useState<any[]>([]);
+  const [paiGrantedV, setPaiGrantedV] = useState<any[]>([]);
+  const [paiGrantedC, setPaiGrantedC] = useState<any[]>([]);
+  const [paiLoading, setPaiLoading] = useState(false);
+  const [paiView, setPaiView] = useState<'requests' | 'granted' | 'events'>('requests');
+  const [paiGrantDays, setPaiGrantDays] = useState('5');
+  const loadPai = async () => {
+    setPaiLoading(true);
+    try {
+      const [rReq, rStats] = await Promise.all([
+        fetch(`${API}/api/pai/admin/requests`),
+        fetch(`${API}/api/pai/admin/stats`),
+      ]);
+      const dReq = await rReq.json();
+      const dStats = await rStats.json();
+      if (dReq.success) setPaiRequests(dReq.data || []);
+      if (dStats.success) {
+        setPaiEvents(dStats.events || []);
+        setPaiGrantedV(dStats.granted_vendors || []);
+        setPaiGrantedC(dStats.granted_couples || []);
+      }
+    } catch {} finally { setPaiLoading(false); }
+  };
+  const paiGrant = async (userType: string, userId: string) => {
+    try {
+      const r = await fetch(`${API}/api/pai/admin/grant`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: userType, user_id: userId, days: parseInt(paiGrantDays) || 5 }),
+      });
+      const d = await r.json();
+      if (d.success) { loadPai(); }
+      else alert(d.error || 'Could not grant');
+    } catch { alert('Network error'); }
+  };
+  const paiRevoke = async (userType: string, userId: string) => {
+    if (!confirm('Revoke PAi access for this user?')) return;
+    try {
+      const r = await fetch(`${API}/api/pai/admin/revoke`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: userType, user_id: userId }),
+      });
+      const d = await r.json();
+      if (d.success) loadPai();
+    } catch {}
+  };
+  const paiDeny = async (requestId: string) => {
+    if (!confirm('Deny this request?')) return;
+    try {
+      const r = await fetch(`${API}/api/pai/admin/deny`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      const d = await r.json();
+      if (d.success) loadPai();
+    } catch {}
+  };
+  useEffect(() => { if (activeTab === 'pai') loadPai(); }, [activeTab]);
 
   const [isMobile, setIsMobile] = useState(false);
 
@@ -1640,6 +1701,266 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'pai' && (
+          <>
+            <div style={s.cardPad}>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>🤖 PAi Beta Management</div>
+              <div style={{ fontSize: 12, color: '#8C7B6E', marginBottom: 16, lineHeight: 1.5 }}>
+                PAi is invite-only during beta. Grant access for 5-day windows, review usage, deny requests.
+                <br />Target: 50 users max. Cost: ~₹0.12 per parse (Haiku 4.5 with prompt caching).
+              </div>
+
+              {/* Sub-tab nav */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid #E8E0D5', paddingBottom: 0 }}>
+                {(['requests', 'granted', 'events'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setPaiView(v)}
+                    style={{
+                      padding: '8px 14px', border: 'none', background: 'transparent',
+                      cursor: 'pointer', fontSize: 12,
+                      color: paiView === v ? '#2C2420' : '#8C7B6E',
+                      borderBottom: paiView === v ? '2px solid #C9A84C' : '2px solid transparent',
+                      fontWeight: paiView === v ? 500 : 400, marginBottom: -1,
+                    }}
+                  >
+                    {v === 'requests' ? `Pending Requests (${paiRequests.filter(r => r.status === 'pending').length})`
+                      : v === 'granted' ? `Active Grants (${paiGrantedV.length + paiGrantedC.length})`
+                      : `Usage Log (${paiEvents.length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Default days config */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '10px 14px', background: '#FAF6F0', borderRadius: 8 }}>
+                <label style={{ fontSize: 11, color: '#8C7B6E', fontWeight: 500, letterSpacing: 0.5 }}>GRANT FOR</label>
+                <input
+                  type="number" min="1" max="30"
+                  value={paiGrantDays}
+                  onChange={e => setPaiGrantDays(e.target.value)}
+                  style={{ width: 60, padding: '6px 10px', borderRadius: 6, border: '1px solid #E8E0D5', fontSize: 13 }}
+                />
+                <span style={{ fontSize: 11, color: '#8C7B6E' }}>days</span>
+                <span style={{ fontSize: 10, color: '#B8ADA4', marginLeft: 'auto' }}>Default: 5 days • Max: 30 days</span>
+              </div>
+
+              {paiLoading ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>Loading…</div>
+              ) : (
+                <>
+                  {paiView === 'requests' && (
+                    <>
+                      {paiRequests.length === 0 ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                          No access requests yet.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr>
+                                <th style={s.th}>Requested</th>
+                                <th style={s.th}>Type</th>
+                                <th style={s.th}>User</th>
+                                <th style={s.th}>Reason</th>
+                                <th style={s.th}>Status</th>
+                                <th style={s.th}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paiRequests.map(r => (
+                                <tr key={r.id}>
+                                  <td style={s.td}>{new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</td>
+                                  <td style={s.td}>
+                                    <span style={s.pill(r.user_type === 'vendor' ? '#FFF3DB' : '#FDF6F0', r.user_type === 'vendor' ? '#B8963A' : '#C9A84C')}>
+                                      {r.user_type}
+                                    </span>
+                                  </td>
+                                  <td style={s.td}>
+                                    <strong>{r.user_name || 'Unknown'}</strong>
+                                    {r.user_phone && <div style={{ fontSize: 10, color: '#8C7B6E' }}>{r.user_phone}</div>}
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={{ fontSize: 11, color: '#8C7B6E', maxWidth: 240, display: 'inline-block' }}>
+                                      {r.reason || <span style={{ color: '#B8ADA4' }}>—</span>}
+                                    </span>
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={s.pill(
+                                      r.status === 'pending' ? '#FFF3DB' : r.status === 'granted' ? '#D4EDDA' : '#F8D7DA',
+                                      r.status === 'pending' ? '#B8963A' : r.status === 'granted' ? '#155724' : '#721C24'
+                                    )}>{r.status}</span>
+                                  </td>
+                                  <td style={s.td}>
+                                    {r.status === 'pending' ? (
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        <button
+                                          onClick={() => paiGrant(r.user_type, r.user_id)}
+                                          style={s.btnSm('#2C2420', '#C9A84C', '#2C2420')}
+                                        >Grant</button>
+                                        <button
+                                          onClick={() => paiDeny(r.id)}
+                                          style={s.btnSm('transparent', '#C65757', '#F5D5D5')}
+                                        >Deny</button>
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: 10, color: '#B8ADA4' }}>
+                                        {r.reviewed_at ? new Date(r.reviewed_at).toLocaleDateString('en-IN') : ''}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {paiView === 'granted' && (
+                    <>
+                      {(paiGrantedV.length + paiGrantedC.length) === 0 ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                          No users have PAi access yet.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr>
+                                <th style={s.th}>Type</th>
+                                <th style={s.th}>Name</th>
+                                <th style={s.th}>Granted</th>
+                                <th style={s.th}>Expires</th>
+                                <th style={s.th}>Status</th>
+                                <th style={s.th}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[...paiGrantedV.map(v => ({ ...v, user_type: 'vendor' })), ...paiGrantedC.map(c => ({ ...c, user_type: 'couple' }))].map(u => {
+                                const expired = u.pai_expires_at && new Date(u.pai_expires_at) < new Date();
+                                return (
+                                  <tr key={u.id} style={{ background: expired ? '#FFF8E8' : 'transparent' }}>
+                                    <td style={s.td}>
+                                      <span style={s.pill(u.user_type === 'vendor' ? '#FFF3DB' : '#FDF6F0', u.user_type === 'vendor' ? '#B8963A' : '#C9A84C')}>
+                                        {u.user_type}
+                                      </span>
+                                    </td>
+                                    <td style={s.td}><strong>{u.name || 'Unknown'}</strong></td>
+                                    <td style={s.td}>
+                                      {u.pai_granted_at ? new Date(u.pai_granted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                                    </td>
+                                    <td style={s.td}>
+                                      {u.pai_expires_at ? new Date(u.pai_expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric' }) : 'never'}
+                                    </td>
+                                    <td style={s.td}>
+                                      <span style={s.pill(expired ? '#F8D7DA' : '#D4EDDA', expired ? '#721C24' : '#155724')}>
+                                        {expired ? 'expired' : 'active'}
+                                      </span>
+                                    </td>
+                                    <td style={s.td}>
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        <button
+                                          onClick={() => paiGrant(u.user_type, u.id)}
+                                          style={s.btnSm('#FFF8EC', '#B8963A', '#E8D9B5')}
+                                        >Extend</button>
+                                        <button
+                                          onClick={() => paiRevoke(u.user_type, u.id)}
+                                          style={s.btnSm('transparent', '#C65757', '#F5D5D5')}
+                                        >Revoke</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {paiView === 'events' && (
+                    <>
+                      {paiEvents.length === 0 ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                          No PAi activity yet.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr>
+                                <th style={s.th}>When</th>
+                                <th style={s.th}>Type</th>
+                                <th style={s.th}>Input</th>
+                                <th style={s.th}>Intent</th>
+                                <th style={s.th}>Status</th>
+                                <th style={s.th}>Tokens</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paiEvents.slice(0, 100).map(e => (
+                                <tr key={e.id} style={{ background: e.error ? '#FFF4F4' : 'transparent' }}>
+                                  <td style={s.td}>
+                                    <div style={{ fontSize: 11 }}>
+                                      {new Date(e.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: '#8C7B6E' }}>
+                                      {new Date(e.created_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+                                    </div>
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={s.pill(e.user_type === 'vendor' ? '#FFF3DB' : '#FDF6F0', e.user_type === 'vendor' ? '#B8963A' : '#C9A84C')}>
+                                      {e.user_type}
+                                    </span>
+                                  </td>
+                                  <td style={s.td}>
+                                    <div style={{ fontSize: 11, color: '#2C2420', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      "{e.input_text}"
+                                    </div>
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={{ fontSize: 11, color: e.parsed_intent === 'unknown' ? '#C65757' : '#2C2420' }}>
+                                      {e.parsed_intent || '—'}
+                                    </span>
+                                  </td>
+                                  <td style={s.td}>
+                                    {e.error ? (
+                                      <span style={s.pill('#F8D7DA', '#721C24')}>error</span>
+                                    ) : e.final_action_taken ? (
+                                      <span style={s.pill('#D4EDDA', '#155724')}>saved</span>
+                                    ) : e.user_confirmed ? (
+                                      <span style={s.pill('#FFF3DB', '#B8963A')}>confirmed</span>
+                                    ) : (
+                                      <span style={s.pill('#E8E0D5', '#8C7B6E')}>parsed</span>
+                                    )}
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={{ fontSize: 10, color: '#8C7B6E' }}>
+                                      {e.input_tokens || 0}→{e.output_tokens || 0}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {paiEvents.length > 100 && (
+                            <div style={{ padding: 12, textAlign: 'center', fontSize: 11, color: '#8C7B6E' }}>
+                              Showing latest 100 of {paiEvents.length} events.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
               )}
             </div>
           </>

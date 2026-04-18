@@ -9702,6 +9702,11 @@ export default function CoupleApp() {
           </button>
         )}
 
+        {/* PAi FAB — visible on tool screens (not Home, not Discover) */}
+        {appMode === 'plan' && activeTool && session && (
+          <CouplePaiFloatingButton session={session} />
+        )}
+
         {showDreamAi && (
           <DreamAiSheet
             session={session}
@@ -9767,5 +9772,511 @@ export default function CoupleApp() {
         )}
       </div>
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAi — Personal Assistant AI (couple side, Turn 9E)
+// Invite-only during beta. Draggable FAB that lives on tool screens.
+// ══════════════════════════════════════════════════════════════════════════
+
+interface PaiStatusC {
+  enabled: boolean;
+  reason?: string;
+  expires_at?: string | null;
+  daily_cap?: number;
+  daily_used?: number;
+  daily_remaining?: number;
+  pending_request?: any;
+}
+
+function CouplePaiFloatingButton({ session }: { session: CoupleSession }) {
+  const storageKey = 'tdw_couple_pai_y';
+  const [buttonY, setButtonY] = useState<number>(() => {
+    if (typeof window === 'undefined') return -1;
+    const saved = localStorage.getItem(storageKey);
+    return saved ? parseInt(saved) : -1;
+  });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startY: number; startTop: number; moved: boolean }>({ startY: 0, startTop: 0, moved: false });
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+
+  const [paiStatus, setPaiStatus] = useState<PaiStatusC | null>(null);
+  const [showSheet, setShowSheet] = useState(false);
+  const [showRequest, setShowRequest] = useState(false);
+
+  const userId = session.id;
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    fetch(`${API}/api/pai/status?user_type=couple&user_id=${userId}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.success) setPaiStatus(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const defaultY = typeof window !== 'undefined' ? window.innerHeight - 140 : 600;
+  const effectiveY = buttonY < 0 ? defaultY : buttonY;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!btnRef.current) return;
+    btnRef.current.setPointerCapture(e.pointerId);
+    const rect = btnRef.current.getBoundingClientRect();
+    dragRef.current = { startY: e.clientY, startTop: rect.top, moved: false };
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dy) > 3) dragRef.current.moved = true;
+    const newTop = dragRef.current.startTop + dy;
+    const minY = 80;
+    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 800) - 100;
+    setButtonY(Math.min(Math.max(newTop, minY), maxY));
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    setDragging(false);
+    if (dragRef.current.moved) {
+      if (typeof window !== 'undefined') localStorage.setItem(storageKey, String(buttonY));
+    } else {
+      // Tap
+      if (!paiStatus) return;
+      if (paiStatus.enabled) setShowSheet(true);
+      else setShowRequest(true);
+    }
+    if (btnRef.current) btnRef.current.releasePointerCapture(e.pointerId);
+  };
+
+  const showBeta = paiStatus?.enabled;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        aria-label="Open PAi"
+        style={{
+          position: 'fixed',
+          top: effectiveY,
+          right: 'max(20px, calc(50vw - 220px))',
+          width: 48, height: 48, borderRadius: 24,
+          background: C.dark, border: `1px solid ${C.goldBorder}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: dragging ? '0 8px 24px rgba(44,36,32,0.3)' : '0 4px 16px rgba(44,36,32,0.18)',
+          cursor: dragging ? 'grabbing' : 'pointer',
+          zIndex: 45, padding: 0,
+          touchAction: 'none',
+          transition: dragging ? 'none' : 'box-shadow 0.2s ease',
+        }}
+      >
+        <span style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 15, fontWeight: 500, color: C.gold,
+          letterSpacing: '0.5px', lineHeight: 1,
+        }}>PAi</span>
+        {showBeta && (
+          <span style={{
+            position: 'absolute', bottom: -5, right: -4,
+            background: C.goldDeep, color: '#fff',
+            fontSize: 7, fontWeight: 700, letterSpacing: '0.5px',
+            padding: '2px 5px', borderRadius: 8,
+            fontFamily: 'DM Sans, sans-serif',
+            pointerEvents: 'none' as const,
+          }}>BETA</span>
+        )}
+      </button>
+
+      {showSheet && paiStatus?.enabled && (
+        <CouplePaiSheet
+          userId={userId}
+          status={paiStatus}
+          onClose={() => setShowSheet(false)}
+          onSaved={() => {
+            fetch(`${API}/api/pai/status?user_type=couple&user_id=${userId}`)
+              .then(r => r.json()).then(d => { if (d.success) setPaiStatus(d); }).catch(() => {});
+          }}
+        />
+      )}
+
+      {showRequest && !paiStatus?.enabled && (
+        <CouplePaiRequestSheet
+          userId={userId}
+          hasPending={!!paiStatus?.pending_request}
+          onClose={() => setShowRequest(false)}
+          onSubmitted={() => {
+            fetch(`${API}/api/pai/status?user_type=couple&user_id=${userId}`)
+              .then(r => r.json()).then(d => { if (d.success) setPaiStatus(d); }).catch(() => {});
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function CouplePaiOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(44,36,32,0.5)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.ivory,
+          borderRadius: '18px 18px 0 0',
+          padding: '20px 20px 24px',
+          maxWidth: 480, width: '100%',
+          maxHeight: '85vh', overflowY: 'auto',
+          boxShadow: '0 -8px 24px rgba(44,36,32,0.15)',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CouplePaiHeader({ eyebrow, title, onClose }: { eyebrow: string; title: string; onClose: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div>
+        <div style={{
+          fontSize: 9, fontWeight: 600, letterSpacing: '2.5px',
+          color: C.goldDeep, textTransform: 'uppercase' as const,
+        }}>{eyebrow}</div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif", fontSize: 20,
+          color: C.dark, fontWeight: 400, marginTop: 4, letterSpacing: '0.3px',
+        }}>{title}</div>
+      </div>
+      <button onClick={onClose} style={{
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color: C.muted, padding: 4, fontFamily: 'inherit',
+      }}>✕</button>
+    </div>
+  );
+}
+
+function CouplePaiSheet({ userId, status, onClose, onSaved }: {
+  userId: string;
+  status: PaiStatusC;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [input, setInput] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState('');
+  const [parsed, setParsed] = useState<any>(null);
+  const [eventId, setEventId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [listening, setListening] = useState(false);
+  const remaining = status.daily_remaining ?? 5;
+
+  const startVoice = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert('Voice input is not supported on this browser.'); return; }
+    const rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      const text = e.results[0][0].transcript;
+      setInput(prev => prev ? prev + ' ' + text : text);
+      setListening(false);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    setListening(true);
+    rec.start();
+  };
+
+  const handleParse = async () => {
+    if (!input.trim()) return;
+    if (remaining <= 0) { setError('Daily cap reached. Come back tomorrow.'); return; }
+    setParsing(true); setError(''); setParsed(null);
+    try {
+      const r = await fetch(`${API}/api/pai/parse`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: 'couple', user_id: userId, input_text: input.trim() }),
+      });
+      const d = await r.json();
+      if (!d.success) { setError(d.error || 'Could not parse.'); setParsing(false); return; }
+      if (d.parsed?.intent === 'unknown') {
+        setError(d.parsed.preview_summary || 'Be more specific, please.');
+        setParsing(false); return;
+      }
+      setParsed(d.parsed);
+      setEventId(d.event_id || null);
+    } catch { setError('Network error.'); } finally { setParsing(false); }
+  };
+
+  const handleConfirm = async () => {
+    if (!parsed) return;
+    setConfirming(true); setError('');
+    try {
+      const r = await fetch(`${API}/api/pai/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_id: eventId, user_type: 'couple', user_id: userId,
+          intent: parsed.intent, data: parsed.data,
+        }),
+      });
+      const d = await r.json();
+      if (!d.success) {
+        setError(d.error === 'daily_cap_reached' ? 'Daily cap reached.' : (d.error || 'Could not save.'));
+        setConfirming(false); return;
+      }
+      onSaved(); onClose();
+    } catch { setError('Network error.'); setConfirming(false); }
+  };
+
+  const intentLabel: Record<string, string> = {
+    create_checklist_item: 'Checklist Item',
+    create_expense: parsed?.data?.kind === 'shagun' ? 'Shagun' : 'Expense',
+    create_guest: 'Guest',
+    create_moodboard_pin: 'Moodboard',
+    update_vendor_stage: 'Vendor Update',
+  };
+
+  return (
+    <CouplePaiOverlay onClose={onClose}>
+      <CouplePaiHeader
+        eyebrow={`PAi · Beta · ${remaining}/5 today`}
+        title={parsed ? 'Does this look right?' : 'What would you like to add?'}
+        onClose={onClose}
+      />
+
+      {!parsed ? (
+        <>
+          <div style={{ position: 'relative', marginBottom: 12 }}>
+            <textarea
+              value={input}
+              onChange={e => { setInput(e.target.value); setError(''); }}
+              placeholder="e.g. Add mom's dupattas to checklist"
+              rows={3}
+              style={{
+                width: '100%', boxSizing: 'border-box' as const,
+                padding: '12px 44px 12px 14px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.pearl,
+                fontSize: 14, fontFamily: 'inherit',
+                outline: 'none', resize: 'none' as const,
+              }}
+            />
+            <button
+              onClick={startVoice}
+              disabled={listening}
+              aria-label="Voice input"
+              style={{
+                position: 'absolute' as const, top: 10, right: 10,
+                width: 28, height: 28, borderRadius: 14,
+                background: listening ? C.gold : 'transparent',
+                border: `1px solid ${listening ? C.goldDeep : C.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', padding: 0, fontSize: 12,
+              }}
+            >🎙</button>
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+              background: 'rgba(229,115,115,0.08)', border: '1px solid rgba(229,115,115,0.22)',
+              color: '#C65757', fontSize: 12,
+            }}>{error}</div>
+          )}
+
+          <button
+            onClick={handleParse}
+            disabled={parsing || !input.trim() || remaining <= 0}
+            style={{
+              width: '100%', padding: 14, borderRadius: 10,
+              background: (parsing || !input.trim() || remaining <= 0) ? C.pearl : C.dark,
+              color: C.gold, border: 'none',
+              cursor: (parsing || !input.trim() || remaining <= 0) ? 'default' : 'pointer',
+              fontSize: 12, fontWeight: 500, letterSpacing: '2px',
+              textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+              opacity: (parsing || !input.trim() || remaining <= 0) ? 0.6 : 1,
+            }}
+          >{parsing ? 'Thinking…' : 'Parse'}</button>
+
+          <div style={{
+            marginTop: 12, padding: '10px 12px',
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10, fontSize: 10, color: C.goldDeep, lineHeight: 1.5,
+          }}>
+            <strong>PAi is in Beta.</strong> 5 actions per day, 5-day access.
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{
+            padding: '14px 16px', borderRadius: 12,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            marginBottom: 14,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 600, letterSpacing: '2px',
+              color: C.goldDeep, textTransform: 'uppercase' as const, marginBottom: 6,
+            }}>{intentLabel[parsed.intent] || parsed.intent}</div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif", fontSize: 15,
+              color: C.dark, fontWeight: 500, lineHeight: 1.4,
+            }}>{parsed.preview_summary}</div>
+          </div>
+
+          <div style={{
+            background: C.ivory, border: `1px solid ${C.border}`,
+            borderRadius: 10, overflow: 'hidden', marginBottom: 14,
+          }}>
+            {Object.entries(parsed.data || {}).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v], i, arr) => (
+              <div key={k} style={{
+                padding: '10px 14px',
+                borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : 'none',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+              }}>
+                <span style={{
+                  fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '0.5px',
+                  textTransform: 'uppercase' as const, flexShrink: 0, minWidth: 90,
+                }}>{k.replace(/_/g, ' ')}</span>
+                <span style={{ fontSize: 12, color: C.dark, flex: 1, wordBreak: 'break-word' as const }}>
+                  {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+              background: 'rgba(229,115,115,0.08)', border: '1px solid rgba(229,115,115,0.22)',
+              color: '#C65757', fontSize: 12,
+            }}>{error}</div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setParsed(null)} disabled={confirming} style={{
+              flex: 1, padding: 12, borderRadius: 10,
+              background: 'transparent', color: C.muted,
+              border: `1px solid ${C.border}`, cursor: 'pointer',
+              fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+              textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+            }}>Edit</button>
+            <button onClick={handleConfirm} disabled={confirming} style={{
+              flex: 2, padding: 12, borderRadius: 10,
+              background: confirming ? C.pearl : C.dark, color: C.gold,
+              border: 'none', cursor: confirming ? 'default' : 'pointer',
+              fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+              textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+              opacity: confirming ? 0.6 : 1,
+            }}>{confirming ? 'Saving…' : 'Confirm & Save'}</button>
+          </div>
+        </>
+      )}
+    </CouplePaiOverlay>
+  );
+}
+
+function CouplePaiRequestSheet({ userId, hasPending, onClose, onSubmitted }: {
+  userId: string;
+  hasPending: boolean;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(hasPending);
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await fetch(`${API}/api/pai/request-access`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_type: 'couple', user_id: userId, reason: reason.trim() || null }),
+      });
+      setDone(true);
+      onSubmitted();
+    } catch {} finally { setSubmitting(false); }
+  };
+
+  return (
+    <CouplePaiOverlay onClose={onClose}>
+      <CouplePaiHeader
+        eyebrow="PAi · Beta"
+        title={done ? 'Request received' : 'Request access to PAi'}
+        onClose={onClose}
+      />
+
+      {done ? (
+        <>
+          <div style={{
+            padding: '14px 16px', borderRadius: 12, marginBottom: 14,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+          }}>
+            <div style={{
+              fontFamily: "'Playfair Display', serif", fontSize: 15,
+              color: C.dark, fontWeight: 500, marginBottom: 4,
+            }}>Thanks — we'll be in touch.</div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              PAi is currently invite-only. We're granting access to a small group of founding couples during beta.
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            width: '100%', padding: 14, borderRadius: 10,
+            background: C.dark, color: C.gold, border: 'none',
+            cursor: 'pointer', fontSize: 12, fontWeight: 500,
+            letterSpacing: '2px', textTransform: 'uppercase' as const,
+            fontFamily: 'DM Sans, sans-serif',
+          }}>Close</button>
+        </>
+      ) : (
+        <>
+          <div style={{ marginBottom: 14, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+            <strong style={{ color: C.dark }}>PAi</strong> is your personal assistant. Type or speak what you want added — PAi handles the rest.
+            <br /><br />
+            "Add mom's dupattas to my checklist"
+            <br />
+            "Bua gave ₹21,000 shagun for sangeet"
+            <br /><br />
+            Invite-only during beta.
+          </div>
+
+          <div style={{
+            fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '1px',
+            textTransform: 'uppercase' as const, marginBottom: 6,
+          }}>Why you'd like PAi (optional)</div>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="I'm juggling so many details and want to capture them fast…"
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box' as const,
+              padding: '12px 14px', borderRadius: 10,
+              border: `1px solid ${C.border}`, background: C.pearl,
+              fontSize: 14, fontFamily: 'inherit',
+              outline: 'none', resize: 'none' as const, marginBottom: 14,
+            }}
+          />
+
+          <button onClick={submit} disabled={submitting} style={{
+            width: '100%', padding: 14, borderRadius: 10,
+            background: submitting ? C.pearl : C.dark, color: C.gold,
+            border: 'none', cursor: submitting ? 'default' : 'pointer',
+            fontSize: 12, fontWeight: 500, letterSpacing: '2px',
+            textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+            opacity: submitting ? 0.6 : 1,
+          }}>{submitting ? 'Submitting…' : 'Request access'}</button>
+        </>
+      )}
+    </CouplePaiOverlay>
   );
 }

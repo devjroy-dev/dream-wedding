@@ -3433,6 +3433,567 @@ app.get('/api/ai-health', (req, res) => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// PAi — Personal Assistant AI (Turn 9E)
+// Structured NL → action extraction via Claude Haiku 4.5
+// Invite-only during beta; 5-day access, 5 confirmed actions/day max.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Access check helper
+async function checkPaiAccess(userType, userId) {
+  const table = userType === 'vendor' ? 'vendors' : 'users';
+  const { data, error } = await supabase
+    .from(table)
+    .select('id, pai_enabled, pai_expires_at')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error || !data) return { ok: false, reason: 'not_found' };
+  if (!data.pai_enabled) return { ok: false, reason: 'not_granted' };
+  if (data.pai_expires_at) {
+    const expires = new Date(data.pai_expires_at);
+    if (expires < new Date()) return { ok: false, reason: 'expired' };
+  }
+  return { ok: true };
+}
+
+// ── Daily cap enforcement (5 confirmed actions / day)
+async function checkDailyCap(userType, userId) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const { count, error } = await supabase
+    .from('pai_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_type', userType)
+    .eq('user_id', userId)
+    .eq('user_confirmed', true)
+    .gte('created_at', todayStart.toISOString());
+  if (error) return { ok: true }; // fail open (don't block on DB errors)
+  const used = count || 0;
+  return { ok: used < 5, used, cap: 5 };
+}
+
+// ── Status endpoint — PWA calls this on PAi button mount
+app.get('/api/pai/status', async (req, res) => {
+  try {
+    const { user_type, user_id } = req.query;
+    if (!user_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'user_type and user_id required' });
+    }
+    const access = await checkPaiAccess(user_type, user_id);
+    if (!access.ok) {
+      // Check if a pending request already exists
+      const { data: pending } = await supabase
+        .from('pai_access_requests')
+        .select('id, status, created_at')
+        .eq('user_type', user_type)
+        .eq('user_id', user_id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return res.json({
+        success: true,
+        enabled: false,
+        reason: access.reason,
+        pending_request: pending || null,
+      });
+    }
+    const cap = await checkDailyCap(user_type, user_id);
+    // Fetch expiry to show in UI
+    const table = user_type === 'vendor' ? 'vendors' : 'users';
+    const { data: u } = await supabase
+      .from(table).select('pai_expires_at').eq('id', user_id).maybeSingle();
+    res.json({
+      success: true,
+      enabled: true,
+      expires_at: u?.pai_expires_at || null,
+      daily_cap: cap.cap,
+      daily_used: cap.used,
+      daily_remaining: cap.ok ? (cap.cap - cap.used) : 0,
+    });
+  } catch (error) {
+    console.error('pai status error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Access request — non-granted users submit here
+app.post('/api/pai/request-access', async (req, res) => {
+  try {
+    const { user_type, user_id, reason } = req.body || {};
+    if (!user_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'user_type and user_id required' });
+    }
+    // Dedup: if there's already a pending request, don't create another
+    const { data: existing } = await supabase
+      .from('pai_access_requests')
+      .select('id').eq('user_type', user_type).eq('user_id', user_id)
+      .eq('status', 'pending').maybeSingle();
+    if (existing) {
+      return res.json({ success: true, already_pending: true, data: existing });
+    }
+    // Look up name/phone for admin display
+    const table = user_type === 'vendor' ? 'vendors' : 'users';
+    const { data: u } = await supabase
+      .from(table).select('name, phone').eq('id', user_id).maybeSingle();
+    const { data, error } = await supabase
+      .from('pai_access_requests').insert([{
+        user_type, user_id,
+        user_name: u?.name || null, user_phone: u?.phone || null,
+        reason: reason || null,
+      }]).select().single();
+    if (error) throw error;
+    // Also stamp the user record so it's queryable inline
+    await supabase.from(table).update({
+      pai_access_requested_at: new Date().toISOString(),
+    }).eq('id', user_id);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('pai request-access error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── The main parse endpoint
+// System prompt with JSON schema for structured extraction.
+// Uses Haiku 4.5 with prompt caching on the large system prompt.
+const PAI_VENDOR_SYSTEM = `You are PAi — Personal Assistant AI for a wedding vendor using The Dream Wedding platform.
+
+Your ONLY job is to parse the vendor's natural-language input into a structured action.
+Today's date: {{TODAY}}. India timezone. Vendor ID: {{VENDOR_ID}}.
+
+Output JSON matching this exact schema (no other text):
+{
+  "intent": "<one of: create_todo | create_event | create_reminder | create_payment_schedule | create_invoice | unknown>",
+  "confidence": <0.0-1.0>,
+  "data": { <intent-specific fields> },
+  "preview_summary": "<one human-readable sentence summarizing the parsed action>"
+}
+
+## Intents & schemas:
+
+1. create_todo — personal task / to-do
+   data: { title: string, due_date: "YYYY-MM-DD" | null, assigned_to: string | null, notes: string | null }
+
+2. create_event — scheduled meeting / trial / visit
+   data: { title: string, event_date: "YYYY-MM-DD", event_time: "HH:MM" | null, event_type: string, venue: string | null, notes: string | null }
+
+3. create_reminder — reminder to self
+   data: { title: string, remind_date: "YYYY-MM-DD", remind_time: "HH:MM" | null, notes: string | null }
+
+4. create_payment_schedule — payment due from a client
+   data: { client_name: string, client_phone: string | null, total_amount: number, instalments: [{ label: string, amount: number, due_date: "YYYY-MM-DD" | null }] }
+
+5. create_invoice — bill a client
+   data: { client_name: string, client_phone: string | null, amount: number, description: string | null, due_date: "YYYY-MM-DD" | null, gst_enabled: boolean }
+
+## Rules:
+- Parse dates relative to today. "tomorrow" = today + 1. "next Monday" = upcoming Monday. "25 April" = 2026-04-25 (this year unless past).
+- Indian currency: "5 lakh" = 500000, "50k" = 50000, "2L" = 200000, "₹1cr" = 10000000.
+- Understand Hindi/Hinglish. "kal" = tomorrow. "Vivek ko bolo" = assign to Vivek.
+- If intent is ambiguous or missing critical info, set intent=unknown with preview_summary explaining what's missing.
+- For create_payment_schedule with only one amount, make it a single instalment labeled "Advance" or "Final" based on context.
+- GST off by default unless explicitly mentioned (e.g., "with GST", "include tax").
+- Never fabricate client data. If client not mentioned, set client_name = "TBD".
+- Keep preview_summary under 80 characters, natural English.
+
+Return ONLY the JSON. No markdown, no explanation, no code fence.`;
+
+const PAI_COUPLE_SYSTEM = `You are PAi — Personal Assistant AI for a couple using The Dream Wedding platform to plan their wedding.
+
+Your ONLY job is to parse the couple's natural-language input into a structured action.
+Today's date: {{TODAY}}. India timezone. Couple ID: {{COUPLE_ID}}.
+
+Output JSON matching this exact schema (no other text):
+{
+  "intent": "<one of: create_checklist_item | create_expense | create_guest | create_moodboard_pin | update_vendor_stage | unknown>",
+  "confidence": <0.0-1.0>,
+  "data": { <intent-specific fields> },
+  "preview_summary": "<one human-readable sentence>"
+}
+
+## Intents & schemas:
+
+1. create_checklist_item — add a task to wedding planning checklist
+   data: { title: string, category: string | null, due_date: "YYYY-MM-DD" | null }
+
+2. create_expense — log a wedding-related expense (or shagun)
+   data: { kind: "expense" | "shagun", name: string, amount: number, category: string | null, event: string | null, notes: string | null }
+
+3. create_guest — add a guest to the guest ledger
+   data: { name: string, phone: string | null, household_head: string | null, event_invites: string[] | null }
+
+4. create_moodboard_pin — save an inspiration item
+   data: { title: string, category: string | null, notes: string | null }
+
+5. update_vendor_stage — move a vendor in the pipeline
+   data: { vendor_name: string, new_stage: "Enquired" | "Quoted" | "Booked" | "Confirmed" | "Completed" }
+
+## Rules:
+- Dates relative to today. Indian currency conventions (lakh, crore, L, cr).
+- Hindi/Hinglish. "bua ne 21000 diya" → create_expense kind=shagun, name="Bua", amount=21000.
+- Wedding events: Haldi, Mehendi, Sangeet, Wedding, Reception.
+- If ambiguous, intent=unknown with preview_summary explaining.
+- Never fabricate data. If vendor name or guest name unclear, set intent=unknown.
+
+Return ONLY the JSON.`;
+
+app.post('/api/pai/parse', async (req, res) => {
+  try {
+    const { user_type, user_id, input_text } = req.body || {};
+    if (!user_type || !user_id || !input_text) {
+      return res.status(400).json({ success: false, error: 'user_type, user_id, and input_text required' });
+    }
+
+    // Access check
+    const access = await checkPaiAccess(user_type, user_id);
+    if (!access.ok) {
+      return res.status(403).json({ success: false, error: 'access_denied', reason: access.reason });
+    }
+
+    // Daily cap check — counts CONFIRMED actions only, so parse requests themselves don't burn quota.
+    // We just return current usage so UI can show warnings.
+
+    if (!anthropic) {
+      return res.status(503).json({ success: false, error: 'AI service not configured' });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const system = (user_type === 'couple' ? PAI_COUPLE_SYSTEM : PAI_VENDOR_SYSTEM)
+      .replace('{{TODAY}}', today)
+      .replace(user_type === 'couple' ? '{{COUPLE_ID}}' : '{{VENDOR_ID}}', user_id);
+
+    let parsed = null;
+    let modelUsed = 'claude-haiku-4-5-20251001';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let errMsg = null;
+
+    try {
+      const response = await anthropic.messages.create({
+        model: modelUsed,
+        max_tokens: 512,
+        system: [
+          {
+            type: 'text',
+            text: system,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        messages: [{ role: 'user', content: input_text }],
+      });
+      inputTokens = response.usage?.input_tokens || 0;
+      outputTokens = response.usage?.output_tokens || 0;
+      const textBlock = response.content.find(b => b.type === 'text');
+      const raw = textBlock?.text || '';
+      // Strip any markdown fence just in case
+      const cleaned = raw.replace(/```json|```/g, '').trim();
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (parseErr) {
+        errMsg = 'Claude returned non-JSON: ' + raw.slice(0, 200);
+      }
+    } catch (apiErr) {
+      errMsg = 'AI call failed: ' + apiErr.message;
+    }
+
+    // Log the parse attempt (confirmed=false at this point)
+    const { data: logRow } = await supabase
+      .from('pai_events')
+      .insert([{
+        user_type, user_id,
+        input_text,
+        parsed_intent: parsed?.intent || null,
+        parsed_json: parsed || null,
+        user_confirmed: false,
+        error: errMsg,
+        model_used: modelUsed,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+      }])
+      .select('id').single();
+
+    if (errMsg) {
+      return res.json({ success: false, error: errMsg, event_id: logRow?.id });
+    }
+
+    res.json({ success: true, parsed, event_id: logRow?.id });
+  } catch (error) {
+    console.error('pai parse error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Confirm endpoint — creates the actual record + marks event confirmed
+app.post('/api/pai/confirm', async (req, res) => {
+  try {
+    const { event_id, user_type, user_id, intent, data } = req.body || {};
+    if (!user_type || !user_id || !intent || !data) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    // Access + cap check
+    const access = await checkPaiAccess(user_type, user_id);
+    if (!access.ok) {
+      return res.status(403).json({ success: false, error: 'access_denied', reason: access.reason });
+    }
+    const cap = await checkDailyCap(user_type, user_id);
+    if (!cap.ok) {
+      return res.status(429).json({ success: false, error: 'daily_cap_reached', used: cap.used, cap: cap.cap });
+    }
+
+    let createdId = null;
+    let createErr = null;
+
+    // Route to appropriate create based on intent
+    try {
+      if (user_type === 'vendor') {
+        if (intent === 'create_todo') {
+          const { data: t, error } = await supabase.from('todos').insert([{
+            vendor_id: user_id,
+            title: data.title,
+            due_date: data.due_date || null,
+            notes: data.notes || (data.assigned_to ? `Assigned to: ${data.assigned_to}` : null),
+            done: false,
+          }]).select().single();
+          if (error) throw error; createdId = t?.id;
+        } else if (intent === 'create_event') {
+          const { data: e, error } = await supabase.from('vendor_calendar_events').insert([{
+            vendor_id: user_id,
+            title: data.title,
+            event_date: data.event_date,
+            event_time: data.event_time || null,
+            event_type: data.event_type || 'Event',
+            venue: data.venue || null,
+            notes: data.notes || null,
+          }]).select().single();
+          if (error) throw error; createdId = e?.id;
+        } else if (intent === 'create_reminder') {
+          const { data: r, error } = await supabase.from('vendor_reminders').insert([{
+            vendor_id: user_id,
+            title: data.title,
+            remind_date: data.remind_date,
+            remind_time: data.remind_time || null,
+            notes: data.notes || null,
+          }]).select().single();
+          if (error) throw error; createdId = r?.id;
+        } else if (intent === 'create_payment_schedule') {
+          const instalments = data.instalments && data.instalments.length > 0
+            ? data.instalments
+            : [{ label: 'Advance', amount: data.total_amount || 0, due_date: null, paid: false }];
+          const { data: ps, error } = await supabase.from('vendor_payment_schedules').insert([{
+            vendor_id: user_id,
+            client_name: data.client_name,
+            client_phone: data.client_phone || null,
+            instalments: instalments.map(i => ({ ...i, paid: false })),
+          }]).select().single();
+          if (error) throw error; createdId = ps?.id;
+        } else if (intent === 'create_invoice') {
+          const amount = data.amount || 0;
+          const gst_amount = data.gst_enabled ? amount * 0.18 : 0;
+          const total_amount = amount + gst_amount;
+          const invoice_number = `INV-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
+          const { data: inv, error } = await supabase.from('vendor_invoices').insert([{
+            vendor_id: user_id,
+            client_name: data.client_name,
+            client_phone: data.client_phone || null,
+            amount,
+            gst_enabled: !!data.gst_enabled,
+            gst_amount,
+            total_amount,
+            description: data.description || null,
+            due_date: data.due_date || null,
+            invoice_number,
+            status: 'unpaid',
+            issue_date: new Date().toISOString().slice(0, 10),
+          }]).select().single();
+          if (error) throw error; createdId = inv?.id;
+        } else {
+          throw new Error('Unknown vendor intent: ' + intent);
+        }
+      } else if (user_type === 'couple') {
+        if (intent === 'create_checklist_item') {
+          const { data: c, error } = await supabase.from('couple_checklist').insert([{
+            user_id,
+            title: data.title,
+            category: data.category || 'General',
+            due_date: data.due_date || null,
+            done: false,
+          }]).select().single();
+          if (error) throw error; createdId = c?.id;
+        } else if (intent === 'create_expense') {
+          const table = data.kind === 'shagun' ? 'couple_shagun' : 'couple_expenses';
+          const payload = data.kind === 'shagun'
+            ? { user_id, giver_name: data.name, amount: data.amount, event: data.event || null, notes: data.notes || null }
+            : { user_id, name: data.name, amount: data.amount, category: data.category || 'Other', notes: data.notes || null };
+          const { data: e, error } = await supabase.from(table).insert([payload]).select().single();
+          if (error) throw error; createdId = e?.id;
+        } else if (intent === 'create_guest') {
+          const { data: g, error } = await supabase.from('couple_guests').insert([{
+            user_id,
+            name: data.name,
+            phone: data.phone || null,
+            household_head: data.household_head || null,
+            event_invites: data.event_invites || {},
+          }]).select().single();
+          if (error) throw error; createdId = g?.id;
+        } else if (intent === 'create_moodboard_pin') {
+          const { data: p, error } = await supabase.from('couple_moodboard_pins').insert([{
+            user_id,
+            title: data.title,
+            category: data.category || 'Inspiration',
+            notes: data.notes || null,
+          }]).select().single();
+          if (error) throw error; createdId = p?.id;
+        } else if (intent === 'update_vendor_stage') {
+          // Find existing vendor by name and update stage
+          const { data: existing } = await supabase
+            .from('couple_vendors').select('id')
+            .eq('user_id', user_id)
+            .ilike('vendor_name', `%${data.vendor_name}%`)
+            .limit(1).maybeSingle();
+          if (!existing) throw new Error(`Vendor "${data.vendor_name}" not found in your list`);
+          const { data: upd, error } = await supabase
+            .from('couple_vendors').update({ stage: data.new_stage })
+            .eq('id', existing.id).select().single();
+          if (error) throw error; createdId = upd?.id;
+        } else {
+          throw new Error('Unknown couple intent: ' + intent);
+        }
+      }
+    } catch (e) {
+      createErr = e.message;
+    }
+
+    // Mark event confirmed (even on DB error — we want the attempt logged)
+    if (event_id) {
+      await supabase.from('pai_events').update({
+        user_confirmed: true,
+        final_action_taken: !createErr,
+        error: createErr,
+      }).eq('id', event_id);
+    } else {
+      // No event_id (shouldn't happen but be defensive) — insert a standalone log
+      await supabase.from('pai_events').insert([{
+        user_type, user_id,
+        input_text: '(direct confirm)',
+        parsed_intent: intent,
+        parsed_json: data,
+        user_confirmed: true,
+        final_action_taken: !createErr,
+        error: createErr,
+      }]);
+    }
+
+    if (createErr) {
+      return res.status(500).json({ success: false, error: createErr });
+    }
+    res.json({ success: true, created_id: createdId });
+  } catch (error) {
+    console.error('pai confirm error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: list all access requests
+app.get('/api/pai/admin/requests', async (req, res) => {
+  try {
+    const { status } = req.query;
+    let q = supabase.from('pai_access_requests').select('*').order('created_at', { ascending: false });
+    if (status) q = q.eq('status', status);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('pai admin requests error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: grant PAi (approves request if exists)
+app.post('/api/pai/admin/grant', async (req, res) => {
+  try {
+    const { user_type, user_id, days } = req.body || {};
+    if (!user_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'user_type and user_id required' });
+    }
+    const dayCount = Math.min(Math.max(parseInt(days) || 5, 1), 30);
+    const now = new Date();
+    const expires = new Date(now.getTime() + dayCount * 24 * 60 * 60 * 1000);
+    const table = user_type === 'vendor' ? 'vendors' : 'users';
+    const { error } = await supabase.from(table).update({
+      pai_enabled: true,
+      pai_granted_at: now.toISOString(),
+      pai_expires_at: expires.toISOString(),
+    }).eq('id', user_id);
+    if (error) throw error;
+    // Mark any pending request as granted
+    await supabase.from('pai_access_requests').update({
+      status: 'granted',
+      reviewed_at: now.toISOString(),
+      reviewed_by: 'admin',
+    }).eq('user_type', user_type).eq('user_id', user_id).eq('status', 'pending');
+    res.json({ success: true, expires_at: expires.toISOString(), days: dayCount });
+  } catch (error) {
+    console.error('pai admin grant error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: revoke PAi
+app.post('/api/pai/admin/revoke', async (req, res) => {
+  try {
+    const { user_type, user_id } = req.body || {};
+    if (!user_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'user_type and user_id required' });
+    }
+    const table = user_type === 'vendor' ? 'vendors' : 'users';
+    const { error } = await supabase.from(table).update({
+      pai_enabled: false,
+    }).eq('id', user_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('pai admin revoke error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: deny request
+app.post('/api/pai/admin/deny', async (req, res) => {
+  try {
+    const { request_id } = req.body || {};
+    if (!request_id) return res.status(400).json({ success: false, error: 'request_id required' });
+    const { error } = await supabase.from('pai_access_requests').update({
+      status: 'denied',
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: 'admin',
+    }).eq('id', request_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('pai admin deny error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: usage stats
+app.get('/api/pai/admin/stats', async (req, res) => {
+  try {
+    const { data: events } = await supabase.from('pai_events').select('*').order('created_at', { ascending: false }).limit(500);
+    const { data: grantedVendors } = await supabase.from('vendors').select('id, name, pai_granted_at, pai_expires_at').eq('pai_enabled', true);
+    const { data: grantedCouples } = await supabase.from('users').select('id, name, pai_granted_at, pai_expires_at').eq('pai_enabled', true);
+    res.json({
+      success: true,
+      events: events || [],
+      granted_vendors: grantedVendors || [],
+      granted_couples: grantedCouples || [],
+    });
+  } catch (error) {
+    console.error('pai admin stats error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || '';
 const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || '';
