@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "The Dream Wedding",
-  description: "Your digital maid of honour — plan your wedding together",
+  description: "Plan your wedding beautifully — The Dream Wedding",
   manifest: "/couple-manifest.json",
   appleWebApp: {
     capable: true,

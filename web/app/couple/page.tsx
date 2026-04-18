@@ -8587,12 +8587,12 @@ function EntryScreen({ onSessionRestore }: {
           <h1 style={{
             margin: 0, fontSize: 28, color: C.dark,
             fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '34px',
-          }}>Your digital maid of honour.</h1>
+          }}>Plan your wedding, beautifully.</h1>
           <p style={{
             margin: '10px 0 0', fontSize: 13, color: C.muted,
             fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
           }}>
-            Plan your wedding together, beautifully.
+            Everything you need in one elegant place.
           </p>
         </div>
 
@@ -9791,14 +9791,26 @@ interface PaiStatusC {
 }
 
 function CouplePaiFloatingButton({ session }: { session: CoupleSession }) {
-  const storageKey = 'tdw_couple_pai_y';
-  const [buttonY, setButtonY] = useState<number>(() => {
-    if (typeof window === 'undefined') return -1;
-    const saved = localStorage.getItem(storageKey);
-    return saved ? parseInt(saved) : -1;
+  const storageKey = 'tdw_couple_pai_pos';
+  const BTN_SIZE = 48;
+  const MARGIN = 16;
+  const BOTTOM_NAV_HEIGHT = 72;
+
+  const [pos, setPos] = useState<{ x: number; y: number; edge: 'left' | 'right' | 'top' | 'bottom' }>(() => {
+    if (typeof window === 'undefined') return { x: 0, y: 0, edge: 'right' };
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    return { x: w - BTN_SIZE - MARGIN, y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'right' };
   });
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ startY: number; startTop: number; moved: boolean }>({ startY: 0, startTop: 0, moved: false });
+  const [livePos, setLivePos] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; btnX: number; btnY: number; moved: boolean }>({
+    startX: 0, startY: 0, btnX: 0, btnY: 0, moved: false,
+  });
   const btnRef = useRef<HTMLButtonElement | null>(null);
 
   const [paiStatus, setPaiStatus] = useState<PaiStatusC | null>(null);
@@ -9817,40 +9829,77 @@ function CouplePaiFloatingButton({ session }: { session: CoupleSession }) {
     return () => { cancelled = true; };
   }, [userId]);
 
-  const defaultY = typeof window !== 'undefined' ? window.innerHeight - 140 : 600;
-  const effectiveY = buttonY < 0 ? defaultY : buttonY;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const check = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (pos.x > w - BTN_SIZE || pos.y > h - BTN_SIZE) {
+        setPos({ x: w - BTN_SIZE - MARGIN, y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'right' });
+      }
+    };
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [pos.x, pos.y]);
+
+  const snapToEdge = (x: number, y: number) => {
+    if (typeof window === 'undefined') return { x, y, edge: 'right' as const };
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const distLeft = x;
+    const distRight = w - (x + BTN_SIZE);
+    const distTop = y;
+    const distBottom = h - (y + BTN_SIZE);
+    const min = Math.min(distLeft, distRight, distTop, distBottom);
+    if (min === distLeft)   return { x: MARGIN, y: Math.min(Math.max(y, MARGIN), h - BTN_SIZE - MARGIN), edge: 'left' as const };
+    if (min === distRight)  return { x: w - BTN_SIZE - MARGIN, y: Math.min(Math.max(y, MARGIN), h - BTN_SIZE - MARGIN), edge: 'right' as const };
+    if (min === distTop)    return { x: Math.min(Math.max(x, MARGIN), w - BTN_SIZE - MARGIN), y: MARGIN + 60, edge: 'top' as const };
+    return { x: Math.min(Math.max(x, MARGIN), w - BTN_SIZE - MARGIN), y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'bottom' as const };
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!btnRef.current) return;
     btnRef.current.setPointerCapture(e.pointerId);
     const rect = btnRef.current.getBoundingClientRect();
-    dragRef.current = { startY: e.clientY, startTop: rect.top, moved: false };
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      btnX: rect.left, btnY: rect.top,
+      moved: false,
+    };
     setDragging(true);
+    setLivePos({ x: rect.left, y: rect.top });
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
+    const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    if (Math.abs(dy) > 3) dragRef.current.moved = true;
-    const newTop = dragRef.current.startTop + dy;
-    const minY = 80;
-    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 800) - 100;
-    setButtonY(Math.min(Math.max(newTop, minY), maxY));
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) dragRef.current.moved = true;
+    setLivePos({
+      x: dragRef.current.btnX + dx,
+      y: dragRef.current.btnY + dy,
+    });
   };
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragging) return;
     setDragging(false);
-    if (dragRef.current.moved) {
-      if (typeof window !== 'undefined') localStorage.setItem(storageKey, String(buttonY));
+    if (dragRef.current.moved && livePos) {
+      const snapped = snapToEdge(livePos.x, livePos.y);
+      setPos(snapped);
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem(storageKey, JSON.stringify(snapped)); } catch {}
+      }
     } else {
-      // Tap
       if (!paiStatus) return;
       if (paiStatus.enabled) setShowSheet(true);
       else setShowRequest(true);
     }
+    setLivePos(null);
     if (btnRef.current) btnRef.current.releasePointerCapture(e.pointerId);
   };
 
   const showBeta = paiStatus?.enabled;
+  const renderX = dragging && livePos ? livePos.x : pos.x;
+  const renderY = dragging && livePos ? livePos.y : pos.y;
 
   return (
     <>
@@ -9860,26 +9909,26 @@ function CouplePaiFloatingButton({ session }: { session: CoupleSession }) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onContextMenu={e => e.preventDefault()}
         aria-label="Open PAi"
         style={{
           position: 'fixed',
-          top: effectiveY,
-          right: 'max(20px, calc(50vw - 220px))',
-          width: 48, height: 48, borderRadius: 24,
+          top: renderY,
+          left: renderX,
+          width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
           background: C.dark, border: `1px solid ${C.goldBorder}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: dragging ? '0 8px 24px rgba(44,36,32,0.3)' : '0 4px 16px rgba(44,36,32,0.18)',
           cursor: dragging ? 'grabbing' : 'pointer',
           zIndex: 45, padding: 0,
           touchAction: 'none',
-          transition: dragging ? 'none' : 'box-shadow 0.2s ease',
-        }}
+          transition: dragging ? 'none' : 'top 0.2s ease, left 0.2s ease, box-shadow 0.2s ease',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+        } as any}
       >
-        <span style={{
-          fontFamily: "'Playfair Display', serif",
-          fontSize: 15, fontWeight: 500, color: C.gold,
-          letterSpacing: '0.5px', lineHeight: 1,
-        }}>PAi</span>
+        <Sparkles size={18} color={C.gold} strokeWidth={1.75} />
         {showBeta && (
           <span style={{
             position: 'absolute', bottom: -5, right: -4,

@@ -1161,9 +1161,16 @@ app.get('/api/vendor-clients/by-id/:id', async (req, res) => {
 
 app.post('/api/vendor-clients', async (req, res) => {
   try {
+    const allowed = [
+      'vendor_id', 'name', 'phone', 'email',
+      'event_type', 'event_date', 'venue', 'budget',
+      'status', 'notes', 'profile_incomplete',
+    ];
+    const payload = {};
+    for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
     const { data, error } = await supabase
       .from('vendor_clients')
-      .insert([req.body])
+      .insert([payload])
       .select()
       .single();
     if (error) throw error;
@@ -1461,6 +1468,62 @@ app.patch('/api/todos/:id', async (req, res) => {
 app.delete('/api/todos/:id', async (req, res) => {
   try {
     const { error } = await supabase.from('vendor_todos').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================
+// REMINDER ROUTES (Turn 9F)
+// ==================
+
+app.get('/api/reminders/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_reminders')
+      .select('*')
+      .eq('vendor_id', req.params.vendorId)
+      .order('remind_date', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/reminders', async (req, res) => {
+  try {
+    const allowed = ['vendor_id', 'title', 'remind_date', 'remind_time', 'notes', 'done'];
+    const payload = {};
+    for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
+    const { data, error } = await supabase
+      .from('vendor_reminders').insert([payload]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/reminders/:id', async (req, res) => {
+  try {
+    const allowed = ['title', 'remind_date', 'remind_time', 'notes', 'done'];
+    const patch = {};
+    for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+    const { data, error } = await supabase
+      .from('vendor_reminders').update(patch).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/reminders/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_reminders').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
@@ -3748,7 +3811,7 @@ app.post('/api/pai/confirm', async (req, res) => {
     try {
       if (user_type === 'vendor') {
         if (intent === 'create_todo') {
-          const { data: t, error } = await supabase.from('todos').insert([{
+          const { data: t, error } = await supabase.from('vendor_todos').insert([{
             vendor_id: user_id,
             title: data.title,
             due_date: data.due_date || null,

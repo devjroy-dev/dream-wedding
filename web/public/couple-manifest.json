@@ -1,7 +1,7 @@
 {
   "name": "The Dream Wedding",
   "short_name": "TDW",
-  "description": "Your digital maid of honour — plan your wedding together",
+  "description": "Plan your wedding beautifully — The Dream Wedding",
   "start_url": "/couple",
   "scope": "/couple",
   "display": "standalone",

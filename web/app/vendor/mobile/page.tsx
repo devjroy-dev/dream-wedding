@@ -9,6 +9,7 @@ import {
   CheckCircle, AlertCircle, X, Search, Mail, MoreHorizontal,
   Minus, Edit2, DollarSign, Tag, Trash2,
 } from 'react-feather';
+import { Sparkles } from 'lucide-react';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
@@ -43,7 +44,7 @@ const ESSENTIAL_TOOLS = [
 ];
 
 const SIGNATURE_TOOLS = [
-  { id: 'expenses',  icon: TrendingDown,  label: 'Expenses',  tab: 'Power' as Tab, sub: 'expenses' },
+  { id: 'expenses',  icon: Package,  label: 'Expense Tracker',  tab: 'Power' as Tab, sub: 'expenses' },
   { id: 'tax',       icon: Percent,       label: 'Tax & TDS', tab: 'Power' as Tab, sub: 'tax' },
   { id: 'team',      icon: Users,         label: 'Teams',     tab: 'Teams' as Tab },
   { id: 'referral',  icon: Share2,        label: 'Referrals', tab: 'Power' as Tab, sub: 'referral' },
@@ -528,7 +529,10 @@ export default function VendorMobilePage() {
           onClose={() => setShowQuickInvoice(false)}
           onSaved={(newInvoice: any) => {
             setInvoices(prev => [newInvoice, ...prev]);
-            setShowQuickInvoice(false);
+            // Don't close — sheet shows confirmation + WhatsApp share screen
+          }}
+          onClientCreated={(newClient: any) => {
+            setClients(prev => [newClient, ...prev]);
           }}
         />
       )}
@@ -2219,7 +2223,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
         { id: 'invoices',  label: 'Invoices',  icon: FileText,     sub: 'invoices',  minTier: 'essential', desc: 'Create, send, and track invoices. GST auto-calculated.' },
         { id: 'payments',  label: 'Payments',  icon: CreditCard,   sub: 'payments',  minTier: 'essential', desc: 'Payment schedules and outstanding amounts.' },
         { id: 'contracts', label: 'Contracts', icon: Briefcase,    sub: 'contracts', minTier: 'essential', desc: 'Service agreements, generated and tracked per client.' },
-        { id: 'expenses',  label: 'Expenses',  icon: TrendingDown, sub: 'expenses',  minTier: 'signature', desc: 'Track every expense. See where your money goes. P&L view.' },
+        { id: 'expenses',  label: 'Expense Tracker',  icon: Package, sub: 'expenses',  minTier: 'signature', desc: 'Track every expense, tag to clients, see what you profited after costs.' },
         { id: 'tax',       label: 'Tax & TDS', icon: Percent,      sub: 'tax',       minTier: 'signature', desc: 'GST invoices. Quarterly TDS summary. CA-ready exports.' },
       ],
     },
@@ -2419,7 +2423,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
 function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads, paymentSchedules, todos, events, blockedDates, onBack, showBack = true, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onOpenBlockDate, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName, onRefreshCalendar }: any) {
   const titles: Record<string, string> = {
     clients: 'Clients', invoices: 'Invoices', contracts: 'Contracts', payments: 'Payments',
-    expenses: 'Expenses', tax: 'Tax & TDS', team: 'My Team', referral: 'Referrals',
+    expenses: 'Expense Tracker', tax: 'Tax & TDS', team: 'My Team', referral: 'Referrals',
     whatsapp: 'Broadcast', analytics: 'Analytics', chat: 'Team Chat', todos: 'To-Do',
     inquiries: 'Enquiries', calendar: 'Calendar', events: 'Events',
   };
@@ -4178,23 +4182,34 @@ function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
   userId: string;
   onDreamAiClick?: () => void;
 }) {
-  // Y-position persists in localStorage. X is always right-edge-snapped.
-  const storageKey = `tdw_${kind}_button_y`;
-  const [buttonY, setButtonY] = useState<number>(() => {
-    if (typeof window === 'undefined') return -1;
-    const saved = localStorage.getItem(storageKey);
-    return saved ? parseInt(saved) : -1;
+  // Position persists in localStorage as { x, y, edge: 'left'|'right'|'top'|'bottom' }.
+  const storageKey = `tdw_${kind}_button_pos`;
+  const BTN_SIZE = 52;
+  const MARGIN = 16;
+  const BOTTOM_NAV_HEIGHT = 72;
+
+  const [pos, setPos] = useState<{ x: number; y: number; edge: 'left' | 'right' | 'top' | 'bottom' }>(() => {
+    if (typeof window === 'undefined') return { x: 0, y: 0, edge: 'right' };
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    // Default: bottom-right above bottom nav
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    return { x: w - BTN_SIZE - MARGIN, y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'right' };
   });
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ startY: number; startTop: number; moved: boolean }>({ startY: 0, startTop: 0, moved: false });
+  const [livePos, setLivePos] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; btnX: number; btnY: number; moved: boolean }>({
+    startX: 0, startY: 0, btnX: 0, btnY: 0, moved: false,
+  });
   const btnRef = useRef<HTMLButtonElement | null>(null);
 
-  // PAi state
   const [paiStatus, setPaiStatus] = useState<PaiStatus | null>(null);
   const [showPaiSheet, setShowPaiSheet] = useState(false);
   const [showRequestSheet, setShowRequestSheet] = useState(false);
 
-  // Load PAi status only if this is a PAi button
   useEffect(() => {
     if (kind !== 'pai' || !userId) return;
     let cancelled = false;
@@ -4205,40 +4220,75 @@ function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
     return () => { cancelled = true; };
   }, [kind, userType, userId]);
 
-  // Default Y position: bottom-right, above bottom nav
-  const defaultY = typeof window !== 'undefined' ? window.innerHeight - 140 : 600;
-  const effectiveY = buttonY < 0 ? defaultY : buttonY;
+  // Re-center on window resize if out of bounds
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const check = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (pos.x > w - BTN_SIZE || pos.y > h - BTN_SIZE) {
+        setPos({ x: w - BTN_SIZE - MARGIN, y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'right' });
+      }
+    };
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [pos.x, pos.y]);
+
+  const snapToEdge = (x: number, y: number) => {
+    if (typeof window === 'undefined') return { x, y, edge: 'right' as const };
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    // Distance to each edge
+    const distLeft = x;
+    const distRight = w - (x + BTN_SIZE);
+    const distTop = y;
+    const distBottom = h - (y + BTN_SIZE);
+    const min = Math.min(distLeft, distRight, distTop, distBottom);
+    if (min === distLeft)   return { x: MARGIN, y: Math.min(Math.max(y, MARGIN), h - BTN_SIZE - MARGIN), edge: 'left' as const };
+    if (min === distRight)  return { x: w - BTN_SIZE - MARGIN, y: Math.min(Math.max(y, MARGIN), h - BTN_SIZE - MARGIN), edge: 'right' as const };
+    if (min === distTop)    return { x: Math.min(Math.max(x, MARGIN), w - BTN_SIZE - MARGIN), y: MARGIN + 60, edge: 'top' as const }; // avoid header
+    return { x: Math.min(Math.max(x, MARGIN), w - BTN_SIZE - MARGIN), y: h - BTN_SIZE - BOTTOM_NAV_HEIGHT - MARGIN, edge: 'bottom' as const };
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!btnRef.current) return;
     btnRef.current.setPointerCapture(e.pointerId);
     const rect = btnRef.current.getBoundingClientRect();
-    dragRef.current = { startY: e.clientY, startTop: rect.top, moved: false };
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      btnX: rect.left, btnY: rect.top,
+      moved: false,
+    };
     setDragging(true);
+    setLivePos({ x: rect.left, y: rect.top });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
+    const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    if (Math.abs(dy) > 3) dragRef.current.moved = true;
-    const newTop = dragRef.current.startTop + dy;
-    const minY = 80;
-    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 800) - 100;
-    setButtonY(Math.min(Math.max(newTop, minY), maxY));
+    // Raise threshold from 3 to 8 px — prevents accidental drag detection on jittery taps
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) dragRef.current.moved = true;
+    setLivePos({
+      x: dragRef.current.btnX + dx,
+      y: dragRef.current.btnY + dy,
+    });
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragging) return;
     setDragging(false);
-    if (dragRef.current.moved) {
-      // Save position
+    if (dragRef.current.moved && livePos) {
+      const snapped = snapToEdge(livePos.x, livePos.y);
+      setPos(snapped);
       if (typeof window !== 'undefined') {
-        localStorage.setItem(storageKey, String(buttonY));
+        try { localStorage.setItem(storageKey, JSON.stringify(snapped)); } catch {}
       }
     } else {
-      // Not a drag — treat as tap
+      // Tap
       handleClick();
     }
+    setLivePos(null);
     if (btnRef.current) btnRef.current.releasePointerCapture(e.pointerId);
   };
 
@@ -4247,19 +4297,18 @@ function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
       onDreamAiClick && onDreamAiClick();
       return;
     }
-    // PAi flow
     if (!paiStatus) return;
-    if (paiStatus.enabled) {
-      setShowPaiSheet(true);
-    } else {
-      setShowRequestSheet(true);
-    }
+    if (paiStatus.enabled) setShowPaiSheet(true);
+    else setShowRequestSheet(true);
   };
 
-  // Button visual
   const bg = C.dark;
   const accent = C.gold;
   const showBetaChip = kind === 'pai' && paiStatus?.enabled;
+
+  // Render position: during drag use livePos, otherwise use stored pos
+  const renderX = dragging && livePos ? livePos.x : pos.x;
+  const renderY = dragging && livePos ? livePos.y : pos.y;
 
   return (
     <>
@@ -4269,23 +4318,28 @@ function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onContextMenu={e => e.preventDefault()}
         aria-label={kind === 'dreamai' ? 'Open Dream AI' : 'Open PAi'}
         style={{
           position: 'fixed',
-          top: effectiveY,
-          right: 'max(20px, calc(50vw - 220px))',
-          width: 52, height: 52, borderRadius: 26,
+          top: renderY,
+          left: renderX,
+          width: BTN_SIZE, height: BTN_SIZE, borderRadius: BTN_SIZE / 2,
           background: bg, border: `2px solid ${accent}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: dragging ? 'grabbing' : 'pointer', zIndex: 40,
           boxShadow: dragging ? '0 10px 28px rgba(44,36,32,0.35)' : '0 6px 20px rgba(44,36,32,0.25)',
-          transition: dragging ? 'none' : 'box-shadow 0.2s ease',
-          touchAction: 'none', // prevents page scroll while dragging
+          transition: dragging ? 'none' : 'top 0.2s ease, left 0.2s ease, box-shadow 0.2s ease',
+          touchAction: 'none',
           padding: 0,
-        }}
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+          msUserSelect: 'none',
+        } as any}
       >
         <span style={{
-          position: 'absolute', inset: 0, borderRadius: 26,
+          position: 'absolute', inset: 0, borderRadius: BTN_SIZE / 2,
           border: `1px solid ${accent}`, opacity: 0.4,
           animation: 'tdwAiPulse 2.4s ease-in-out infinite',
           pointerEvents: 'none' as const,
@@ -4293,11 +4347,7 @@ function FloatingAssistant({ kind, userType, userId, onDreamAiClick }: {
         {kind === 'dreamai' ? (
           <Zap size={20} color={accent} />
         ) : (
-          <span style={{
-            fontFamily: "'Playfair Display', serif",
-            fontSize: 16, fontWeight: 500, color: accent,
-            letterSpacing: '0.5px', lineHeight: 1,
-          }}>PAi</span>
+          <Sparkles size={20} color={accent} strokeWidth={1.75} />
         )}
         {showBetaChip && (
           <span style={{
@@ -5400,7 +5450,7 @@ type ToolDef = {
 };
 
 const MORE_TOOLS: ToolDef[] = [
-  { id: 'expenses',  label: 'Expenses',   icon: TrendingDown,  minTier: 'signature', href: '/vendor/mobile?sub=expenses',   desc: 'Track every expense. See where your money goes. P&L view.' },
+  { id: 'expenses',  label: 'Expense Tracker',   icon: Package,  minTier: 'signature', href: '/vendor/mobile?sub=expenses',   desc: 'Track every expense. Tag to clients. See profit per wedding.' },
   { id: 'tax',       label: 'Tax & TDS',  icon: Percent,       minTier: 'signature', href: '/vendor/mobile?sub=tax',        desc: 'GST invoices. Quarterly TDS summary. CA-ready exports.' },
   { id: 'broadcast', label: 'Broadcast',  icon: Send,          minTier: 'signature', href: '/vendor/mobile?sub=whatsapp',   desc: 'Send WhatsApp updates to client groups. Templates included.' },
   { id: 'analytics', label: 'Analytics',  icon: BarChart2,     minTier: 'signature', href: '/vendor/mobile?sub=analytics',  desc: 'Revenue trends. Lead conversion. What\'s working.' },
@@ -5762,47 +5812,99 @@ function FieldLabel({ children, style }: { children: React.ReactNode; style?: Re
 // ══════════════════════════════════════════════════════════════════════════
 
 function QuickInvoiceSheet({
-  vendorId, vendorName, clients, onClose, onSaved,
+  vendorId, vendorName, clients, onClose, onSaved, onClientCreated,
 }: {
   vendorId: string; vendorName: string; clients: any[];
   onClose: () => void; onSaved: (invoice: any) => void;
+  onClientCreated?: (client: any) => void;
 }) {
-  const [clientId, setClientId] = useState<string>('');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [amount, setAmount] = useState<string>('');
   const [description, setDescription] = useState<string>('');
+  const [gstEnabled, setGstEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [savedInvoice, setSavedInvoice] = useState<any>(null);
 
-  const selectedClient = clients.find(c => c.id === clientId);
-  const canSave = !!clientId && amount && parseInt(amount) > 0 && !submitting;
+  // Autocomplete: filter clients by name match (minimum 2 chars typed, no exact match)
+  const matches = clientName.trim().length >= 2 && !selectedClient
+    ? clients.filter(c => c.name?.toLowerCase().includes(clientName.trim().toLowerCase())).slice(0, 5)
+    : [];
+
+  const canSave = clientName.trim().length > 0 && amount && parseInt(amount) > 0 && !submitting;
+
+  const pickClient = (c: any) => {
+    setSelectedClient(c);
+    setClientName(c.name || '');
+    setClientPhone(c.phone || '');
+    setShowSuggestions(false);
+  };
+
+  const clearClient = () => {
+    setSelectedClient(null);
+    setClientName('');
+    setClientPhone('');
+  };
 
   const handleSave = async () => {
     if (!canSave) return;
     setError('');
     setSubmitting(true);
     try {
-      // Generate a human-readable invoice number (INV-YYMMDD-NNN)
+      let clientId = selectedClient?.id || null;
+      let clientWasCreated = false;
+
+      // If no client selected and no match, auto-create an incomplete client
+      if (!clientId) {
+        const autoClient = {
+          vendor_id: vendorId,
+          name: clientName.trim(),
+          phone: clientPhone.trim() || null,
+          profile_incomplete: true,
+        };
+        try {
+          const cr = await fetch(API + '/api/vendor-clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(autoClient),
+          });
+          const cd = await cr.json();
+          if (cd.success && cd.data) {
+            clientId = cd.data.id;
+            clientWasCreated = true;
+            onClientCreated && onClientCreated(cd.data);
+          }
+        } catch { /* non-fatal — continue without client_id */ }
+      }
+
+      const amt = parseInt(amount);
       const d = new Date();
       const yymmdd = d.toISOString().slice(2, 10).replace(/-/g, '');
       const invoice_number = `INV-${yymmdd}-${Math.floor(Math.random() * 900 + 100)}`;
+
       const r = await fetch(API + '/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vendor_id: vendorId,
           client_id: clientId,
-          client_name: selectedClient?.name || '',
-          client_phone: selectedClient?.phone || '',
-          client_email: selectedClient?.email || '',
-          amount: parseInt(amount),
+          client_name: clientName.trim(),
+          client_phone: clientPhone.trim() || null,
+          client_email: selectedClient?.email || null,
+          amount: amt,
           description: description.trim() || `Services by ${vendorName}`,
           invoice_number,
           status: 'unpaid',
           issue_date: new Date().toISOString().slice(0, 10),
+          gst_enabled: gstEnabled,
         }),
       });
       const d2 = await r.json();
       if (d2.success && d2.data) {
+        setSavedInvoice({ ...d2.data, _clientWasCreated: clientWasCreated });
         onSaved(d2.data);
       } else {
         setError(d2.error || 'Could not save invoice');
@@ -5814,111 +5916,282 @@ function QuickInvoiceSheet({
     }
   };
 
+  const handleWhatsApp = () => {
+    if (!savedInvoice) return;
+    const amt = parseInt(amount);
+    const gstPart = gstEnabled ? `\nGST (18%): ₹${(amt * 0.18).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '';
+    const total = gstEnabled ? amt * 1.18 : amt;
+    const msg = `Hi ${clientName.trim()},\n\nInvoice from ${vendorName}:\n*${savedInvoice.invoice_number}*\n\nAmount: ₹${amt.toLocaleString('en-IN')}${gstPart}\n*Total: ₹${total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}*\n\n${description.trim() || 'Services rendered'}\n\nKindly process payment at your earliest convenience.\n\nThank you,\n${vendorName}`;
+    const phone = (clientPhone || '').replace(/\D/g, '');
+    const waUrl = phone
+      ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  // Post-save confirmation screen
+  if (savedInvoice) {
+    return (
+      <SheetOverlay onClose={onClose}>
+        <SheetHeader eyebrow="Invoice Created" title={savedInvoice.invoice_number} onClose={onClose} />
+        <div style={{
+          padding: '18px 16px', borderRadius: 12, marginBottom: 14,
+          background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+        }}>
+          <div style={{ fontSize: 11, color: C.goldDeep, fontWeight: 500, letterSpacing: 1.5, textTransform: 'uppercase' as const, marginBottom: 4 }}>Client</div>
+          <div style={{ fontSize: 15, color: C.dark, fontFamily: "'Playfair Display', serif", fontWeight: 500 }}>
+            {clientName}
+            {savedInvoice._clientWasCreated && (
+              <span style={{
+                display: 'inline-block', marginLeft: 8, width: 6, height: 6, borderRadius: 3,
+                background: '#E57373', verticalAlign: 'middle',
+              }} />
+            )}
+          </div>
+          {savedInvoice._clientWasCreated && (
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+              New client added — complete profile in Clients tab.
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: C.goldDeep, fontWeight: 500, letterSpacing: 1.5, textTransform: 'uppercase' as const, marginTop: 12, marginBottom: 4 }}>Total</div>
+          <div style={{ fontSize: 22, color: C.dark, fontFamily: "'Playfair Display', serif", fontWeight: 400 }}>
+            ₹{(gstEnabled ? parseInt(amount) * 1.18 : parseInt(amount)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </div>
+          {gstEnabled && <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>Includes 18% GST</div>}
+        </div>
+
+        <button
+          onClick={handleWhatsApp}
+          style={{
+            width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
+            background: '#25D366', color: '#fff', border: 'none',
+            cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+            fontFamily: 'DM Sans, sans-serif',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          <Send size={14} /> Share on WhatsApp
+        </button>
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%', padding: 12, borderRadius: 12,
+            background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`, cursor: 'pointer',
+            fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+            textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+          }}
+        >Done</button>
+      </SheetOverlay>
+    );
+  }
+
   return (
     <SheetOverlay onClose={onClose}>
       <SheetHeader eyebrow="Quick Action" title="Create Invoice" onClose={onClose} />
 
-      {clients.length === 0 ? (
-        <div style={{
-          background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
-          borderRadius: '12px', padding: '18px',
-          fontSize: '13px', color: C.goldDeep, lineHeight: 1.55,
-          marginBottom: '12px',
-        }}>
-          Add a client first, then you can invoice them. Tap <strong>Add Client</strong> on the Home tab.
-        </div>
-      ) : (
-        <>
-          <FieldLabel>Client</FieldLabel>
-          <select
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
+      <FieldLabel>Client Name</FieldLabel>
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <input
+          type="text"
+          value={clientName}
+          onChange={(e) => {
+            setClientName(e.target.value);
+            if (selectedClient && e.target.value !== selectedClient.name) setSelectedClient(null);
+            setShowSuggestions(true);
+            setError('');
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+          placeholder="Type client name…"
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            background: C.ivory, border: `1px solid ${selectedClient ? C.goldBorder : C.border}`,
+            borderRadius: 12, padding: '13px 14px',
+            fontSize: 14, color: C.dark,
+            fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          }}
+        />
+        {selectedClient && (
+          <button
+            onClick={clearClient}
             style={{
-              width: '100%',
-              background: C.ivory,
-              border: `1px solid ${C.border}`,
-              borderRadius: '12px',
-              padding: '13px 14px',
-              fontSize: '14px', color: clientId ? C.dark : C.muted,
-              fontFamily: 'DM Sans, sans-serif',
-              outline: 'none', marginBottom: '14px',
-              appearance: 'none', WebkitAppearance: 'none',
+              position: 'absolute' as const, top: 10, right: 10,
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+              borderRadius: 12, padding: '4px 10px',
+              fontSize: 10, color: C.goldDeep,
+              cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+              display: 'flex', alignItems: 'center', gap: 4,
             }}
           >
-            <option value="">Select a client…</option>
-            {clients.map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name}{c.event_type ? ` · ${c.event_type}` : ''}
-              </option>
-            ))}
-          </select>
-
-          <FieldLabel>Amount (₹)</FieldLabel>
+            ✓ From list
+          </button>
+        )}
+        {showSuggestions && matches.length > 0 && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: '10px',
-            background: C.ivory, border: `1px solid ${C.border}`,
-            borderRadius: '12px', padding: '13px 14px', marginBottom: '14px',
+            position: 'absolute' as const, top: '100%', left: 0, right: 0,
+            marginTop: 4, background: C.ivory,
+            border: `1px solid ${C.border}`, borderRadius: 10,
+            boxShadow: '0 6px 18px rgba(44,36,32,0.1)',
+            maxHeight: 200, overflowY: 'auto' as const, zIndex: 10,
           }}>
-            <span style={{
-              fontFamily: "'Playfair Display', serif",
-              fontSize: '18px', color: C.goldDeep, fontWeight: 400,
-            }}>₹</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={amount ? parseInt(amount).toLocaleString('en-IN') : ''}
-              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="e.g. 50000"
-              style={{
-                flex: 1, background: 'transparent', border: 'none',
-                fontSize: '18px', fontFamily: "'Playfair Display', serif",
-                color: C.dark, fontWeight: 400, outline: 'none',
-              }}
-            />
+            {matches.map(c => (
+              <button
+                key={c.id}
+                onClick={() => pickClient(c)}
+                style={{
+                  width: '100%', padding: '10px 14px',
+                  background: 'transparent', border: 'none',
+                  borderBottom: `1px solid ${C.borderSoft}`,
+                  textAlign: 'left' as const, cursor: 'pointer',
+                  fontFamily: 'inherit', display: 'flex',
+                  alignItems: 'center', gap: 10,
+                }}
+              >
+                <div style={{
+                  width: 30, height: 30, borderRadius: 15,
+                  background: C.goldSoft, display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 600, color: C.goldDeep,
+                  fontFamily: "'Playfair Display', serif",
+                }}>
+                  {(c.name || '?')[0].toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: C.dark, fontWeight: 500 }}>{c.name}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>
+                    {c.event_type || 'Client'}{c.phone ? ` · ${c.phone}` : ''}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
+        )}
+        {showSuggestions && clientName.trim().length >= 2 && matches.length === 0 && !selectedClient && (
+          <div style={{
+            position: 'absolute' as const, top: '100%', left: 0, right: 0,
+            marginTop: 4, padding: '10px 14px',
+            background: C.champagne, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10, fontSize: 11, color: C.muted, zIndex: 10,
+          }}>
+            No match in your client list. Will be added as a new client when you save.
+          </div>
+        )}
+      </div>
 
-          <FieldLabel>Description (optional)</FieldLabel>
+      {!selectedClient && (
+        <>
+          <FieldLabel>Client Phone (optional)</FieldLabel>
           <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g. Wedding photography — Sangeet + Reception"
+            type="tel"
+            value={clientPhone}
+            onChange={(e) => setClientPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))}
+            placeholder="10-digit mobile"
             style={{
-              width: '100%',
+              width: '100%', boxSizing: 'border-box' as const,
               background: C.ivory, border: `1px solid ${C.border}`,
-              borderRadius: '12px', padding: '13px 14px',
-              fontSize: '13px', color: C.dark,
+              borderRadius: 12, padding: '13px 14px',
+              fontSize: 14, color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none',
-              marginBottom: '14px', boxSizing: 'border-box',
+              marginBottom: 14,
             }}
           />
-
-          <div style={{
-            fontFamily: 'DM Sans, sans-serif', fontSize: '11px',
-            color: C.muted, marginBottom: '16px', fontStyle: 'italic',
-          }}>
-            GST (18%) is added automatically. Total: ₹{amount ? (parseInt(amount) * 1.18).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '0'}
-          </div>
         </>
       )}
+
+      <FieldLabel>Amount (₹)</FieldLabel>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: C.ivory, border: `1px solid ${C.border}`,
+        borderRadius: 12, padding: '13px 14px', marginBottom: 14,
+      }}>
+        <span style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 18, color: C.goldDeep, fontWeight: 400,
+        }}>₹</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={amount ? parseInt(amount).toLocaleString('en-IN') : ''}
+          onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
+          placeholder="e.g. 50000"
+          style={{
+            flex: 1, background: 'transparent', border: 'none',
+            fontSize: 18, fontFamily: "'Playfair Display', serif",
+            color: C.dark, fontWeight: 400, outline: 'none',
+          }}
+        />
+      </div>
+
+      <FieldLabel>Description (optional)</FieldLabel>
+      <input
+        type="text"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="e.g. Wedding photography — Sangeet + Reception"
+        style={{
+          width: '100%', boxSizing: 'border-box' as const,
+          background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: 12, padding: '13px 14px',
+          fontSize: 13, color: C.dark,
+          fontFamily: 'DM Sans, sans-serif', outline: 'none',
+          marginBottom: 14,
+        }}
+      />
+
+      {/* GST toggle */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: gstEnabled ? C.goldSoft : C.pearl,
+        border: `1px solid ${gstEnabled ? C.goldBorder : C.border}`,
+        borderRadius: 12, padding: '12px 14px', marginBottom: 16,
+        transition: 'all 0.2s ease',
+      }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: C.dark, fontFamily: 'DM Sans, sans-serif' }}>
+            Add GST (18%)
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+            Total: ₹{amount ? ((gstEnabled ? parseInt(amount) * 1.18 : parseInt(amount)).toLocaleString('en-IN', { maximumFractionDigits: 0 })) : '0'}
+          </div>
+        </div>
+        <button
+          onClick={() => setGstEnabled(!gstEnabled)}
+          style={{
+            width: 40, height: 22, borderRadius: 11,
+            background: gstEnabled ? C.gold : C.border,
+            border: 'none', cursor: 'pointer', padding: 0,
+            position: 'relative' as const, transition: 'all 0.2s ease',
+          }}
+        >
+          <div style={{
+            position: 'absolute' as const,
+            top: 2, left: gstEnabled ? 20 : 2,
+            width: 18, height: 18, borderRadius: 9,
+            background: '#fff',
+            transition: 'all 0.2s ease',
+          }} />
+        </button>
+      </div>
 
       {error && (
         <div style={{
           background: C.redSoft, border: `1px solid ${C.redBorder}`,
-          borderRadius: '10px', padding: '10px 12px',
-          fontSize: '11px', color: C.red, marginBottom: '12px',
+          borderRadius: 10, padding: '10px 12px',
+          fontSize: 11, color: C.red, marginBottom: 12,
         }}>{error}</div>
       )}
 
-      <div style={{ display: 'flex', gap: '10px' }}>
+      <div style={{ display: 'flex', gap: 10 }}>
         <button
           onClick={onClose}
           style={{
             flex: 1,
             background: 'transparent', color: C.muted,
-            border: `1px solid ${C.border}`, borderRadius: '12px',
-            padding: '13px', fontSize: '11px', fontWeight: 500,
-            letterSpacing: '1.5px', textTransform: 'uppercase',
+            border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: 13, fontSize: 11, fontWeight: 500,
+            letterSpacing: '1.5px', textTransform: 'uppercase' as const,
             cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
           }}
         >Cancel</button>
@@ -5927,11 +6200,11 @@ function QuickInvoiceSheet({
           disabled={!canSave}
           style={{
             flex: 2,
-            background: canSave ? C.gold : C.border,
-            color: canSave ? C.ivory : C.light,
-            border: 'none', borderRadius: '12px',
-            padding: '14px', fontSize: '11px', fontWeight: 600,
-            letterSpacing: '1.8px', textTransform: 'uppercase',
+            background: canSave ? C.dark : C.border,
+            color: canSave ? C.gold : C.light,
+            border: 'none', borderRadius: 12,
+            padding: 14, fontSize: 11, fontWeight: 600,
+            letterSpacing: '1.8px', textTransform: 'uppercase' as const,
             cursor: canSave ? 'pointer' : 'not-allowed',
             fontFamily: 'DM Sans, sans-serif',
           }}
