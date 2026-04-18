@@ -3,6 +3,26 @@ import { useState, useEffect } from 'react';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
+const C = {
+  cream: '#FAF6F0',
+  ivory: '#FFFFFF',
+  pearl: '#FBF8F2',
+  champagne: '#FFFDF7',
+  goldSoft: '#FFF8EC',
+  goldMist: '#FFF3DB',
+  goldBorder: '#E8D9B5',
+  border: '#EDE8E0',
+  borderSoft: '#F2EDE4',
+  dark: '#2C2420',
+  gold: '#C9A84C',
+  goldDeep: '#B8963A',
+  muted: '#8C7B6E',
+  light: '#B8ADA4',
+  red: '#C65757',
+  redSoft: '#FBEEEE',
+  redBorder: '#F0CFCF',
+};
+
 export default function VendorSetupPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -11,8 +31,10 @@ export default function VendorSetupPage() {
   const [error, setError] = useState('');
   const [session, setSession] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
     window.addEventListener('resize', check);
@@ -24,7 +46,7 @@ export default function VendorSetupPage() {
       const s = JSON.parse(localStorage.getItem('vendor_web_session') || '{}');
       if (!s.vendorId) { window.location.href = '/vendor/login'; return; }
       setSession(s);
-    } catch(e) { window.location.href = '/vendor/login'; }
+    } catch (e) { window.location.href = '/vendor/login'; }
   }, []);
 
   const handleCreate = async () => {
@@ -51,62 +73,285 @@ export default function VendorSetupPage() {
     } finally { setLoading(false); }
   };
 
+  if (!mounted) return null;
+
   const tierLabel = session?.tier === 'prestige' ? 'Prestige' : 'Signature';
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{
+      display: 'flex', minHeight: '100vh',
+      fontFamily: "'DM Sans', sans-serif",
+      background: C.cream,
+    }}>
       {!isMobile && (
-      <div style={{ width: '55%', background: '#0F1117', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '48px 56px' }}>
-        <div>
-          <div style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase' }}>THE DREAM WEDDING</div>
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.5px', marginTop: '4px' }}>Vendor Business Portal</div>
-        </div>
-        <div>
-          <div style={{ fontSize: '38px', fontWeight: 300, color: '#fff', lineHeight: 1.2, letterSpacing: '-0.8px', marginBottom: '20px' }}>Welcome aboard.</div>
-          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', lineHeight: 1.8, maxWidth: '340px' }}>You have been granted access to the {tierLabel} plan. Set up your credentials to get started.</div>
-          {session?.tier && (
-            <div style={{ display: 'inline-block', marginTop: '24px', padding: '8px 20px', borderRadius: '50px', border: '1px solid rgba(201,168,76,0.3)', background: 'rgba(201,168,76,0.08)' }}>
-              <span style={{ fontSize: '11px', fontWeight: 500, color: '#C9A84C', letterSpacing: '2px', textTransform: 'uppercase' }}>{tierLabel} Trial</span>
+        <div style={{
+          width: '50%',
+          background: `linear-gradient(135deg, ${C.champagne} 0%, ${C.goldSoft} 100%)`,
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          padding: '56px 64px',
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', top: -100, right: -100,
+            width: 300, height: 300, borderRadius: '50%',
+            background: `radial-gradient(circle, ${C.goldMist} 0%, transparent 70%)`,
+            opacity: 0.6,
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: '3px',
+              color: C.goldDeep, textTransform: 'uppercase',
+            }}>
+              The Dream Wedding
             </div>
-          )}
+            <div style={{
+              fontSize: 10, color: C.muted, letterSpacing: '0.5px',
+              marginTop: 4,
+            }}>
+              Vendor Portal
+            </div>
+          </div>
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <h1 style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: 40, fontWeight: 400, color: C.dark,
+              lineHeight: 1.15, letterSpacing: '-0.5px',
+              margin: 0, marginBottom: 18,
+            }}>
+              Welcome aboard.
+            </h1>
+            <p style={{
+              fontSize: 14, color: C.muted, lineHeight: 1.7,
+              maxWidth: 360, margin: 0, fontWeight: 300,
+            }}>
+              You have been granted access to the {tierLabel} plan. Set up your credentials to get started.
+            </p>
+            {session?.tier && (
+              <div style={{
+                display: 'inline-block', marginTop: 24,
+                padding: '8px 20px', borderRadius: 50,
+                border: `1px solid ${C.goldBorder}`,
+                background: C.goldSoft,
+              }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: C.goldDeep,
+                  letterSpacing: '2px', textTransform: 'uppercase',
+                }}>{tierLabel} Trial</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            position: 'relative', zIndex: 1,
+            borderTop: `1px solid ${C.goldBorder}`, paddingTop: 24,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{
+              fontSize: 11, color: C.muted, letterSpacing: '0.3px',
+            }}>
+              vendor.thedreamwedding.in
+            </div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: 11, color: C.goldDeep,
+              fontStyle: 'italic',
+            }}>
+              est. 2026
+            </div>
+          </div>
         </div>
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '24px' }}>
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.3px' }}>vendor.thedreamwedding.in</div>
-        </div>
-      </div>
       )}
-      <div style={{ width: isMobile ? '100%' : '45%', background: isMobile ? '#0F1117' : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '32px 24px' : '56px 64px', minHeight: isMobile ? '100vh' : 'auto' }}>
+
+      <div style={{
+        width: isMobile ? '100%' : '50%',
+        background: C.cream,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        padding: isMobile ? '40px 24px max(40px, env(safe-area-inset-bottom))' : '64px',
+        minHeight: isMobile ? '100vh' : 'auto',
+      }}>
         {isMobile && (
-          <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase', marginBottom: '6px' }}>THE DREAM WEDDING</div>
-            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.5px' }}>Vendor Business Portal</div>
+          <div style={{ marginBottom: 36, textAlign: 'center' }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: '3px',
+              color: C.goldDeep, textTransform: 'uppercase',
+              marginBottom: 4,
+            }}>
+              The Dream Wedding
+            </div>
+            <div style={{
+              fontSize: 10, color: C.muted, letterSpacing: '0.5px',
+            }}>
+              Vendor Portal
+            </div>
           </div>
         )}
-        <div style={{ width: '100%', maxWidth: '360px', background: isMobile ? '#FFFFFF' : 'transparent', borderRadius: isMobile ? '16px' : '0', padding: isMobile ? '28px 24px' : '0' }}>
-          <div style={{ marginBottom: '32px' }}>
-            <div style={{ fontSize: '22px', fontWeight: 600, color: '#0F1117', marginBottom: '8px', letterSpacing: '-0.3px' }}>Create your account</div>
-            <div style={{ fontSize: '13px', color: '#6B7280', lineHeight: 1.6 }}>Choose a username and password. You will use these to sign in to your portal.</div>
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Username</label>
-            <input type="text" placeholder="Choose a username" value={username} onChange={(e) => { setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, '')); setError(''); }} style={{ width: '100%', padding: '14px 18px', fontSize: '14px', fontFamily: 'Inter, sans-serif', border: '1.5px solid #E5E7EB', borderRadius: '8px', backgroundColor: '#FAFAFA', color: '#0F1117', outline: 'none', boxSizing: 'border-box' }} onFocus={(e) => e.target.style.border = '1.5px solid #C9A84C'} onBlur={(e) => e.target.style.border = '1.5px solid #E5E7EB'} />
-            <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>Lowercase letters, numbers, dots and underscores only</div>
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Password</label>
-            <input type="password" placeholder="Create a password" value={password} onChange={(e) => { setPassword(e.target.value); setError(''); }} style={{ width: '100%', padding: '14px 18px', fontSize: '14px', fontFamily: 'Inter, sans-serif', border: '1.5px solid #E5E7EB', borderRadius: '8px', backgroundColor: '#FAFAFA', color: '#0F1117', outline: 'none', boxSizing: 'border-box' }} onFocus={(e) => e.target.style.border = '1.5px solid #C9A84C'} onBlur={(e) => e.target.style.border = '1.5px solid #E5E7EB'} />
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Confirm Password</label>
-            <input type="password" placeholder="Confirm your password" value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setError(''); }} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} style={{ width: '100%', padding: '14px 18px', fontSize: '14px', fontFamily: 'Inter, sans-serif', border: '1.5px solid #E5E7EB', borderRadius: '8px', backgroundColor: '#FAFAFA', color: '#0F1117', outline: 'none', boxSizing: 'border-box' }} onFocus={(e) => e.target.style.border = '1.5px solid #C9A84C'} onBlur={(e) => e.target.style.border = '1.5px solid #E5E7EB'} />
-          </div>
-          {error && <div style={{ fontSize: '12px', color: '#DC2626', marginBottom: '12px' }}>{error}</div>}
-          <button onClick={handleCreate} disabled={loading} style={{ width: '100%', background: loading ? '#E5E7EB' : '#0F1117', color: loading ? '#9CA3AF' : '#fff', fontSize: '13px', fontWeight: 600, letterSpacing: '0.5px', fontFamily: 'Inter, sans-serif', padding: '14px 24px', borderRadius: '8px', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', marginBottom: '16px' }}>
-            {loading ? 'Creating account...' : 'Create Account & Enter Dashboard'}
+
+        <div style={{ width: '100%', maxWidth: 380 }}>
+          <h2 style={{
+            fontFamily: "'Playfair Display', serif",
+            fontSize: 26, fontWeight: 400,
+            color: C.dark, letterSpacing: '-0.3px',
+            margin: 0, marginBottom: 8, lineHeight: 1.25,
+          }}>
+            Create your account.
+          </h2>
+          <p style={{
+            fontSize: 13, color: C.muted, lineHeight: 1.6,
+            margin: 0, marginBottom: 24,
+          }}>
+            Choose a username and password. You'll use these to sign in to your portal.
+          </p>
+
+          <FloatingField
+            label="Username"
+            required
+            value={username}
+            onChange={v => { setUsername(v.toLowerCase().replace(/[^a-z0-9._]/g, '')); setError(''); }}
+            autoFocus
+            helper="Lowercase letters, numbers, dots and underscores only"
+          />
+
+          <FloatingField
+            label="Password"
+            required
+            value={password}
+            onChange={v => { setPassword(v); setError(''); }}
+            type="password"
+            helper="At least 6 characters"
+          />
+
+          <FloatingField
+            label="Confirm password"
+            required
+            value={confirmPassword}
+            onChange={v => { setConfirmPassword(v); setError(''); }}
+            type="password"
+            onKeyDown={e => e.key === 'Enter' && !loading && handleCreate()}
+          />
+
+          {error && (
+            <div style={{
+              background: C.redSoft,
+              border: `1px solid ${C.redBorder}`,
+              borderRadius: 8,
+              padding: '10px 12px',
+              fontSize: 12, color: C.red,
+              marginBottom: 14,
+            }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={handleCreate}
+            disabled={loading}
+            style={{
+              width: '100%',
+              padding: '15px 20px',
+              background: loading ? C.border : C.dark,
+              color: loading ? C.light : C.gold,
+              border: 'none',
+              borderRadius: 12,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '2px',
+              textTransform: 'uppercase',
+              fontFamily: "'DM Sans', sans-serif",
+              transition: 'all 0.2s ease',
+              marginBottom: 16,
+            }}
+          >
+            {loading ? 'Creating account…' : 'Create account & enter dashboard'}
           </button>
-          <div style={{ fontSize: '11px', color: '#9CA3AF', textAlign: 'center', lineHeight: 1.6 }}>You can update your profile, add services, and manage your business from the dashboard.</div>
+
+          <div style={{
+            fontSize: 11, color: C.muted,
+            textAlign: 'center', lineHeight: 1.6,
+          }}>
+            You can update your profile, add services, and manage your business from the dashboard.
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FloatingField({
+  label, value, onChange, type = 'text', required,
+  autoFocus, helper, onKeyDown,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+  autoFocus?: boolean;
+  helper?: string;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const labelFloated = focused || value.length > 0;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{
+        position: 'relative',
+        background: C.ivory,
+        border: `1.5px solid ${focused ? C.gold : C.border}`,
+        borderRadius: 12,
+        transition: 'border-color 0.2s ease',
+      }}>
+        <label style={{
+          position: 'absolute',
+          left: 14,
+          top: labelFloated ? 6 : '50%',
+          transform: labelFloated ? 'none' : 'translateY(-50%)',
+          fontSize: labelFloated ? 9 : 13,
+          fontWeight: labelFloated ? 600 : 400,
+          letterSpacing: labelFloated ? '1.5px' : 'normal',
+          textTransform: labelFloated ? 'uppercase' : 'none',
+          color: focused ? C.goldDeep : C.muted,
+          fontFamily: "'DM Sans', sans-serif",
+          pointerEvents: 'none',
+          transition: 'all 0.2s ease',
+        }}>
+          {label}
+          {required && <span style={{ color: C.red, marginLeft: 4 }}>*</span>}
+        </label>
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={onKeyDown}
+          autoFocus={autoFocus}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none', outline: 'none',
+            padding: labelFloated ? '24px 14px 10px 14px' : '20px 14px 16px 14px',
+            fontSize: 14,
+            color: C.dark,
+            fontFamily: "'DM Sans', sans-serif",
+            boxSizing: 'border-box',
+            transition: 'padding 0.2s ease',
+          }}
+        />
+      </div>
+      {helper && (
+        <div style={{
+          fontSize: 11, color: C.muted, marginTop: 6, paddingLeft: 4,
+          lineHeight: 1.5,
+        }}>
+          {helper}
+        </div>
+      )}
     </div>
   );
 }

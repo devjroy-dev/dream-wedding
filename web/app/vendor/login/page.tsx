@@ -1,7 +1,28 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
+
+// ── Net-a-Porter palette (matches mobile PWA exactly) ──
+const C = {
+  cream: '#FAF6F0',
+  ivory: '#FFFFFF',
+  pearl: '#FBF8F2',
+  champagne: '#FFFDF7',
+  goldSoft: '#FFF8EC',
+  goldMist: '#FFF3DB',
+  goldBorder: '#E8D9B5',
+  border: '#EDE8E0',
+  borderSoft: '#F2EDE4',
+  dark: '#2C2420',
+  gold: '#C9A84C',
+  goldDeep: '#B8963A',
+  muted: '#8C7B6E',
+  light: '#B8ADA4',
+  red: '#C65757',
+  redSoft: '#FBEEEE',
+  redBorder: '#F0CFCF',
+};
 
 type Mode = 'entry' | 'signup' | 'login' | 'forgot';
 
@@ -11,7 +32,6 @@ export default function VendorLoginPage() {
   const [mounted, setMounted] = useState(false);
   const [prefillCode, setPrefillCode] = useState<string | null>(null);
 
-  // Route post-login to the right surface
   const goToVendorHome = () => {
     const mob = typeof window !== 'undefined' && window.innerWidth < 768;
     window.location.href = mob ? '/vendor/mobile' : '/vendor/dashboard';
@@ -29,7 +49,6 @@ export default function VendorLoginPage() {
         if (p.vendorId) goToVendorHome();
       }
     } catch {}
-    // Read ?code=XXXX from URL — if present, jump straight to signup with code prefilled
     try {
       const params = new URLSearchParams(window.location.search);
       const code = params.get('code');
@@ -43,198 +62,477 @@ export default function VendorLoginPage() {
 
   if (!mounted) return null;
 
-  // ──────────────────────────────────────────────────────────
-  // LAYOUT WRAPPER
-  // ──────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{
+      display: 'flex', minHeight: '100vh',
+      fontFamily: "'DM Sans', sans-serif",
+      background: C.cream,
+    }}>
       {!isMobile && (
         <div style={{
-          width: '55%', background: '#0F1117',
+          width: '50%',
+          background: `linear-gradient(135deg, ${C.champagne} 0%, ${C.goldSoft} 100%)`,
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-          padding: '48px 56px',
+          padding: '56px 64px',
+          position: 'relative',
+          overflow: 'hidden',
         }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase' }}>
-              THE DREAM WEDDING
+          <div style={{
+            position: 'absolute', top: -100, right: -100,
+            width: 300, height: 300, borderRadius: '50%',
+            background: `radial-gradient(circle, ${C.goldMist} 0%, transparent 70%)`,
+            opacity: 0.6,
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: '3px',
+              color: C.goldDeep, textTransform: 'uppercase',
+              fontFamily: "'DM Sans', sans-serif",
+            }}>
+              The Dream Wedding
             </div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.5px', marginTop: 4 }}>
+            <div style={{
+              fontSize: 10, color: C.muted, letterSpacing: '0.5px',
+              marginTop: 4, fontFamily: "'DM Sans', sans-serif",
+            }}>
               Vendor Portal
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: 38, fontWeight: 300, color: '#fff', lineHeight: 1.2, letterSpacing: '-0.8px', marginBottom: 20 }}>
-              Your business, in your pocket.
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.8, maxWidth: 340 }}>
-              Clients, calendar, enquiries, payments — everything you need to run your wedding business. Without the bulk.
-            </div>
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <h1 style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: 44, fontWeight: 400, color: C.dark,
+              lineHeight: 1.15, letterSpacing: '-0.5px',
+              margin: 0, marginBottom: 18,
+            }}>
+              Your business,<br />in your pocket.
+            </h1>
+            <p style={{
+              fontSize: 14, color: C.muted, lineHeight: 1.7,
+              maxWidth: 360, margin: 0,
+              fontFamily: "'DM Sans', sans-serif", fontWeight: 300,
+            }}>
+              Clients, calendar, enquiries, payments — everything you need to run your wedding business. Beautifully arranged.
+            </p>
           </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 24 }}>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.3px' }}>
+
+          <div style={{
+            position: 'relative', zIndex: 1,
+            borderTop: `1px solid ${C.goldBorder}`, paddingTop: 24,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{
+              fontSize: 11, color: C.muted, letterSpacing: '0.3px',
+              fontFamily: "'DM Sans', sans-serif",
+            }}>
               vendor.thedreamwedding.in
+            </div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: 11, color: C.goldDeep,
+              fontStyle: 'italic',
+            }}>
+              est. 2026
             </div>
           </div>
         </div>
       )}
 
       <div style={{
-        width: isMobile ? '100%' : '45%',
-        background: isMobile ? '#0F1117' : '#fff',
+        width: isMobile ? '100%' : '50%',
+        background: C.cream,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        padding: isMobile ? '32px 24px' : '56px 64px',
+        padding: isMobile ? '40px 24px max(40px, env(safe-area-inset-bottom))' : '64px',
         minHeight: isMobile ? '100vh' : 'auto',
-        color: isMobile ? '#fff' : '#0F1117',
       }}>
         {isMobile && (
-          <div style={{ marginBottom: 24, textAlign: 'center' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '2.5px', color: '#C9A84C', textTransform: 'uppercase' }}>
-              THE DREAM WEDDING
+          <div style={{ marginBottom: 36, textAlign: 'center' }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: '3px',
+              color: C.goldDeep, textTransform: 'uppercase',
+              marginBottom: 4,
+            }}>
+              The Dream Wedding
             </div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.5px', marginTop: 4 }}>
+            <div style={{
+              fontSize: 10, color: C.muted, letterSpacing: '0.5px',
+            }}>
               Vendor Portal
             </div>
           </div>
         )}
 
         <div style={{ width: '100%', maxWidth: 380 }}>
-          {mode === 'entry' && <EntryScreen onSignup={() => setMode('signup')} onLogin={() => setMode('login')} isMobile={isMobile} />}
-          {mode === 'signup' && <SignupFlow onBack={() => setMode('entry')} onComplete={goToVendorHome} isMobile={isMobile} prefillCode={prefillCode} />}
-          {mode === 'login' && <LoginFlow onBack={() => setMode('entry')} onForgot={() => setMode('forgot')} onComplete={goToVendorHome} isMobile={isMobile} />}
-          {mode === 'forgot' && <ForgotFlow onBack={() => setMode('login')} onDone={() => setMode('login')} isMobile={isMobile} />}
+          {mode === 'entry' && <EntryScreen onSignup={() => setMode('signup')} onLogin={() => setMode('login')} />}
+          {mode === 'signup' && <SignupFlow onBack={() => setMode('entry')} onComplete={goToVendorHome} prefillCode={prefillCode} />}
+          {mode === 'login' && <LoginFlow onBack={() => setMode('entry')} onForgot={() => setMode('forgot')} onComplete={goToVendorHome} />}
+          {mode === 'forgot' && <ForgotFlow onBack={() => setMode('login')} onDone={() => setMode('login')} />}
         </div>
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// STYLE HELPERS
-// ─────────────────────────────────────────────────────────────
-
-function useStyles(isMobile: boolean) {
-  const textColor = isMobile ? '#fff' : '#0F1117';
-  const mutedColor = isMobile ? 'rgba(255,255,255,0.5)' : '#6B7280';
-  const inputBg = isMobile ? 'rgba(255,255,255,0.05)' : '#FAFAFA';
-  const inputBorder = isMobile ? 'rgba(255,255,255,0.1)' : '#E5E7EB';
-
-  return {
-    textColor,
-    mutedColor,
-    input: {
-      width: '100%', padding: '14px 18px', fontSize: 14,
-      fontFamily: 'Inter, sans-serif',
-      border: `1.5px solid ${inputBorder}`, borderRadius: 8,
-      backgroundColor: inputBg, color: textColor, outline: 'none',
-      boxSizing: 'border-box' as const, marginBottom: 12,
-    },
-    inputWithPrefix: {
-      width: '100%', padding: '14px 18px 14px 52px', fontSize: 14,
-      fontFamily: 'Inter, sans-serif',
-      border: `1.5px solid ${inputBorder}`, borderRadius: 8,
-      backgroundColor: inputBg, color: textColor, outline: 'none',
-      boxSizing: 'border-box' as const, marginBottom: 12,
-    },
-    label: {
-      fontSize: 11, fontWeight: 500, color: mutedColor,
-      letterSpacing: '0.8px', textTransform: 'uppercase' as const,
-      display: 'block', marginBottom: 8,
-    },
-    primaryBtn: (active: boolean): React.CSSProperties => ({
-      width: '100%', padding: 15,
-      background: active ? '#2C2420' : 'rgba(60,50,45,0.4)',
-      color: '#C9A84C',
-      fontSize: 11, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const,
-      fontFamily: 'Inter, sans-serif',
-      border: 'none', cursor: active ? 'pointer' : 'default',
-      transition: 'all 0.3s ease', marginTop: 4,
-    }),
-    secondaryBtn: {
-      background: 'none', border: 'none', cursor: 'pointer',
-      color: isMobile ? 'rgba(255,255,255,0.5)' : '#6B7280',
-      fontSize: 12, fontWeight: 400,
-      fontFamily: 'Inter, sans-serif',
-      textDecoration: 'underline',
-      padding: '8px 0',
-    } as React.CSSProperties,
-    headline: {
-      fontFamily: 'Inter, sans-serif', fontSize: 22, fontWeight: 500,
-      color: textColor, marginBottom: 8,
-    },
-    subhead: {
-      fontSize: 13, color: mutedColor, marginBottom: 24, lineHeight: 1.6,
-    },
-    error: {
-      fontSize: 12, color: '#DC2626', marginTop: -6, marginBottom: 12,
-      fontFamily: 'Inter, sans-serif',
-    },
-  };
-}
-
-function PhoneInput({ value, onChange, styles, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void; styles: any; placeholder?: string; disabled?: boolean;
+function FloatingField({
+  label, value, onChange, type = 'text', required, prefix,
+  inputMode, autoComplete, autoFocus, maxLength, helper, error,
+  onKeyDown, suffix, disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+  prefix?: string;
+  inputMode?: 'text' | 'numeric' | 'decimal' | 'tel' | 'email';
+  autoComplete?: string;
+  autoFocus?: boolean;
+  maxLength?: number;
+  helper?: string;
+  error?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  suffix?: React.ReactNode;
+  disabled?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
+  const hasValue = value.length > 0;
+  const labelFloated = focused || hasValue;
+
   return (
-    <div style={{ position: 'relative' }}>
-      <span style={{
-        position: 'absolute', left: 18, top: '50%', transform: 'translateY(-50%)',
-        fontSize: 14, color: styles.mutedColor, fontFamily: 'Inter, sans-serif',
-      }}>+91</span>
-      <input
-        type="tel" value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder || '98765 43210'}
-        autoComplete="tel"
-        disabled={disabled}
-        style={styles.inputWithPrefix}
-      />
+    <div style={{ marginBottom: 16 }}>
+      <div style={{
+        position: 'relative',
+        background: disabled ? C.pearl : C.ivory,
+        border: `1.5px solid ${error ? C.red : focused ? C.gold : C.border}`,
+        borderRadius: 12,
+        transition: 'border-color 0.2s ease',
+      }}>
+        <label style={{
+          position: 'absolute',
+          left: prefix && labelFloated ? 14 : prefix ? 50 : 14,
+          top: labelFloated ? 6 : '50%',
+          transform: labelFloated ? 'none' : 'translateY(-50%)',
+          fontSize: labelFloated ? 9 : 13,
+          fontWeight: labelFloated ? 600 : 400,
+          letterSpacing: labelFloated ? '1.5px' : 'normal',
+          textTransform: labelFloated ? 'uppercase' : 'none',
+          color: focused ? C.goldDeep : C.muted,
+          fontFamily: "'DM Sans', sans-serif",
+          pointerEvents: 'none',
+          transition: 'all 0.2s ease',
+          background: 'transparent',
+        }}>
+          {label}
+          {required && <span style={{ color: C.red, marginLeft: 4 }}>*</span>}
+        </label>
+
+        {prefix && (
+          <span style={{
+            position: 'absolute',
+            left: 14,
+            top: labelFloated ? 26 : '50%',
+            transform: labelFloated ? 'none' : 'translateY(-50%)',
+            fontSize: 14,
+            color: labelFloated ? C.dark : 'transparent',
+            fontFamily: "'DM Sans', sans-serif",
+            transition: 'all 0.2s ease',
+            pointerEvents: 'none',
+            fontWeight: 500,
+          }}>
+            {prefix}
+          </span>
+        )}
+
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={onKeyDown}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          maxLength={maxLength}
+          disabled={disabled}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none', outline: 'none',
+            padding: prefix
+              ? (labelFloated ? '24px 14px 10px 50px' : '20px 14px 16px 50px')
+              : (labelFloated ? '24px 14px 10px 14px' : '20px 14px 16px 14px'),
+            fontSize: 14,
+            color: C.dark,
+            fontFamily: "'DM Sans', sans-serif",
+            boxSizing: 'border-box',
+            transition: 'padding 0.2s ease',
+          }}
+        />
+
+        {suffix && (
+          <div style={{
+            position: 'absolute',
+            right: 12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+          }}>
+            {suffix}
+          </div>
+        )}
+      </div>
+      {helper && (
+        <div style={{
+          fontSize: 11, color: C.muted, marginTop: 6, paddingLeft: 4,
+          fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5,
+        }}>
+          {helper}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// ENTRY (signup vs login choice)
-// ─────────────────────────────────────────────────────────────
-
-function EntryScreen({ onSignup, onLogin, isMobile }: {
-  onSignup: () => void; onLogin: () => void; isMobile: boolean;
+function OtpInput({ value, onChange, onComplete }: {
+  value: string;
+  onChange: (v: string) => void;
+  onComplete?: (v: string) => void;
 }) {
-  const s = useStyles(isMobile);
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleChange = (idx: number, char: string) => {
+    const digit = char.replace(/[^0-9]/g, '').slice(-1);
+    const arr = value.split('');
+    arr[idx] = digit;
+    while (arr.length < 6) arr.push('');
+    const next = arr.join('').slice(0, 6);
+    onChange(next);
+    if (digit && idx < 5) refs.current[idx + 1]?.focus();
+    if (next.length === 6 && next.split('').every(c => /\d/.test(c))) {
+      onComplete && onComplete(next);
+    }
+  };
+
+  const handleKey = (idx: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !value[idx] && idx > 0) {
+      refs.current[idx - 1]?.focus();
+    }
+    if (e.key === 'ArrowLeft' && idx > 0) refs.current[idx - 1]?.focus();
+    if (e.key === 'ArrowRight' && idx < 5) refs.current[idx + 1]?.focus();
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '').slice(0, 6);
+    if (pasted.length > 0) {
+      onChange(pasted);
+      const focusIdx = Math.min(pasted.length, 5);
+      refs.current[focusIdx]?.focus();
+      if (pasted.length === 6 && onComplete) onComplete(pasted);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginBottom: 16 }}>
+      {Array.from({ length: 6 }, (_, i) => (
+        <input
+          key={i}
+          ref={el => { refs.current[i] = el; }}
+          type="tel"
+          inputMode="numeric"
+          maxLength={1}
+          value={value[i] || ''}
+          onChange={e => handleChange(i, e.target.value)}
+          onKeyDown={e => handleKey(i, e)}
+          onPaste={handlePaste}
+          autoFocus={i === 0}
+          style={{
+            width: 46, height: 56,
+            background: C.ivory,
+            border: `1.5px solid ${value[i] ? C.gold : C.border}`,
+            borderRadius: 10,
+            textAlign: 'center',
+            fontSize: 22,
+            fontFamily: "'Playfair Display', serif",
+            color: C.dark,
+            outline: 'none',
+            transition: 'border-color 0.2s ease',
+            boxSizing: 'border-box',
+          }}
+          onFocus={e => e.target.style.borderColor = C.gold}
+          onBlur={e => e.target.style.borderColor = value[i] ? C.gold : C.border}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PrimaryButton({ children, onClick, disabled, loading }: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      style={{
+        width: '100%',
+        padding: '15px 20px',
+        background: (disabled || loading) ? C.border : C.dark,
+        color: (disabled || loading) ? C.light : C.gold,
+        border: 'none',
+        borderRadius: 12,
+        cursor: (disabled || loading) ? 'not-allowed' : 'pointer',
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '2px',
+        textTransform: 'uppercase',
+        fontFamily: "'DM Sans', sans-serif",
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {loading ? 'Please wait…' : children}
+    </button>
+  );
+}
+
+function SecondaryButton({ children, onClick }: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%',
+        padding: '15px 20px',
+        background: 'transparent',
+        color: C.dark,
+        border: `1.5px solid ${C.border}`,
+        borderRadius: 12,
+        cursor: 'pointer',
+        fontSize: 11,
+        fontWeight: 500,
+        letterSpacing: '2px',
+        textTransform: 'uppercase',
+        fontFamily: "'DM Sans', sans-serif",
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TextLink({ children, onClick }: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        color: C.muted,
+        fontSize: 12,
+        fontWeight: 400,
+        fontFamily: "'DM Sans', sans-serif",
+        padding: '8px 4px',
+        textDecoration: 'underline',
+        textDecorationColor: C.borderSoft,
+        textUnderlineOffset: 4,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Headline({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 style={{
+      fontFamily: "'Playfair Display', serif",
+      fontSize: 26, fontWeight: 400,
+      color: C.dark, letterSpacing: '-0.3px',
+      margin: 0, marginBottom: 8,
+      lineHeight: 1.25,
+    }}>
+      {children}
+    </h2>
+  );
+}
+
+function Subhead({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{
+      fontSize: 13, color: C.muted, lineHeight: 1.6,
+      margin: 0, marginBottom: 24,
+      fontFamily: "'DM Sans', sans-serif",
+    }}>
+      {children}
+    </p>
+  );
+}
+
+function ErrorMsg({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: C.redSoft,
+      border: `1px solid ${C.redBorder}`,
+      borderRadius: 8,
+      padding: '10px 12px',
+      fontSize: 12, color: C.red,
+      fontFamily: "'DM Sans', sans-serif",
+      marginBottom: 14,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Divider() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      margin: '24px 0',
+    }}>
+      <div style={{ flex: 1, height: 1, background: C.border }} />
+      <span style={{
+        fontSize: 9, color: C.muted, fontWeight: 600,
+        letterSpacing: '2px', textTransform: 'uppercase',
+        fontFamily: "'DM Sans', sans-serif",
+      }}>Or</span>
+      <div style={{ flex: 1, height: 1, background: C.border }} />
+    </div>
+  );
+}
+
+function EntryScreen({ onSignup, onLogin }: {
+  onSignup: () => void;
+  onLogin: () => void;
+}) {
   return (
     <div>
-      <div style={s.headline}>Welcome.</div>
-      <div style={s.subhead}>
+      <Headline>Welcome.</Headline>
+      <Subhead>
         Built for vendors who'd rather run their business than manage their business.
-      </div>
+      </Subhead>
 
-      <button onClick={onSignup} style={s.primaryBtn(true)}>New here — sign up</button>
+      <PrimaryButton onClick={onSignup}>New here — Sign up</PrimaryButton>
 
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        margin: '24px 0 16px',
-      }}>
-        <div style={{ flex: 1, height: 1, background: isMobile ? 'rgba(255,255,255,0.1)' : '#E5E7EB' }} />
-        <span style={{
-          fontSize: 10, color: s.mutedColor, fontWeight: 500,
-          letterSpacing: 2, textTransform: 'uppercase' as const,
-        }}>Or</span>
-        <div style={{ flex: 1, height: 1, background: isMobile ? 'rgba(255,255,255,0.1)' : '#E5E7EB' }} />
-      </div>
+      <Divider />
 
-      <button onClick={onLogin} style={{
-        ...s.primaryBtn(true),
-        background: 'transparent',
-        border: `1.5px solid ${isMobile ? 'rgba(255,255,255,0.15)' : '#E5E7EB'}`,
-        color: s.textColor,
-      }}>Sign in to your account</button>
+      <SecondaryButton onClick={onLogin}>Sign in to your account</SecondaryButton>
     </div>
   );
 }
-
-// ─────────────────────────────────────────────────────────────
-// SIGNUP — 5 steps
-// 1. Code → 2. Business details → 3. Phone → 4. OTP → 5. Password
-// ─────────────────────────────────────────────────────────────
 
 const VENDOR_CATEGORIES = [
   'Photography', 'Videography', 'Makeup Artist', 'Mehendi Artist',
@@ -243,501 +541,526 @@ const VENDOR_CATEGORIES = [
   'Jewellery', 'Priest / Pandit', 'Transportation', 'Other',
 ];
 
-function SignupFlow({ onBack, onComplete, isMobile, prefillCode }: {
-  onBack: () => void; onComplete: () => void; isMobile: boolean;
+function SignupFlow({ onBack, onComplete, prefillCode }: {
+  onBack: () => void;
+  onComplete: () => void;
   prefillCode?: string | null;
 }) {
-  const s = useStyles(isMobile);
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
+  const [step, setStep] = useState(prefillCode ? 2 : 1);
   const [code, setCode] = useState(prefillCode || '');
-  const [codeData, setCodeData] = useState<{ tier: string } | null>(null);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [category, setCategory] = useState('');
   const [city, setCity] = useState('');
-  const [instagram, setInstagram] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
   const [sessionInfo, setSessionInfo] = useState('');
   const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [tier, setTier] = useState<string | null>(null);
 
-  // If a prefill code arrived via URL, auto-validate and jump to step 2
-  useEffect(() => {
-    if (!prefillCode) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${API}/api/vendor-codes/validate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: prefillCode.trim().toUpperCase() }),
-        });
-        const d = await res.json();
-        if (cancelled) return;
-        if (d.success) {
-          setCodeData(d.data);
-          setStep(2);
-        } else {
-          // invalid or consumed — stay on step 1 with error
-          setError(d.error || 'Invalid code');
-        }
-      } catch {
-        if (!cancelled) setError('Network error. Enter your code manually.');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [prefillCode]);
-
-  // Step 1 — validate code
-  const validateCode = async () => {
+  const verifyCode = async () => {
     if (!code.trim()) { setError('Enter your invite code'); return; }
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API}/api/vendor-codes/validate`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API}/api/vendor-codes/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: code.trim().toUpperCase() }),
       });
       const d = await res.json();
       if (!d.success) { setError(d.error || 'Invalid code'); setLoading(false); return; }
-      setCodeData(d.data);
+      setTier(d.tier);
       setStep(2);
-    } catch { setError('Network error. Try again.'); }
-    setLoading(false);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
-  // Step 2 → 3 — business details
-  const goToPhone = () => {
-    if (!name.trim()) { setError('Business name required'); return; }
+  const submitBusiness = () => {
+    if (!businessName.trim()) { setError('Enter your business name'); return; }
     if (!category) { setError('Pick a category'); return; }
-    if (!city.trim()) { setError('City required'); return; }
+    if (!city.trim()) { setError('Enter your city'); return; }
     setError('');
     setStep(3);
   };
 
-  // Step 3 — send OTP
   const sendOtp = async () => {
-    const clean = phone.replace(/\D/g, '').slice(-10);
-    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length !== 10) { setError('Enter a valid 10-digit phone number'); return; }
     setLoading(true); setError('');
     try {
       const res = await fetch(`${API}/api/auth/send-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: clean }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + cleaned }),
       });
       const d = await res.json();
       if (!d.success) { setError(d.error || 'Could not send OTP'); setLoading(false); return; }
-      setSessionInfo(d.sessionInfo || '');
-      setOtpSent(true);
+      setSessionInfo(d.sessionInfo);
       setStep(4);
-    } catch { setError('Network error. Try again.'); }
-    setLoading(false);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
-  // Step 4 — verify OTP
-  const verifyOtp = async () => {
-    if (!otp || otp.length < 4) { setError('Enter the OTP'); return; }
+  const verifyOtp = async (otpVal?: string) => {
+    const codeVal = otpVal || otp;
+    if (!codeVal || codeVal.length < 6) { setError('Enter the 6-digit code'); return; }
     setLoading(true); setError('');
     try {
       const res = await fetch(`${API}/api/auth/verify-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionInfo, code: otp }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionInfo, code: codeVal }),
       });
       const d = await res.json();
-      if (!d.success) { setError(d.error || 'Invalid OTP'); setLoading(false); return; }
+      if (!d.success) { setError(d.error || 'Invalid code'); setLoading(false); return; }
       setStep(5);
-    } catch { setError('Network error. Try again.'); }
-    setLoading(false);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
-  // Step 5 — set password + finalize
-  const completeSignup = async () => {
+  const createAccount = async () => {
     if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
-    if (password !== passwordConfirm) { setError('Passwords do not match'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
     setLoading(true); setError('');
-    const clean = phone.replace(/\D/g, '').slice(-10);
     try {
-      const res = await fetch(`${API}/api/vendor/onboard`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const cleaned = phone.replace(/\D/g, '');
+      const res = await fetch(`${API}/api/vendor-signup-v2`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
-          phone: '+91' + clean,
-          email: email.trim() || null,
-          category,
-          city: city.trim(),
-          instagram: instagram.trim() || null,
-          access_code: code.trim().toUpperCase(),
+          code: code.trim().toUpperCase(),
+          business_name: businessName.trim(),
+          category, city: city.trim(),
+          phone: '+91' + cleaned,
           password,
         }),
       });
       const d = await res.json();
       if (!d.success) { setError(d.error || 'Could not create account'); setLoading(false); return; }
-      // Save session
-      localStorage.setItem('vendor_web_session', JSON.stringify({
-        vendorId: d.data.id,
-        vendorName: d.data.name,
-        category,
-        city: city.trim(),
-        tier: d.data.tier || codeData?.tier || 'essential',
-      }));
+      try {
+        localStorage.setItem('vendor_web_session', JSON.stringify({
+          vendorId: d.vendorId,
+          vendorName: businessName.trim(),
+          category, city: city.trim(),
+          tier: d.tier || tier,
+        }));
+      } catch {}
       onComplete();
-    } catch { setError('Network error. Try again.'); setLoading(false); }
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
   return (
     <div>
-      <div style={{ fontSize: 10, color: s.mutedColor, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 500, marginBottom: 8 }}>
-        Step {step} of 5
+      <div style={{
+        display: 'flex', gap: 4, marginBottom: 28,
+      }}>
+        {[1, 2, 3, 4, 5].map(i => (
+          <div key={i} style={{
+            flex: 1, height: 3, borderRadius: 2,
+            background: i <= step ? C.gold : C.border,
+            transition: 'background 0.3s ease',
+          }} />
+        ))}
       </div>
 
       {step === 1 && (
         <>
-          <div style={s.headline}>Your invite.</div>
-          <div style={s.subhead}>Enter the code you received from The Dream Wedding team.</div>
-          <label style={s.label}>Invite code</label>
-          <input type="text" value={code}
-            onChange={e => { setCode(e.target.value.toUpperCase()); setError(''); }}
-            onKeyDown={e => e.key === 'Enter' && !loading && validateCode()}
-            placeholder="ABCD1234" style={s.input} autoFocus />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={validateCode} disabled={loading || !code.trim()} style={s.primaryBtn(!loading && !!code.trim())}>
-            {loading ? 'Verifying…' : 'Continue'}
-          </button>
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={onBack} style={s.secondaryBtn}>Back</button>
+          <Headline>Your invite code.</Headline>
+          <Subhead>Enter the code you received from The Dream Wedding.</Subhead>
+          <FloatingField
+            label="Invite code"
+            required
+            value={code}
+            onChange={v => { setCode(v.toUpperCase()); setError(''); }}
+            autoFocus
+            onKeyDown={e => e.key === 'Enter' && !loading && verifyCode()}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={verifyCode} loading={loading} disabled={!code.trim()}>Continue</PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <TextLink onClick={onBack}>Back</TextLink>
           </div>
         </>
       )}
 
       {step === 2 && (
         <>
-          <div style={s.headline}>About your business.</div>
-          <div style={s.subhead}>Tell us the essentials — you can change any of this later.</div>
-
-          <label style={s.label}>Business name</label>
-          <input type="text" value={name} onChange={e => { setName(e.target.value); setError(''); }}
-            placeholder="e.g. Makeup by Swati Roy" style={s.input} autoFocus />
-
-          <label style={s.label}>Category</label>
-          <select value={category} onChange={e => { setCategory(e.target.value); setError(''); }} style={s.input}>
-            <option value="">Choose a category</option>
-            {VENDOR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-
-          <label style={s.label}>City</label>
-          <input type="text" value={city} onChange={e => { setCity(e.target.value); setError(''); }}
-            placeholder="e.g. Delhi" style={s.input} />
-
-          <label style={s.label}>Email (optional)</label>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com" style={s.input} />
-
-          <label style={s.label}>Instagram (optional)</label>
-          <input type="text" value={instagram} onChange={e => setInstagram(e.target.value)}
-            placeholder="@yourhandle" style={s.input} />
-
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={goToPhone} style={s.primaryBtn(true)}>Continue</button>
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={() => { setStep(1); setError(''); }} style={s.secondaryBtn}>Back</button>
+          <Headline>About your business.</Headline>
+          <Subhead>Tell us a little about what you do.</Subhead>
+          <FloatingField label="Business name" required value={businessName} onChange={setBusinessName} autoFocus />
+          <CategorySelect value={category} onChange={setCategory} />
+          <FloatingField label="City" required value={city} onChange={setCity} onKeyDown={e => e.key === 'Enter' && submitBusiness()} />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={submitBusiness}>Continue</PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <TextLink onClick={() => setStep(1)}>Back</TextLink>
           </div>
         </>
       )}
 
       {step === 3 && (
         <>
-          <div style={s.headline}>Your phone number.</div>
-          <div style={s.subhead}>We'll send a one-time code to verify it's you. This will be your login.</div>
-          <label style={s.label}>Phone</label>
-          <PhoneInput value={phone} onChange={v => { setPhone(v); setError(''); }} styles={s} />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={sendOtp} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Sending…' : 'Send code'}
-          </button>
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={() => { setStep(2); setError(''); }} style={s.secondaryBtn}>Back</button>
+          <Headline>Your phone.</Headline>
+          <Subhead>We'll send a 6-digit code to verify it's really you.</Subhead>
+          <FloatingField
+            label="Mobile number"
+            required
+            value={phone}
+            onChange={v => { setPhone(v.replace(/\D/g, '').slice(0, 10)); setError(''); }}
+            prefix="+91"
+            inputMode="numeric"
+            type="tel"
+            autoComplete="tel"
+            autoFocus
+            onKeyDown={e => e.key === 'Enter' && !loading && sendOtp()}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={sendOtp} loading={loading} disabled={phone.replace(/\D/g, '').length !== 10}>
+            Send code
+          </PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <TextLink onClick={() => setStep(2)}>Back</TextLink>
           </div>
         </>
       )}
 
       {step === 4 && (
         <>
-          <div style={s.headline}>Enter the code.</div>
-          <div style={s.subhead}>We sent a 6-digit code to +91 {phone.replace(/\D/g, '').slice(-10)}.</div>
-          <label style={s.label}>6-digit code</label>
-          <input type="tel" value={otp} onChange={e => { setOtp(e.target.value); setError(''); }}
-            onKeyDown={e => e.key === 'Enter' && !loading && verifyOtp()}
-            placeholder="123456" style={s.input} autoFocus />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={verifyOtp} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Verifying…' : 'Continue'}
-          </button>
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={() => { setOtpSent(false); setOtp(''); setError(''); setStep(3); }} style={s.secondaryBtn}>
-              Didn't get it? Try again
-            </button>
+          <Headline>Enter the code.</Headline>
+          <Subhead>We sent a 6-digit code to +91 {phone.slice(-10)}.</Subhead>
+          <OtpInput
+            value={otp}
+            onChange={v => { setOtp(v); setError(''); }}
+            onComplete={(v) => !loading && verifyOtp(v)}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={() => verifyOtp()} loading={loading} disabled={otp.length < 6}>
+            Verify
+          </PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14, display: 'flex', gap: 16, justifyContent: 'center' }}>
+            <TextLink onClick={() => { setOtp(''); setError(''); setStep(3); }}>Didn't get it? Resend</TextLink>
           </div>
         </>
       )}
 
       {step === 5 && (
         <>
-          <div style={s.headline}>Set a password.</div>
-          <div style={s.subhead}>You'll use this to sign in from any device. At least 8 characters.</div>
-
-          <label style={s.label}>Password</label>
-          <div style={{ position: 'relative', marginBottom: 12 }}>
-            <input type={showPassword ? 'text' : 'password'} value={password}
-              onChange={e => { setPassword(e.target.value); setError(''); }}
-              placeholder="At least 8 characters" autoComplete="new-password"
-              style={{ ...s.input, paddingRight: 60, marginBottom: 0 }} />
-            <button type="button" onClick={() => setShowPassword(v => !v)}
-              style={{
-                position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: s.mutedColor, fontSize: 11, fontWeight: 500,
-              }}>
-              {showPassword ? 'Hide' : 'Show'}
-            </button>
-          </div>
-
-          <label style={s.label}>Confirm password</label>
-          <input type={showPassword ? 'text' : 'password'} value={passwordConfirm}
-            onChange={e => { setPasswordConfirm(e.target.value); setError(''); }}
-            placeholder="Type it again" autoComplete="new-password" style={s.input} />
-
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={completeSignup} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Setting up…' : 'Complete signup'}
-          </button>
+          <Headline>Set a password.</Headline>
+          <Subhead>You'll use this to sign in from any device.</Subhead>
+          <FloatingField
+            label="Password"
+            required
+            value={password}
+            onChange={v => { setPassword(v); setError(''); }}
+            type="password"
+            autoFocus
+            helper="At least 8 characters"
+          />
+          <FloatingField
+            label="Confirm password"
+            required
+            value={confirmPassword}
+            onChange={v => { setConfirmPassword(v); setError(''); }}
+            type="password"
+            onKeyDown={e => e.key === 'Enter' && !loading && createAccount()}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={createAccount} loading={loading} disabled={password.length < 8 || password !== confirmPassword}>
+            Create account
+          </PrimaryButton>
         </>
       )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// LOGIN — phone + password
-// ─────────────────────────────────────────────────────────────
+function CategorySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [focused, setFocused] = useState(false);
+  const labelFloated = focused || !!value;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{
+        position: 'relative',
+        background: C.ivory,
+        border: `1.5px solid ${focused ? C.gold : C.border}`,
+        borderRadius: 12,
+        transition: 'border-color 0.2s ease',
+      }}>
+        <label style={{
+          position: 'absolute',
+          left: 14,
+          top: labelFloated ? 6 : '50%',
+          transform: labelFloated ? 'none' : 'translateY(-50%)',
+          fontSize: labelFloated ? 9 : 13,
+          fontWeight: labelFloated ? 600 : 400,
+          letterSpacing: labelFloated ? '1.5px' : 'normal',
+          textTransform: labelFloated ? 'uppercase' : 'none',
+          color: focused ? C.goldDeep : C.muted,
+          fontFamily: "'DM Sans', sans-serif",
+          pointerEvents: 'none',
+          transition: 'all 0.2s ease',
+        }}>
+          Category<span style={{ color: C.red, marginLeft: 4 }}>*</span>
+        </label>
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none', outline: 'none',
+            padding: labelFloated ? '24px 14px 10px 14px' : '20px 14px 16px 14px',
+            fontSize: 14,
+            color: C.dark,
+            fontFamily: "'DM Sans', sans-serif",
+            appearance: 'none',
+            cursor: 'pointer',
+            boxSizing: 'border-box',
+          }}
+        >
+          <option value="">{labelFloated ? 'Select your category' : ''}</option>
+          {VENDOR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div style={{
+          position: 'absolute', right: 14, top: '50%',
+          transform: 'translateY(-50%)', pointerEvents: 'none',
+          color: C.muted, fontSize: 12,
+        }}>▾</div>
+      </div>
+    </div>
+  );
+}
 
-function LoginFlow({ onBack, onForgot, onComplete, isMobile }: {
-  onBack: () => void; onForgot: () => void; onComplete: () => void; isMobile: boolean;
+function LoginFlow({ onBack, onForgot, onComplete }: {
+  onBack: () => void;
+  onForgot: () => void;
+  onComplete: () => void;
 }) {
-  const s = useStyles(isMobile);
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async () => {
-    const clean = phone.replace(/\D/g, '').slice(-10);
-    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+  const submit = async () => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
     if (!password) { setError('Enter your password'); return; }
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API}/api/vendor/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: '+91' + clean, password }),
+      const res = await fetch(`${API}/api/vendor-login-v2`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + cleaned, password }),
       });
       const d = await res.json();
       if (!d.success) { setError(d.error || 'Could not sign in'); setLoading(false); return; }
-      localStorage.setItem('vendor_web_session', JSON.stringify({
-        vendorId: d.data.id,
-        vendorName: d.data.name,
-        category: d.data.category,
-        city: d.data.city,
-        tier: d.data.tier,
-      }));
+      try {
+        localStorage.setItem('vendor_web_session', JSON.stringify({
+          vendorId: d.vendor.id,
+          vendorName: d.vendor.business_name,
+          category: d.vendor.category,
+          city: d.vendor.city,
+          tier: d.vendor.tier,
+        }));
+      } catch {}
       onComplete();
-    } catch { setError('Network error. Try again.'); setLoading(false); }
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
   return (
     <div>
-      <div style={s.headline}>Welcome back.</div>
-      <div style={s.subhead}>Sign in with the phone you used to register.</div>
+      <Headline>Welcome back.</Headline>
+      <Subhead>Sign in with the phone you used to register.</Subhead>
 
-      <label style={s.label}>Phone</label>
-      <PhoneInput value={phone} onChange={v => { setPhone(v); setError(''); }} styles={s} />
+      <FloatingField
+        label="Mobile number"
+        required
+        value={phone}
+        onChange={v => { setPhone(v.replace(/\D/g, '').slice(0, 10)); setError(''); }}
+        prefix="+91"
+        inputMode="numeric"
+        type="tel"
+        autoComplete="tel"
+        autoFocus
+      />
 
-      <label style={s.label}>Password</label>
-      <div style={{ position: 'relative', marginBottom: 12 }}>
-        <input type={showPassword ? 'text' : 'password'} value={password}
-          onChange={e => { setPassword(e.target.value); setError(''); }}
-          onKeyDown={e => e.key === 'Enter' && !loading && handleLogin()}
-          placeholder="Your password" autoComplete="current-password"
-          style={{ ...s.input, paddingRight: 60, marginBottom: 0 }} />
-        <button type="button" onClick={() => setShowPassword(v => !v)}
-          style={{
-            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: s.mutedColor, fontSize: 11, fontWeight: 500,
-          }}>
-          {showPassword ? 'Hide' : 'Show'}
-        </button>
-      </div>
+      <FloatingField
+        label="Password"
+        required
+        value={password}
+        onChange={v => { setPassword(v); setError(''); }}
+        type={showPassword ? 'text' : 'password'}
+        autoComplete="current-password"
+        onKeyDown={e => e.key === 'Enter' && !loading && submit()}
+        suffix={
+          <button
+            onClick={() => setShowPassword(!showPassword)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 11, color: C.muted, padding: 4,
+              fontFamily: "'DM Sans', sans-serif",
+              letterSpacing: '0.5px',
+            }}
+          >{showPassword ? 'Hide' : 'Show'}</button>
+        }
+      />
 
-      {error && <div style={s.error}>{error}</div>}
-      <button onClick={handleLogin} disabled={loading} style={s.primaryBtn(!loading)}>
-        {loading ? 'Signing in…' : 'Sign in'}
-      </button>
+      {error && <ErrorMsg>{error}</ErrorMsg>}
 
-      <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button onClick={onForgot} style={s.secondaryBtn}>Forgot password?</button>
-        <button onClick={onBack} style={s.secondaryBtn}>Back</button>
+      <PrimaryButton onClick={submit} loading={loading} disabled={phone.replace(/\D/g, '').length !== 10 || !password}>
+        Sign in
+      </PrimaryButton>
+
+      <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <TextLink onClick={onBack}>Back</TextLink>
+        <TextLink onClick={onForgot}>Forgot password?</TextLink>
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// FORGOT PASSWORD — phone → OTP → new password
-// ─────────────────────────────────────────────────────────────
-
-function ForgotFlow({ onBack, onDone, isMobile }: {
-  onBack: () => void; onDone: () => void; isMobile: boolean;
-}) {
-  const s = useStyles(isMobile);
-  const [step, setStep] = useState<'phone' | 'otp' | 'password' | 'done'>('phone');
+function ForgotFlow({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [sessionInfo, setSessionInfo] = useState('');
-  const [newPassword, setNewPassword] = useState('');
+  const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const sendOtp = async () => {
-    const clean = phone.replace(/\D/g, '').slice(-10);
-    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
     setLoading(true); setError('');
     try {
-      await fetch(`${API}/api/vendor/forgot-password`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: '+91' + clean }),
-      });
       const res = await fetch(`${API}/api/auth/send-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: clean }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + cleaned }),
       });
       const d = await res.json();
       if (!d.success) { setError(d.error || 'Could not send OTP'); setLoading(false); return; }
-      setSessionInfo(d.sessionInfo || '');
-      setStep('otp');
-    } catch { setError('Network error. Try again.'); }
-    setLoading(false);
+      setSessionInfo(d.sessionInfo);
+      setStep(2);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
-  const verifyOtp = async () => {
-    if (!otp || otp.length < 4) { setError('Enter the OTP'); return; }
+  const verifyOtp = async (otpVal?: string) => {
+    const codeVal = otpVal || otp;
+    if (codeVal.length < 6) { setError('Enter the 6-digit code'); return; }
     setLoading(true); setError('');
     try {
       const res = await fetch(`${API}/api/auth/verify-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionInfo, code: otp }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionInfo, code: codeVal }),
       });
       const d = await res.json();
-      if (!d.success) { setError(d.error || 'Invalid OTP'); setLoading(false); return; }
-      setStep('password');
-    } catch { setError('Network error. Try again.'); }
-    setLoading(false);
+      if (!d.success) { setError(d.error || 'Invalid code'); setLoading(false); return; }
+      setStep(3);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
   const resetPassword = async () => {
-    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
-    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
     setLoading(true); setError('');
-    const clean = phone.replace(/\D/g, '').slice(-10);
     try {
-      const res = await fetch(`${API}/api/vendor/reset-password`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: '+91' + clean,
-          new_password: newPassword,
-          otp_verified: true,
-        }),
+      const cleaned = phone.replace(/\D/g, '');
+      const res = await fetch(`${API}/api/vendor-reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + cleaned, password }),
       });
       const d = await res.json();
-      if (!d.success) { setError(d.error || 'Could not reset password'); setLoading(false); return; }
-      setStep('done');
-    } catch { setError('Network error. Try again.'); setLoading(false); }
+      if (!d.success) { setError(d.error || 'Could not reset'); setLoading(false); return; }
+      onDone();
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
   };
 
   return (
     <div>
-      <div style={s.headline}>Reset password.</div>
-
-      {step === 'phone' && (
+      {step === 1 && (
         <>
-          <div style={s.subhead}>Enter your phone number. We'll send you a code.</div>
-          <label style={s.label}>Phone</label>
-          <PhoneInput value={phone} onChange={v => { setPhone(v); setError(''); }} styles={s} />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={sendOtp} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Sending…' : 'Send code'}
-          </button>
-        </>
-      )}
-
-      {step === 'otp' && (
-        <>
-          <div style={s.subhead}>We sent a 6-digit code to +91 {phone.replace(/\D/g, '').slice(-10)}.</div>
-          <label style={s.label}>6-digit code</label>
-          <input type="tel" value={otp} onChange={e => { setOtp(e.target.value); setError(''); }}
-            placeholder="123456" style={s.input} autoFocus />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={verifyOtp} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Verifying…' : 'Verify'}
-          </button>
-        </>
-      )}
-
-      {step === 'password' && (
-        <>
-          <div style={s.subhead}>Set a new password. At least 8 characters.</div>
-          <label style={s.label}>New password</label>
-          <div style={{ position: 'relative', marginBottom: 12 }}>
-            <input type={showPassword ? 'text' : 'password'} value={newPassword}
-              onChange={e => { setNewPassword(e.target.value); setError(''); }}
-              autoComplete="new-password"
-              style={{ ...s.input, paddingRight: 60, marginBottom: 0 }} />
-            <button type="button" onClick={() => setShowPassword(v => !v)}
-              style={{
-                position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: s.mutedColor, fontSize: 11, fontWeight: 500,
-              }}>
-              {showPassword ? 'Hide' : 'Show'}
-            </button>
+          <Headline>Reset your password.</Headline>
+          <Subhead>Enter your registered phone — we'll send a verification code.</Subhead>
+          <FloatingField
+            label="Mobile number"
+            required
+            value={phone}
+            onChange={v => { setPhone(v.replace(/\D/g, '').slice(0, 10)); setError(''); }}
+            prefix="+91"
+            inputMode="numeric"
+            type="tel"
+            autoFocus
+            onKeyDown={e => e.key === 'Enter' && !loading && sendOtp()}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={sendOtp} loading={loading} disabled={phone.replace(/\D/g, '').length !== 10}>
+            Send code
+          </PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <TextLink onClick={onBack}>Back to sign in</TextLink>
           </div>
-          <label style={s.label}>Confirm password</label>
-          <input type={showPassword ? 'text' : 'password'} value={confirmPassword}
-            onChange={e => { setConfirmPassword(e.target.value); setError(''); }}
-            autoComplete="new-password" style={s.input} />
-          {error && <div style={s.error}>{error}</div>}
-          <button onClick={resetPassword} disabled={loading} style={s.primaryBtn(!loading)}>
-            {loading ? 'Saving…' : 'Reset password'}
-          </button>
         </>
       )}
 
-      {step === 'done' && (
+      {step === 2 && (
         <>
-          <div style={s.subhead}>Password reset. You can sign in with your new password.</div>
-          <button onClick={onDone} style={s.primaryBtn(true)}>Back to sign in</button>
+          <Headline>Enter the code.</Headline>
+          <Subhead>Code sent to +91 {phone.slice(-10)}.</Subhead>
+          <OtpInput
+            value={otp}
+            onChange={v => { setOtp(v); setError(''); }}
+            onComplete={v => !loading && verifyOtp(v)}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={() => verifyOtp()} loading={loading} disabled={otp.length < 6}>
+            Verify
+          </PrimaryButton>
+          <div style={{ textAlign: 'center', marginTop: 14 }}>
+            <TextLink onClick={() => { setOtp(''); setStep(1); }}>Back</TextLink>
+          </div>
         </>
       )}
 
-      {step !== 'done' && (
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <button onClick={onBack} style={s.secondaryBtn}>Back</button>
-        </div>
+      {step === 3 && (
+        <>
+          <Headline>New password.</Headline>
+          <Subhead>Pick something you'll remember.</Subhead>
+          <FloatingField
+            label="New password"
+            required
+            value={password}
+            onChange={v => { setPassword(v); setError(''); }}
+            type="password"
+            autoFocus
+            helper="At least 8 characters"
+          />
+          <FloatingField
+            label="Confirm password"
+            required
+            value={confirmPassword}
+            onChange={v => { setConfirmPassword(v); setError(''); }}
+            type="password"
+            onKeyDown={e => e.key === 'Enter' && !loading && resetPassword()}
+          />
+          {error && <ErrorMsg>{error}</ErrorMsg>}
+          <PrimaryButton onClick={resetPassword} loading={loading} disabled={password.length < 8 || password !== confirmPassword}>
+            Update password
+          </PrimaryButton>
+        </>
       )}
     </div>
   );
