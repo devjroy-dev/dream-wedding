@@ -4317,6 +4317,135 @@ app.post('/api/admin/verify-instagram', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// COUPLE V2 — Onboarding + Discover Waitlist
+// Session 10 Turn 1 additions for the rebuilt couple PWA.
+// ══════════════════════════════════════════════════════════════
+
+// Onboard a couple user: creates or updates record in `users` table.
+// Called at the end of the 4-step onboarding flow after OTP verified.
+// If access_code is a couple_tier code, it is marked used and linked.
+app.post('/api/couple/onboard', async (req, res) => {
+  try {
+    const {
+      name, partner_name, phone, wedding_date, events,
+      couple_tier, founding_bride, access_code,
+    } = req.body || {};
+
+    if (!name || !phone) {
+      return res.status(400).json({ success: false, error: 'Name and phone are required' });
+    }
+
+    const cleanPhone = ('' + phone).replace(/\D/g, '').slice(-10);
+    const fullPhone = '+91' + cleanPhone;
+    const eventsArr = Array.isArray(events) ? events : [];
+    const tier = couple_tier || 'free';
+    const isFounding = !!founding_bride;
+
+    // Check if user already exists by phone
+    const { data: existing } = await supabase
+      .from('users').select('*').eq('phone', fullPhone).maybeSingle();
+
+    let userRow;
+    if (existing) {
+      // Update with onboarding details
+      const { data: updated, error: uErr } = await supabase
+        .from('users')
+        .update({
+          name,
+          partner_name: partner_name || null,
+          wedding_date: wedding_date || null,
+          wedding_events: eventsArr,
+          couple_tier: existing.couple_tier === 'elite' ? 'elite' : tier,
+          founding_bride: isFounding || !!existing.founding_bride,
+          dreamer_type: 'couple',
+        })
+        .eq('id', existing.id)
+        .select().single();
+      if (uErr) throw uErr;
+      userRow = updated;
+    } else {
+      const { data: created, error: cErr } = await supabase
+        .from('users')
+        .insert([{
+          name,
+          partner_name: partner_name || null,
+          phone: fullPhone,
+          wedding_date: wedding_date || null,
+          wedding_events: eventsArr,
+          couple_tier: tier,
+          founding_bride: isFounding,
+          dreamer_type: 'couple',
+          token_balance: tier === 'elite' ? 999 : tier === 'premium' ? 15 : 3,
+        }])
+        .select().single();
+      if (cErr) throw cErr;
+      userRow = created;
+    }
+
+    // If an access_code was used, mark it consumed + link to user
+    if (access_code) {
+      await supabase.from('access_codes')
+        .update({
+          used: true,
+          redeemed_user_id: userRow.id,
+          redeemed_at: new Date().toISOString(),
+        })
+        .eq('code', ('' + access_code).toUpperCase().trim())
+        .eq('type', 'couple_tier');
+    }
+
+    if (typeof logActivity === 'function') {
+      logActivity('couple_onboarded', `${name} onboarded (${tier}${isFounding ? ', Founding' : ''})`);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: userRow.id,
+        name: userRow.name || name,
+        couple_tier: userRow.couple_tier || tier,
+        founding_bride: userRow.founding_bride || isFounding,
+        token_balance: userRow.token_balance || 0,
+      },
+    });
+  } catch (error) {
+    console.error('couple/onboard error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Discover waitlist — capture phone numbers for when Discover mode launches.
+app.post('/api/couple/waitlist', async (req, res) => {
+  try {
+    const { phone, user_id } = req.body || {};
+    if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+    const cleanPhone = ('' + phone).replace(/\D/g, '').slice(-10);
+    const fullPhone = cleanPhone.length === 10 ? '+91' + cleanPhone : phone;
+
+    // Upsert — one row per phone
+    const { data: existing } = await supabase
+      .from('couple_discover_waitlist').select('id').eq('phone', fullPhone).maybeSingle();
+
+    if (existing) {
+      return res.json({ success: true, data: { already_on_list: true } });
+    }
+
+    const { error } = await supabase.from('couple_discover_waitlist').insert([{
+      phone: fullPhone, user_id: user_id || null,
+    }]);
+    if (error) throw error;
+
+    if (typeof logActivity === 'function') {
+      logActivity('discover_waitlist', `Discover waitlist: ${fullPhone}`);
+    }
+    res.json({ success: true, data: { added: true } });
+  } catch (error) {
+    console.error('couple/waitlist error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── Co-Planner System ──
 
 // Generate co-planner invite link
