@@ -462,10 +462,13 @@ export default function HomePage() {
           }}>Log In</button>
         </div>
 
-        {/* Dreamer path is intercepted and routed to V2 at /couple.
-            Vendor path continues to use the existing landing-page flow. */}
+        {/* Dreamer and Vendor paths are both intercepted and routed to V2.
+            Vendors → /vendor/login (5-step phone+OTP+password)
+            Dreamers → /couple (5-step with EntryScreen) */}
         {userType === 'dreamer' ? (
           <DreamerRouter authMode={authMode} inputStyle={inputStyle} primaryBtn={primaryBtn} secondaryBtn={secondaryBtn} />
+        ) : userType === 'vendor' ? (
+          <VendorRouter authMode={authMode} inputStyle={inputStyle} primaryBtn={primaryBtn} secondaryBtn={secondaryBtn} />
         ) : (
           authMode === 'signup' ? renderSignup() : renderLogin()
         )}
@@ -746,6 +749,129 @@ function DreamerRouter({
         }}>Yes, I have a code</button>
         <button
           onClick={() => { window.location.href = '/couple'; }}
+          style={{
+            width: '100%', padding: '15px', background: 'transparent', color: '#8C7B6E',
+            fontSize: '9px', fontWeight: 300, letterSpacing: '3px', textTransform: 'uppercase',
+            fontFamily: "'DM Sans', sans-serif", border: '1px solid #E8DDD4', cursor: 'pointer',
+            transition: 'all 0.3s ease',
+          }}
+        >Request an invite</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// VENDOR ROUTER
+// Landing page's vendor path now delegates to /vendor/login.
+// Mirror of DreamerRouter — keeps marketing brand on /, uses V2 auth.
+// ─────────────────────────────────────────────────────────────
+
+function VendorRouter({
+  authMode, inputStyle, primaryBtn, secondaryBtn,
+}: {
+  authMode: 'signup' | 'login';
+  inputStyle: React.CSSProperties;
+  primaryBtn: (active: boolean) => React.CSSProperties;
+  secondaryBtn: React.CSSProperties;
+}) {
+  const [localCode, setLocalCode] = useState('');
+  const [validatingCode, setValidatingCode] = useState(false);
+  const [codeErr, setCodeErr] = useState('');
+  const [showCodeInput, setShowCodeInput] = useState(false);
+
+  const handleHaveCode = async () => {
+    if (!localCode.trim()) { setCodeErr('Enter your invite code'); return; }
+    setValidatingCode(true); setCodeErr('');
+    try {
+      const res = await fetch(`${API_URL}/api/vendor-codes/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: localCode.trim().toUpperCase() }),
+      });
+      const d = await res.json();
+      if (!d.success) {
+        setCodeErr(d.error || 'Invalid code');
+        setValidatingCode(false);
+        return;
+      }
+      // Valid vendor code — redirect to V2 vendor signup with code preserved
+      window.location.href = `/vendor/login?code=${encodeURIComponent(localCode.trim().toUpperCase())}`;
+    } catch {
+      setCodeErr('Network error. Try again.');
+      setValidatingCode(false);
+    }
+  };
+
+  if (authMode === 'login') {
+    return (
+      <div style={{ animation: 'tdwFadeUp 0.5s ease forwards', textAlign: 'center' }}>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '17px', fontWeight: 300, color: '#2C2420', marginBottom: '12px', letterSpacing: '0.5px' }}>
+          Welcome back
+        </div>
+        <div style={{ fontSize: '12px', color: '#8C7B6E', marginBottom: '28px', fontFamily: "'DM Sans', sans-serif", fontWeight: 300, lineHeight: '18px' }}>
+          Sign in to your vendor account.
+        </div>
+        <button
+          onClick={() => { window.location.href = '/vendor/login'; }}
+          style={{
+            width: '100%', padding: '15px', background: '#2C2420', color: '#C9A84C',
+            fontSize: '9px', fontWeight: 400, letterSpacing: '3px', textTransform: 'uppercase',
+            fontFamily: "'DM Sans', sans-serif", border: 'none', cursor: 'pointer',
+          }}
+        >Continue</button>
+      </div>
+    );
+  }
+
+  if (showCodeInput) {
+    return (
+      <div style={{ animation: 'tdwFadeUp 0.5s ease forwards' }}>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '17px', fontWeight: 300, color: '#2C2420', marginBottom: '20px', textAlign: 'center', letterSpacing: '0.5px' }}>
+          Enter your invite
+        </div>
+        <input
+          type="text"
+          placeholder="Your vendor code"
+          value={localCode}
+          onChange={e => { setLocalCode(e.target.value.toUpperCase()); setCodeErr(''); }}
+          onKeyDown={e => e.key === 'Enter' && !validatingCode && handleHaveCode()}
+          style={inputStyle}
+        />
+        {codeErr && (
+          <div style={{ color: '#B91C1C', fontSize: '11px', marginTop: '8px', fontFamily: "'DM Sans', sans-serif", fontWeight: 300 }}>
+            {codeErr}
+          </div>
+        )}
+        <div style={{ marginTop: '18px', display: 'flex', gap: '10px', flexDirection: 'column' }}>
+          <button
+            onClick={handleHaveCode} disabled={validatingCode || !localCode.trim()}
+            style={primaryBtn(!validatingCode && !!localCode.trim())}
+          >
+            {validatingCode ? 'Verifying\u2026' : 'Continue'}
+          </button>
+          <button onClick={() => { setShowCodeInput(false); setLocalCode(''); setCodeErr(''); }} style={secondaryBtn}>
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ animation: 'tdwFadeUp 0.5s ease forwards', textAlign: 'center' }}>
+      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '17px', fontWeight: 300, color: '#2C2420', marginBottom: '28px', letterSpacing: '0.5px' }}>
+        Do you have an invite?
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <button onClick={() => setShowCodeInput(true)} style={{
+          width: '100%', padding: '15px', background: '#2C2420', color: '#C9A84C',
+          fontSize: '9px', fontWeight: 400, letterSpacing: '3px', textTransform: 'uppercase',
+          fontFamily: "'DM Sans', sans-serif", border: 'none', cursor: 'pointer',
+          transition: 'all 0.3s ease',
+        }}>Yes, I have a code</button>
+        <button
+          onClick={() => { window.location.href = '/vendor/login'; }}
           style={{
             width: '100%', padding: '15px', background: 'transparent', color: '#8C7B6E',
             fontSize: '9px', fontWeight: 300, letterSpacing: '3px', textTransform: 'uppercase',

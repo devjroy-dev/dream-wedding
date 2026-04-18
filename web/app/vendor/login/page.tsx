@@ -9,6 +9,7 @@ export default function VendorLoginPage() {
   const [mode, setMode] = useState<Mode>('entry');
   const [isMobile, setIsMobile] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [prefillCode, setPrefillCode] = useState<string | null>(null);
 
   // Route post-login to the right surface
   const goToVendorHome = () => {
@@ -26,6 +27,15 @@ export default function VendorLoginPage() {
       if (s) {
         const p = JSON.parse(s);
         if (p.vendorId) goToVendorHome();
+      }
+    } catch {}
+    // Read ?code=XXXX from URL — if present, jump straight to signup with code prefilled
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      if (code && code.trim().length > 0) {
+        setPrefillCode(code.trim().toUpperCase());
+        setMode('signup');
       }
     } catch {}
     return () => window.removeEventListener('resize', check);
@@ -90,7 +100,7 @@ export default function VendorLoginPage() {
 
         <div style={{ width: '100%', maxWidth: 380 }}>
           {mode === 'entry' && <EntryScreen onSignup={() => setMode('signup')} onLogin={() => setMode('login')} isMobile={isMobile} />}
-          {mode === 'signup' && <SignupFlow onBack={() => setMode('entry')} onComplete={goToVendorHome} isMobile={isMobile} />}
+          {mode === 'signup' && <SignupFlow onBack={() => setMode('entry')} onComplete={goToVendorHome} isMobile={isMobile} prefillCode={prefillCode} />}
           {mode === 'login' && <LoginFlow onBack={() => setMode('entry')} onForgot={() => setMode('forgot')} onComplete={goToVendorHome} isMobile={isMobile} />}
           {mode === 'forgot' && <ForgotFlow onBack={() => setMode('login')} onDone={() => setMode('login')} isMobile={isMobile} />}
         </div>
@@ -233,15 +243,16 @@ const VENDOR_CATEGORIES = [
   'Jewellery', 'Priest / Pandit', 'Transportation', 'Other',
 ];
 
-function SignupFlow({ onBack, onComplete, isMobile }: {
+function SignupFlow({ onBack, onComplete, isMobile, prefillCode }: {
   onBack: () => void; onComplete: () => void; isMobile: boolean;
+  prefillCode?: string | null;
 }) {
   const s = useStyles(isMobile);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(prefillCode || '');
   const [codeData, setCodeData] = useState<{ tier: string } | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -255,6 +266,32 @@ function SignupFlow({ onBack, onComplete, isMobile }: {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // If a prefill code arrived via URL, auto-validate and jump to step 2
+  useEffect(() => {
+    if (!prefillCode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/vendor-codes/validate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: prefillCode.trim().toUpperCase() }),
+        });
+        const d = await res.json();
+        if (cancelled) return;
+        if (d.success) {
+          setCodeData(d.data);
+          setStep(2);
+        } else {
+          // invalid or consumed — stay on step 1 with error
+          setError(d.error || 'Invalid code');
+        }
+      } catch {
+        if (!cancelled) setError('Network error. Enter your code manually.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [prefillCode]);
 
   // Step 1 — validate code
   const validateCode = async () => {

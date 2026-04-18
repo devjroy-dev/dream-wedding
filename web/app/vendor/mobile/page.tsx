@@ -296,15 +296,18 @@ export default function VendorMobilePage() {
           50% { opacity: 0.5; transform: scale(1.3); }
         }
       `}</style>
-      {/* ── HEADER ── */}
-      <Header session={session} tier={tier} onOpenProfile={() => setShowProfile(true)} />
-
-      {/* ── MODE TOGGLE (Business / Discovery) ── */}
-      <ModeToggle mode={mode} onChange={(m) => {
-        setMode(m);
-        setActiveSubTool(null);
-        if (m === 'Business') setActiveTab('Overview');
-      }} />
+      {/* ── HEADER (with embedded Mode toggle) ── */}
+      <Header
+        session={session}
+        tier={tier}
+        mode={mode}
+        onModeChange={(m) => {
+          setMode(m);
+          setActiveSubTool(null);
+          if (m === 'Business') setActiveTab('Overview');
+        }}
+        onOpenProfile={() => setShowProfile(true)}
+      />
 
       {/* ── BODY ── */}
       <div style={{ padding: '8px 16px 24px' }}>
@@ -602,7 +605,11 @@ export default function VendorMobilePage() {
 // HEADER
 // ══════════════════════════════════════════════════════════════════════════
 
-function Header({ session, tier, onOpenProfile }: { session: VendorSession; tier: Tier; onOpenProfile: () => void }) {
+function Header({ session, tier, mode, onModeChange, onOpenProfile }: {
+  session: VendorSession; tier: Tier;
+  mode: Mode; onModeChange: (m: Mode) => void;
+  onOpenProfile: () => void;
+}) {
   const tierLabel = tier === 'prestige' ? 'PRESTIGE' : tier === 'signature' ? 'SIGNATURE' : 'ESSENTIAL';
   const name = session.vendorName || 'Vendor';
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || 'V';
@@ -658,6 +665,11 @@ function Header({ session, tier, onOpenProfile }: { session: VendorSession; tier
             {tierLabel}
           </span>
         </div>
+      </div>
+
+      {/* Mode toggle row — centered below the identity row */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+        <ModeToggle mode={mode} onChange={onModeChange} />
       </div>
     </div>
   );
@@ -3425,36 +3437,23 @@ function BottomNav({ active, pending, onChange }: { active: Tab; pending: number
 // ══════════════════════════════════════════════════════════════════════════
 
 function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  const modes: { id: Mode; label: string }[] = [
-    { id: 'Business',  label: 'Business'  },
-    { id: 'Discovery', label: 'Discovery' },
-  ];
   return (
     <div style={{
-      display: 'flex', padding: '8px 16px 4px',
-      gap: 6, background: C.cream,
+      display: 'flex', background: C.cream,
+      borderRadius: 20, border: `1px solid ${C.border}`, padding: 3,
     }}>
-      {modes.map(m => {
-        const isActive = mode === m.id;
-        return (
-          <button
-            key={m.id}
-            onClick={() => onChange(m.id)}
-            style={{
-              flex: 1, padding: '10px 12px', borderRadius: 10,
-              background: isActive ? C.dark : C.ivory,
-              border: `1px solid ${isActive ? C.dark : C.border}`,
-              cursor: 'pointer',
-              color: isActive ? C.gold : C.muted,
-              fontFamily: 'inherit', fontSize: 11, fontWeight: 500,
-              letterSpacing: '1.5px', textTransform: 'uppercase' as const,
-              transition: 'all 0.2s ease',
-            }}
-          >
-            {m.label}
-          </button>
-        );
-      })}
+      {(['Business', 'Discovery'] as Mode[]).map(m => (
+        <button key={m} onClick={() => onChange(m)} style={{
+          padding: '5px 16px', borderRadius: 16, border: 'none',
+          background: mode === m ? C.dark : 'transparent',
+          color: mode === m ? C.gold : C.muted,
+          fontSize: 12, fontWeight: mode === m ? 500 : 400,
+          fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+          letterSpacing: '0.3px', transition: 'all 0.15s',
+        }}>
+          {m}
+        </button>
+      ))}
     </div>
   );
 }
