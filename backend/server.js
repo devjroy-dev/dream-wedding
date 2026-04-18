@@ -2173,6 +2173,98 @@ async function findVendorByPhone(phone) {
   return vendor;
 }
 
+// Find couple user by WhatsApp phone
+async function findCoupleByPhone(phone) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+  const { data } = await supabase.from('users')
+    .select('id, name, phone, wedding_events, dreamer_type')
+    .eq('dreamer_type', 'couple')
+    .or(`phone.eq.+91${normalized},phone.eq.${normalized},phone.eq.91${normalized}`)
+    .limit(1);
+  return data && data[0] ? data[0] : null;
+}
+
+// Parse a vCard blob — extract contacts with name + phone
+// vCard format is line-oriented: FN, N, TEL, etc. Multiple vcards can be concatenated.
+function parseVCards(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  const text = raw.replace(/\r\n/g, '\n');
+  const cards = [];
+  let current = null;
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (trimmed === 'BEGIN:VCARD') {
+      current = { name: '', phone: '' };
+      continue;
+    }
+    if (trimmed === 'END:VCARD') {
+      if (current && (current.name || current.phone)) cards.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+
+    // FN:Priya Sharma    (full formatted name — preferred)
+    if (trimmed.startsWith('FN:') || trimmed.startsWith('FN;')) {
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx > -1) {
+        const val = trimmed.slice(colonIdx + 1).trim();
+        if (val && !current.name) current.name = val;
+      }
+      continue;
+    }
+
+    // N:Sharma;Priya;;;   (structured: family;given;middle;prefix;suffix)
+    // Use only if FN wasn't set
+    if (trimmed.startsWith('N:') || trimmed.startsWith('N;')) {
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx > -1 && !current.name) {
+        const val = trimmed.slice(colonIdx + 1).trim();
+        const parts = val.split(';').filter(p => p);
+        // Format: [family, given, middle, prefix, suffix] — show "given family"
+        if (parts.length >= 2) {
+          current.name = `${parts[1]} ${parts[0]}`.trim();
+        } else if (parts[0]) {
+          current.name = parts[0];
+        }
+      }
+      continue;
+    }
+
+    // TEL:+919876543210 or TEL;TYPE=CELL:+919876543210
+    if (trimmed.startsWith('TEL:') || trimmed.startsWith('TEL;')) {
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx > -1 && !current.phone) {
+        const val = trimmed.slice(colonIdx + 1).trim();
+        // Keep + and digits only
+        const clean = val.replace(/[^\d+]/g, '');
+        if (clean) current.phone = clean;
+      }
+    }
+  }
+
+  return cards;
+}
+
+// Fetch vCard content from a Twilio media URL. Twilio serves media behind
+// basic auth using the account SID and auth token.
+async function fetchTwilioMedia(url) {
+  if (!TWILIO_SID || !TWILIO_TOKEN) return null;
+  try {
+    const auth = Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString('base64');
+    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch (e) {
+    console.error('fetchTwilioMedia error:', e.message);
+    return null;
+  }
+}
+
 // AI TOKEN PACKS (Rs. 2 per token base, bulk discounts)
 const AI_TOKEN_PACKS = {
   small:  { tokens: 50,  price: 100, label: 'Starter Pack' },
@@ -2595,6 +2687,115 @@ app.post('/api/whatsapp/incoming', async (req, res) => {
   try {
     // Identify vendor by phone
     const fromPhone = from.replace('whatsapp:', '');
+
+    // ── Couple branch ──────────────────────────────────────────
+    // If this sender is a registered couple AND has media attachments,
+    // parse any vCards and add them to Guest Ledger.
+    const couple = await findCoupleByPhone(fromPhone);
+    const numMedia = parseInt(req.body.NumMedia || '0', 10) || 0;
+
+    if (couple && numMedia > 0) {
+      // Collect all vCard media items
+      const vcards = [];
+      for (let i = 0; i < numMedia; i++) {
+        const contentType = (req.body[`MediaContentType${i}`] || '').toLowerCase();
+        const mediaUrl = req.body[`MediaUrl${i}`] || '';
+        if (!mediaUrl) continue;
+        if (contentType.includes('vcard') || contentType.includes('x-vcard') || contentType === 'text/directory') {
+          const raw = await fetchTwilioMedia(mediaUrl);
+          if (raw) {
+            const parsed = parseVCards(raw);
+            vcards.push(...parsed);
+          }
+        }
+      }
+
+      if (vcards.length === 0) {
+        await sendWhatsApp(fromPhone, "I didn't find any contacts in that. Try long-pressing a chat, tapping Attach → Contact, then selecting who you want to add.");
+        return;
+      }
+
+      // Dedupe by phone+name within this batch AND against existing guests
+      const { data: existingGuests } = await supabase
+        .from('couple_guests')
+        .select('name, phone')
+        .eq('couple_id', couple.id);
+
+      const seen = new Set();
+      if (existingGuests) {
+        for (const g of existingGuests) {
+          const key = `${(g.name || '').toLowerCase()}|${(g.phone || '').replace(/\D/g, '').slice(-10)}`;
+          seen.add(key);
+        }
+      }
+
+      const events = couple.wedding_events || [];
+      const defaultEventInvites = {};
+      for (const ev of events) {
+        defaultEventInvites[ev] = { invited: false, rsvp: 'pending' };
+      }
+
+      const toInsert = [];
+      let skipped = 0;
+      for (const v of vcards) {
+        if (!v.name && !v.phone) { skipped++; continue; }
+        const nameKey = (v.name || '').toLowerCase().trim();
+        const phoneKey = (v.phone || '').replace(/\D/g, '').slice(-10);
+        const key = `${nameKey}|${phoneKey}`;
+        if (seen.has(key)) { skipped++; continue; }
+        seen.add(key);
+
+        toInsert.push({
+          couple_id: couple.id,
+          name: v.name || v.phone || 'Unnamed',
+          phone: v.phone || null,
+          side: 'bride',              // default — she can edit later
+          event_invites: defaultEventInvites,
+          household_head_id: null,
+          dietary: null,
+          nudge_sent_at: null,
+        });
+      }
+
+      if (toInsert.length === 0) {
+        await sendWhatsApp(fromPhone, `I found ${vcards.length} contact${vcards.length !== 1 ? 's' : ''}, but they're already in your Guest Ledger. Nothing new added.`);
+        return;
+      }
+
+      const { error: insertErr } = await supabase
+        .from('couple_guests')
+        .insert(toInsert);
+
+      if (insertErr) {
+        console.error('WhatsApp guest import error:', insertErr.message);
+        await sendWhatsApp(fromPhone, "I couldn't save those contacts right now. Please try again in a moment.");
+        return;
+      }
+
+      const addedPlural = toInsert.length !== 1 ? 's' : '';
+      const skippedMsg = skipped > 0 ? ` (${skipped} already on your list)` : '';
+      await sendWhatsApp(
+        fromPhone,
+        `Added ${toInsert.length} guest${addedPlural} to your Guest Ledger ✨${skippedMsg}\n\nOpen TDW → Plan → Guests and pull down to refresh to see them.`
+      );
+      return;
+    }
+
+    // Couple sent text only (no media) — gentle instructions
+    if (couple && numMedia === 0) {
+      const bodyLower = body.toLowerCase();
+      // Only respond if they seem to be asking about contact import
+      if (bodyLower.includes('import') || bodyLower.includes('contact') || bodyLower.includes('guest') || bodyLower.includes('help')) {
+        await sendWhatsApp(
+          fromPhone,
+          `Hi ${couple.name?.split(' ')[0] || 'there'}! To add guests, forward me their contacts from WhatsApp:\n\n1. Long-press any chat\n2. Tap Attach → Contact\n3. Select up to 50 at a time\n4. Send them here\n\nI'll add them to your Guest Ledger automatically.`
+        );
+      }
+      // Otherwise, silently ignore — couple-side DreamAi is future work
+      return;
+    }
+
+    // ── Vendor branch (unchanged from before) ──────────────────
     const vendor = await findVendorByPhone(fromPhone);
 
     if (!vendor) {

@@ -1104,6 +1104,15 @@ function useCoupleData(session: CoupleSession | null) {
     } catch {}
   };
 
+  const refreshGuests = async () => {
+    if (!session?.id) return;
+    try {
+      const res = await fetch(`${API}/api/couple/guests/${session.id}`);
+      const d = await res.json();
+      if (d.success) setGuests(d.data || []);
+    } catch {}
+  };
+
   // Initial load + one-time template seed if bride has never seeded.
   useEffect(() => {
     let mounted = true;
@@ -1546,7 +1555,7 @@ function useCoupleData(session: CoupleSession | null) {
     budget, expenses, shagun, refreshBudget,
     updateBudget, addExpense, updateExpense, deleteExpense,
     addShagun, updateShagun, deleteShagun,
-    guests, addGuest, updateGuest, deleteGuest,
+    guests, addGuest, updateGuest, deleteGuest, refreshGuests,
     pins, fetchOGPreview, addPin, updatePin, deletePin,
     vendors, addVendor, updateVendor, deleteVendor,
     waTemplates, addTemplate, updateTemplate, deleteTemplate,
@@ -4020,7 +4029,7 @@ type GuestFilter = 'all' | 'bride' | 'groom' | 'pending' | 'confirmed' | 'declin
 
 function GuestTool({
   session, guests, loading, templates,
-  onAdd, onUpdate, onDelete, onBack,
+  onAdd, onUpdate, onDelete, onRefresh, onBack,
 }: {
   session: CoupleSession;
   guests: Guest[];
@@ -4029,6 +4038,7 @@ function GuestTool({
   onAdd: (payload: Partial<Guest>) => Promise<Guest | null>;
   onUpdate: (id: string, patch: Partial<Guest>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
   onBack: () => void;
 }) {
   const [filter, setFilter] = useState<GuestFilter>('all');
@@ -4038,6 +4048,8 @@ function GuestTool({
   const [contactImport, setContactImport] = useState<Array<{ name: string; phone: string }> | null>(null);
   const [contactsSupported, setContactsSupported] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showWhatsAppImport, setShowWhatsAppImport] = useState(false);
 
   // Detect Contact Picker API (Android Chrome) — hidden on iOS
   useEffect(() => {
@@ -4127,6 +4139,36 @@ function GuestTool({
         </div>
         {canEditTool && (
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={async () => {
+                setRefreshing(true);
+                await onRefresh();
+                setRefreshing(false);
+              }}
+              disabled={refreshing}
+              style={{
+                width: 36, height: 36, borderRadius: 18, background: C.ivory,
+                border: `1px solid ${C.border}`, cursor: refreshing ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                opacity: refreshing ? 0.5 : 1,
+                fontSize: 15, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+              }}
+              title="Refresh"
+            >
+              <span style={{ transform: refreshing ? 'rotate(180deg)' : 'none', transition: 'transform 300ms' }}>↻</span>
+            </button>
+            {/* WhatsApp import — always available */}
+            <button
+              onClick={() => setShowWhatsAppImport(true)}
+              style={{
+                width: 36, height: 36, borderRadius: 18, background: C.ivory,
+                border: `1px solid ${C.goldBorder}`, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+              title="Import via WhatsApp"
+            >
+              <Phone size={14} color={C.gold} />
+            </button>
             {contactsSupported && (
               <button
                 onClick={pickContacts}
@@ -4348,6 +4390,12 @@ function GuestTool({
             }
             setContactImport(null);
           }}
+        />
+      )}
+      {showWhatsAppImport && (
+        <WhatsAppImportModal
+          onClose={() => setShowWhatsAppImport(false)}
+          onRefresh={onRefresh}
         />
       )}
     </div>
@@ -4774,6 +4822,169 @@ interface ImportedContactRow {
   householdCount: number;
   invites: Record<string, EventInvite>;
   selected: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────
+// WHATSAPP CONTACT IMPORT MODAL
+// Explains flow, opens WhatsApp with prefilled instructions.
+// ─────────────────────────────────────────────────────────────
+
+function WhatsAppImportModal({ onClose, onRefresh }: {
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const TWILIO_NUMBER = '14155238886';
+  const SANDBOX_JOIN_CODE = 'join acres-eventually';
+  const [refreshing, setRefreshing] = useState(false);
+
+  const openWhatsAppImport = () => {
+    const msg = `I'd like to import contacts for my Guest Ledger.`;
+    window.open(
+      `https://wa.me/${TWILIO_NUMBER}?text=${encodeURIComponent(msg)}`,
+      '_blank'
+    );
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await onRefresh();
+    setRefreshing(false);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '90vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Phone size={16} color={C.gold} />
+          </div>
+          <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+            Import via WhatsApp
+          </p>
+        </div>
+        <p style={{
+          margin: '0 0 18px', fontSize: 12, color: C.muted,
+          fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px',
+        }}>
+          Works on iPhone and Android. Forward us your guest contacts via WhatsApp and we'll add them to your Guest Ledger automatically.
+        </p>
+
+        {/* Step-by-step */}
+        <div style={{
+          background: C.ivory, border: `1px solid ${C.border}`,
+          borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+        }}>
+          <p style={{
+            margin: '0 0 10px', fontSize: 10, color: C.muted, fontWeight: 500,
+            letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+          }}>How it works</p>
+          {[
+            'Tap "Open WhatsApp" below',
+            'In WhatsApp, tap the attach icon (📎 or +)',
+            'Choose "Contact" and select who to add',
+            'Send the contacts',
+            'We reply with a confirmation and add them here',
+          ].map((step, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6, alignItems: 'flex-start' }}>
+              <span style={{
+                flexShrink: 0, width: 20, height: 20, borderRadius: 10,
+                background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                fontSize: 10, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{i + 1}</span>
+              <span style={{
+                fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                fontWeight: 300, lineHeight: '18px', paddingTop: 1,
+              }}>{step}</span>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={openWhatsAppImport} style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          background: C.dark, border: 'none',
+          borderRadius: 12, padding: '14px', cursor: 'pointer',
+          color: C.gold, fontFamily: 'DM Sans, sans-serif',
+          fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, marginBottom: 10,
+        }}>
+          <Phone size={13} color={C.gold} />
+          Open WhatsApp
+        </button>
+
+        {/* After you send, come back and refresh */}
+        <div style={{
+          background: C.pearl, border: `1px solid ${C.border}`,
+          borderRadius: 10, padding: '10px 14px', marginBottom: 10,
+        }}>
+          <p style={{
+            margin: '0 0 8px', fontSize: 11, color: C.dark,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, lineHeight: '16px',
+          }}>
+            After you send the contacts…
+          </p>
+          <p style={{
+            margin: '0 0 10px', fontSize: 11, color: C.muted,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px',
+          }}>
+            Come back here and tap refresh to see them in your list.
+          </p>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              padding: '6px 14px', borderRadius: 10,
+              background: refreshing ? C.pearl : C.goldSoft,
+              border: `1px solid ${C.goldBorder}`,
+              cursor: refreshing ? 'default' : 'pointer',
+              color: C.goldDeep, fontFamily: 'DM Sans, sans-serif',
+              fontSize: 11, fontWeight: 500, letterSpacing: '0.5px',
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            {refreshing ? 'Refreshing…' : '↻ Refresh now'}
+          </button>
+        </div>
+
+        {/* First-time users — Twilio sandbox opt-in */}
+        <div style={{
+          background: C.pearl, border: `1px solid ${C.border}`,
+          borderRadius: 10, padding: '10px 14px', marginBottom: 14,
+        }}>
+          <p style={{
+            margin: 0, fontSize: 10, color: C.muted, fontWeight: 500,
+            letterSpacing: '1px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+          }}>First time?</p>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>
+            You'll need to connect once. Send <span style={{ fontWeight: 500, color: C.dark }}>{SANDBOX_JOIN_CODE}</span> to <span style={{ fontWeight: 500, color: C.dark }}>+1 {TWILIO_NUMBER.slice(0, 3)}-{TWILIO_NUMBER.slice(3, 6)}-{TWILIO_NUMBER.slice(6)}</span> from your WhatsApp.
+          </p>
+        </div>
+
+        <GhostButton label="Done" onTap={onClose} />
+      </div>
+    </div>
+  );
 }
 
 function ContactImportModal({ contacts, events, onClose, onSave }: {
@@ -9381,6 +9592,7 @@ export default function CoupleApp() {
                     onAdd={checklist.addGuest}
                     onUpdate={checklist.updateGuest}
                     onDelete={checklist.deleteGuest}
+                    onRefresh={checklist.refreshGuests}
                     onBack={() => setActiveTool(null)}
                   />
                 )}
