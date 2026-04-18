@@ -32,6 +32,7 @@ const TABS = [
   { id: 'profile-tracking', label: '📈 Profile Completion' },
   { id: 'founding', label: '💎 Founding Vendors' },
   { id: 'tdw-ai', label: '✨ Dream Ai Access' },
+  { id: 'hot-dates', label: '🔥 Hot Dates' },
 ];
 
 const s: any = {
@@ -113,6 +114,52 @@ export default function AdminPage() {
   useEffect(() => { if (activeTab === 'tdw-ai') loadAiVendors(); }, [activeTab]);
   useEffect(() => { if (activeTab === 'users') loadUsers(); }, [activeTab]);
   useEffect(() => { if (activeTab === 'founding') loadFoundingVendors(); }, [activeTab]);
+
+  // ── Hot Dates (Turn 9D) ────────────────────────────────────────
+  const [hotDates, setHotDates] = useState<any[]>([]);
+  const [hotYear, setHotYear] = useState(String(new Date().getFullYear()));
+  const [hotLoading, setHotLoading] = useState(false);
+  const [newHotDate, setNewHotDate] = useState('');
+  const [newHotTradition, setNewHotTradition] = useState('North Indian');
+  const [newHotRegion, setNewHotRegion] = useState('All India');
+  const [newHotNote, setNewHotNote] = useState('');
+  const loadHotDates = async () => {
+    setHotLoading(true);
+    try {
+      const r = await fetch(`${API}/api/hot-dates?year=${hotYear}`);
+      const d = await r.json();
+      if (d.success) setHotDates(d.data || []);
+    } catch {} finally { setHotLoading(false); }
+  };
+  const addHotDate = async () => {
+    if (!newHotDate) { alert('Pick a date'); return; }
+    try {
+      const r = await fetch(`${API}/api/hot-dates`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: newHotDate,
+          tradition: newHotTradition || 'North Indian',
+          region: newHotRegion || 'All India',
+          note: newHotNote || null,
+        }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setNewHotDate(''); setNewHotNote('');
+        loadHotDates();
+      } else alert(d.error || 'Could not add');
+    } catch { alert('Network error'); }
+  };
+  const deleteHotDate = async (id: string) => {
+    if (!confirm('Delete this hot date?')) return;
+    try {
+      const r = await fetch(`${API}/api/hot-dates/${id}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.success) setHotDates(prev => prev.filter(h => h.id !== id));
+    } catch {}
+  };
+  useEffect(() => { if (activeTab === 'hot-dates') loadHotDates(); }, [activeTab, hotYear]);
+
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -1474,6 +1521,128 @@ export default function AdminPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {activeTab === 'hot-dates' && (
+          <>
+            <div style={s.cardPad}>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>🔥 Hot Dates</div>
+              <div style={{ fontSize: 12, color: '#8C7B6E', marginBottom: 16, lineHeight: 1.5 }}>
+                Auspicious wedding dates shown to vendors when they toggle Hot Dates on in their calendar.
+                Add, edit, or remove dates per year.
+              </div>
+
+              {/* Year selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <label style={{ fontSize: 11, color: '#8C7B6E', fontWeight: 500, letterSpacing: 0.5 }}>YEAR</label>
+                <select
+                  value={hotYear}
+                  onChange={e => setHotYear(e.target.value)}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #E8E0D5', fontSize: 13 }}
+                >
+                  {['2025', '2026', '2027', '2028'].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <span style={{ fontSize: 11, color: '#8C7B6E' }}>
+                  {hotDates.length} {hotDates.length === 1 ? 'date' : 'dates'}
+                </span>
+              </div>
+
+              {/* Add form */}
+              <div style={{ background: '#FAF6F0', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#8C7B6E', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
+                  Add a hot date
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>
+                  <input
+                    type="date" value={newHotDate}
+                    onChange={e => setNewHotDate(e.target.value)}
+                    style={s.input}
+                  />
+                  <select
+                    value={newHotTradition}
+                    onChange={e => setNewHotTradition(e.target.value)}
+                    style={s.input}
+                  >
+                    <option value="North Indian">North Indian</option>
+                    <option value="South Indian">South Indian</option>
+                    <option value="Bengali">Bengali</option>
+                    <option value="Gujarati">Gujarati</option>
+                    <option value="Marathi">Marathi</option>
+                    <option value="Punjabi">Punjabi</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <select
+                    value={newHotRegion}
+                    onChange={e => setNewHotRegion(e.target.value)}
+                    style={s.input}
+                  >
+                    <option value="All India">All India</option>
+                    <option value="North">North</option>
+                    <option value="South">South</option>
+                    <option value="East">East</option>
+                    <option value="West">West</option>
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Note (optional) — e.g. 'verify with family priest'"
+                  value={newHotNote}
+                  onChange={e => setNewHotNote(e.target.value)}
+                  style={{ ...s.input, marginBottom: 10 }}
+                />
+                <button onClick={addHotDate} style={s.primaryBtn}>Add Hot Date</button>
+              </div>
+
+              {/* List */}
+              {hotLoading ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>Loading…</div>
+              ) : hotDates.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                  No hot dates for {hotYear}. Add some above.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={s.th}>Date</th>
+                        <th style={s.th}>Day</th>
+                        <th style={s.th}>Tradition</th>
+                        <th style={s.th}>Region</th>
+                        <th style={s.th}>Note</th>
+                        <th style={s.th}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hotDates.map((h) => {
+                        const d = new Date(h.date + 'T00:00:00');
+                        const flagged = h.note && h.note.toLowerCase().includes('verify');
+                        return (
+                          <tr key={h.id} style={{ background: flagged ? '#FFF8E8' : 'transparent' }}>
+                            <td style={s.td}>
+                              <strong>{d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                            </td>
+                            <td style={s.td}>{d.toLocaleDateString('en-IN', { weekday: 'long' })}</td>
+                            <td style={s.td}>{h.tradition}</td>
+                            <td style={s.td}>{h.region}</td>
+                            <td style={s.td}>
+                              {h.note ? <span style={{ fontSize: 11, color: flagged ? '#B8963A' : '#8C7B6E' }}>{h.note}</span> : <span style={{ color: '#B8ADA4' }}>—</span>}
+                            </td>
+                            <td style={s.td}>
+                              <button
+                                onClick={() => deleteHotDate(h.id)}
+                                style={s.btnSm('transparent', '#C65757', '#F5D5D5')}
+                              >Delete</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
         )}
 
       </div>

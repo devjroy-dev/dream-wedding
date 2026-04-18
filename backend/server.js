@@ -755,17 +755,30 @@ app.get('/api/invoices/:vendorId', async (req, res) => {
 
 app.post('/api/invoices', async (req, res) => {
   try {
-    const { amount } = req.body;
-    const gst_amount = amount * 0.18;
+    const { amount, gst_enabled } = req.body;
+    const gst_amount = gst_enabled ? amount * 0.18 : 0;
     const total_amount = amount + gst_amount;
+    // Allow-list the columns we actually have in vendor_invoices to avoid
+    // "schema cache" errors when the frontend sends extra fields.
+    const allowed = [
+      'vendor_id', 'client_id', 'client_name', 'client_phone', 'client_email',
+      'amount', 'description', 'invoice_number', 'status', 'issue_date',
+      'due_date', 'booking_id', 'gst_enabled', 'tds_applicable',
+      'tds_deducted_by_client', 'tds_rate', 'tds_amount',
+    ];
+    const payload = {};
+    for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
+    payload.gst_amount = gst_amount;
+    payload.total_amount = total_amount;
     const { data, error } = await supabase
       .from('vendor_invoices')
-      .insert([{ ...req.body, gst_amount, total_amount }])
+      .insert([payload])
       .select()
       .single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
+    console.error('invoices create error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1530,14 +1543,21 @@ app.get('/api/payment-schedules/:vendorId', async (req, res) => {
 
 app.post('/api/payment-schedules', async (req, res) => {
   try {
+    const allowed = [
+      'vendor_id', 'client_id', 'client_name', 'client_phone',
+      'booking_id', 'instalments',
+    ];
+    const payload = {};
+    for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
     const { data, error } = await supabase
       .from('vendor_payment_schedules')
-      .insert([req.body])
+      .insert([payload])
       .select()
       .single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
+    console.error('payment-schedules create error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2445,6 +2465,88 @@ app.get('/api/vendor/assistants/:id/assignments', async (req, res) => {
     res.json({ success: true, data: data || [] });
   } catch (error) {
     console.error('assistants assignments list error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// HOT DATES (Session 10 Turn 9D)
+// Admin-managed auspicious wedding days. Vendors see them via
+// a toggle in the Calendar view.
+// ══════════════════════════════════════════════════════════════
+
+// List hot dates (optional filters: year, tradition, region)
+app.get('/api/hot-dates', async (req, res) => {
+  try {
+    const { year, tradition, region } = req.query;
+    let q = supabase.from('hot_dates').select('*').order('date', { ascending: true });
+    if (year) {
+      q = q.gte('date', `${year}-01-01`).lte('date', `${year}-12-31`);
+    }
+    if (tradition) q = q.eq('tradition', tradition);
+    if (region) q = q.eq('region', region);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('hot-dates list error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: add a hot date
+app.post('/api/hot-dates', async (req, res) => {
+  try {
+    const { date, tradition, region, note } = req.body || {};
+    if (!date) return res.status(400).json({ success: false, error: 'date is required' });
+    const { data, error } = await supabase
+      .from('hot_dates')
+      .insert([{
+        date,
+        tradition: tradition || 'North Indian',
+        region: region || 'All India',
+        note: note || null,
+      }])
+      .select().single();
+    if (error) {
+      if (error.code === '23505') {
+        return res.json({ success: false, error: 'This date already exists for this tradition/region' });
+      }
+      throw error;
+    }
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('hot-dates create error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: update a hot date
+app.patch('/api/hot-dates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowed = ['date', 'tradition', 'region', 'note'];
+    const patch = {};
+    for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+    const { data, error } = await supabase
+      .from('hot_dates').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('hot-dates update error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: delete a hot date
+app.delete('/api/hot-dates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase.from('hot_dates').delete().eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('hot-dates delete error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

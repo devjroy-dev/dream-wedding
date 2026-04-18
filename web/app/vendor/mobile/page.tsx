@@ -414,10 +414,24 @@ export default function VendorMobilePage() {
             paymentSchedules={paymentSchedules}
             todos={todos}
             events={events}
+            blockedDates={blockedDates}
             onAddClient={() => setShowAddClient(true)}
             onOpenInvoice={() => setShowQuickInvoice(true)}
             onOpenTodo={() => setShowQuickTodo(true)}
             onOpenEvent={() => setShowQuickEvent(true)}
+            onOpenBlockDate={() => setShowQuickBlock(true)}
+            onRefreshCalendar={() => {
+              if (!session?.vendorId) return;
+              fetch(`${API}/api/availability/${session.vendorId}`).then(r => r.json()).then(d => {
+                if (d.success) setBlockedDates(d.data || []);
+              }).catch(() => {});
+              fetch(`${API}/api/events/${session.vendorId}`).then(r => r.json()).then(d => {
+                if (d.success) setEvents(d.data || []);
+              }).catch(() => {});
+              fetch(`${API}/api/bookings/vendor/${session.vendorId}`).then(r => r.json()).then(d => {
+                if (d.success) setBookings(d.data || []);
+              }).catch(() => {});
+            }}
             onToggleTodo={async (id: string, done: boolean) => {
               try {
                 const res = await fetch(`${API}/api/todos/${id}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({done}) });
@@ -918,6 +932,15 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '8px' }}>
+
+      {/* ── NEEDS ATTENTION HUB (Turn 9D) — sits at the very top ── */}
+      <NeedsAttentionCard
+        paymentSchedules={paymentSchedules}
+        invoices={invoices}
+        todos={todos}
+        bookings={bookings}
+        onJumpToTab={onJumpToTab}
+      />
 
       {/* ── PROFILE COMPLETION CARD (sits above Dream Ai — dismissible, collapsable) ── */}
       {profileIncomplete && !checklistDismissed && vendorData && (
@@ -2164,14 +2187,14 @@ function CalendarTab({ session, bookings, blockedDates, events, onRefresh, onAdd
 // TOOLS TAB (launcher grid → opens individual tool views)
 // ══════════════════════════════════════════════════════════════════════════
 
-function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, todos, events, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName, onToast, forcedSub }: any) {
+function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, invoices, bookings, leads, paymentSchedules, todos, events, blockedDates, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onOpenBlockDate, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName, onToast, onRefreshCalendar, forcedSub }: any) {
   if (activeSubTool) {
     // If this is the Clients tab (forcedSub='clients'), the back button
     // should be a no-op because there's no grid to go back to — the tab
     // itself is the detail view.
     const handleBack = forcedSub ? () => { /* no-op — tab-rooted */ } : () => setActiveSubTool(null);
     const showBackButton = !forcedSub;
-    return <ToolDetailView session={session} tier={tier} sub={activeSubTool} clients={clients} invoices={invoices} bookings={bookings} leads={leads} paymentSchedules={paymentSchedules} todos={todos} events={events} onBack={handleBack} showBack={showBackButton} onAddClient={onAddClient} onOpenInvoice={onOpenInvoice} onOpenTodo={onOpenTodo} onOpenEvent={onOpenEvent} onToggleTodo={onToggleTodo} onDeleteTodo={onDeleteTodo} onSavePaymentSchedule={onSavePaymentSchedule} vendorName={vendorName} />;
+    return <ToolDetailView session={session} tier={tier} sub={activeSubTool} clients={clients} invoices={invoices} bookings={bookings} leads={leads} paymentSchedules={paymentSchedules} todos={todos} events={events} blockedDates={blockedDates} onBack={handleBack} showBack={showBackButton} onAddClient={onAddClient} onOpenInvoice={onOpenInvoice} onOpenTodo={onOpenTodo} onOpenEvent={onOpenEvent} onOpenBlockDate={onOpenBlockDate} onToggleTodo={onToggleTodo} onDeleteTodo={onDeleteTodo} onSavePaymentSchedule={onSavePaymentSchedule} vendorName={vendorName} onRefreshCalendar={onRefreshCalendar} />;
   }
 
   const [lockedModal, setLockedModal] = useState<any>(null);
@@ -2192,8 +2215,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
     {
       title: 'Pipeline',
       tools: [
-        { id: 'inquiries', label: 'Enquiries', icon: Mail,       sub: 'inquiries', minTier: 'essential', desc: 'Pending leads, confirmed bookings, and follow-ups in one place.' },
-        { id: 'calendar',  label: 'Calendar',  icon: Calendar,   sub: 'calendar',  minTier: 'essential', desc: 'Your schedule. Bookings, blocked dates, events — all together.' },
+        { id: 'calendar',  label: 'Calendar',  icon: Calendar,   sub: 'calendar',  minTier: 'essential', desc: 'Your schedule. Bookings, DND days, events, hot dates — all together.' },
       ],
     },
     {
@@ -2399,7 +2421,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
 // TOOL DETAIL VIEW (each tool's content)
 // ══════════════════════════════════════════════════════════════════════════
 
-function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads, paymentSchedules, todos, events, onBack, showBack = true, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName }: any) {
+function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads, paymentSchedules, todos, events, blockedDates, onBack, showBack = true, onAddClient, onOpenInvoice, onOpenTodo, onOpenEvent, onOpenBlockDate, onToggleTodo, onDeleteTodo, onSavePaymentSchedule, vendorName, onRefreshCalendar }: any) {
   const titles: Record<string, string> = {
     clients: 'Clients', invoices: 'Invoices', contracts: 'Contracts', payments: 'Payments',
     expenses: 'Expenses', tax: 'Tax & TDS', team: 'My Team', referral: 'Referrals',
@@ -2705,23 +2727,16 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
     }
 
     if (sub === 'calendar') {
-      // Placeholder — CalendarTab requires blockedDates and handlers which we don't
-      // have access to here. For now show an empty state + deep-link advice.
-      // Turn 9C will rewire this fully with proper data flow.
       return (
-        <div style={{
-          background: C.ivory, borderRadius: 18,
-          border: `1px solid ${C.border}`,
-          padding: '36px 22px', textAlign: 'center' as const,
-        }}>
-          <Calendar size={28} color={C.muted} />
-          <div style={{ fontSize: 15, color: C.dark, fontWeight: 600, margin: '12px 0 6px' }}>
-            Calendar
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, maxWidth: 280, margin: '0 auto' }}>
-            Your bookings, blocked dates, and events — coming back here in the next update. For now, tap "Events" to manage scheduled items.
-          </div>
-        </div>
+        <CalendarPanel
+          session={session}
+          bookings={bookings}
+          blockedDates={blockedDates}
+          events={events}
+          onOpenEvent={onOpenEvent}
+          onOpenBlockDate={onOpenBlockDate}
+          onRefresh={onRefreshCalendar}
+        />
       );
     }
 
@@ -3017,7 +3032,772 @@ function MoreTab({ session, tier, vendorData, aiStatus, buyingTokens, setBuyingT
 // ══════════════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════════════
-// ASSISTANTS PANEL (Turn 9B — Teams tab content)
+// NEEDS ATTENTION (Turn 9D)
+// Cross-functional pending hub. Aggregates overdue/due-today items from
+// payment schedules, invoices, todos, and bookings into one actionable
+// card at the top of Overview.
+//
+// Severity buckets:
+//  • Overdue   → red-rimmed   (past due date)
+//  • Today     → gold-rimmed  (due today)
+//  • This week → grey         (within 7 days)
+// Shows up to 6 items + "View all" if more.
+// Empty state: "You're all caught up ✨"
+// ══════════════════════════════════════════════════════════════════════════
+
+interface AttentionItem {
+  id: string;
+  label: string;
+  sub: string;
+  severity: 'overdue' | 'today' | 'week';
+  kind: 'payment' | 'invoice' | 'todo' | 'booking';
+  target: Tab;
+  targetSub?: string;
+}
+
+function NeedsAttentionCard({ paymentSchedules, invoices, todos, bookings, onJumpToTab }: {
+  paymentSchedules: any[];
+  invoices: any[];
+  todos: any[];
+  bookings: any[];
+  onJumpToTab?: (t: Tab) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const now = new Date();
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekFromNow = new Date(today0.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const items: AttentionItem[] = [];
+
+  // ── Payment schedules — overdue instalments
+  for (const sched of paymentSchedules) {
+    for (const inst of (sched.instalments || [])) {
+      if (inst.paid || !inst.due_date) continue;
+      const due = new Date(inst.due_date);
+      const dueIso = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+      const name = sched.client_name || 'Client';
+      const amt = `₹${fmtINR(parseInt(inst.amount) || 0)}`;
+      if (dueIso < today0) {
+        items.push({
+          id: `ps-${sched.id}-${inst.label}`,
+          label: `${amt} from ${name}`,
+          sub: `${inst.label} · overdue since ${due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+          severity: 'overdue',
+          kind: 'payment',
+          target: 'Power',
+          targetSub: 'payments',
+        });
+      } else if (dueIso.getTime() === today0.getTime()) {
+        items.push({
+          id: `ps-${sched.id}-${inst.label}`,
+          label: `${amt} from ${name}`,
+          sub: `${inst.label} · due today`,
+          severity: 'today',
+          kind: 'payment',
+          target: 'Power',
+          targetSub: 'payments',
+        });
+      } else if (dueIso <= weekFromNow) {
+        items.push({
+          id: `ps-${sched.id}-${inst.label}`,
+          label: `${amt} from ${name}`,
+          sub: `${inst.label} · due ${due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+          severity: 'week',
+          kind: 'payment',
+          target: 'Power',
+          targetSub: 'payments',
+        });
+      }
+    }
+  }
+
+  // ── Invoices — unpaid past due
+  for (const inv of invoices) {
+    if (inv.status === 'paid') continue;
+    if (!inv.due_date) continue;
+    const due = new Date(inv.due_date);
+    const dueIso = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    const name = inv.client_name || 'Client';
+    const amt = `₹${fmtINR(parseInt(inv.amount) || 0)}`;
+    if (dueIso < today0) {
+      items.push({
+        id: `inv-${inv.id}`,
+        label: `Invoice unpaid · ${name}`,
+        sub: `${amt} · overdue since ${due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+        severity: 'overdue',
+        kind: 'invoice',
+        target: 'Power',
+        targetSub: 'invoices',
+      });
+    } else if (dueIso.getTime() === today0.getTime()) {
+      items.push({
+        id: `inv-${inv.id}`,
+        label: `Invoice due today · ${name}`,
+        sub: amt,
+        severity: 'today',
+        kind: 'invoice',
+        target: 'Power',
+        targetSub: 'invoices',
+      });
+    }
+  }
+
+  // ── To-dos — past due and unchecked
+  for (const todo of todos) {
+    if (todo.done) continue;
+    if (!todo.due_date) continue;
+    const due = new Date(todo.due_date);
+    const dueIso = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    if (dueIso < today0) {
+      items.push({
+        id: `todo-${todo.id}`,
+        label: todo.title || 'Task',
+        sub: `Past due · ${due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+        severity: 'overdue',
+        kind: 'todo',
+        target: 'Power',
+        targetSub: 'todos',
+      });
+    } else if (dueIso.getTime() === today0.getTime()) {
+      items.push({
+        id: `todo-${todo.id}`,
+        label: todo.title || 'Task',
+        sub: 'Due today',
+        severity: 'today',
+        kind: 'todo',
+        target: 'Power',
+        targetSub: 'todos',
+      });
+    }
+  }
+
+  // ── Bookings — unconfirmed that are approaching
+  for (const b of bookings) {
+    if (b.status !== 'pending' && b.status !== 'pending_confirmation') continue;
+    if (!b.event_date) continue;
+    const ev = new Date(b.event_date);
+    const evIso = new Date(ev.getFullYear(), ev.getMonth(), ev.getDate());
+    if (evIso <= weekFromNow && evIso >= today0) {
+      items.push({
+        id: `b-${b.id}`,
+        label: `Unconfirmed · ${b.users?.name || b.client_name || 'Lead'}`,
+        sub: `Event ${ev.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+        severity: evIso.getTime() === today0.getTime() ? 'today' : 'week',
+        kind: 'booking',
+        target: 'Power',
+        targetSub: 'calendar',
+      });
+    }
+  }
+
+  // Sort — overdue first, then today, then week
+  const order = { overdue: 0, today: 1, week: 2 };
+  items.sort((a, b) => order[a.severity] - order[b.severity]);
+
+  const cap = expanded ? items.length : 6;
+  const visible = items.slice(0, cap);
+  const hiddenCount = items.length - visible.length;
+
+  if (items.length === 0) {
+    return (
+      <div style={{
+        background: C.champagne,
+        border: `1px solid ${C.goldBorder}`,
+        borderRadius: 18,
+        padding: '18px 18px',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 18,
+          background: C.goldSoft, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <CheckCircle size={18} color={C.goldDeep} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{
+            fontFamily: "'Playfair Display', serif", fontSize: 15,
+            color: C.dark, fontWeight: 500,
+          }}>You're all caught up ✨</div>
+          <div style={{
+            fontFamily: 'DM Sans, sans-serif', fontSize: 11,
+            color: C.muted, marginTop: 2,
+          }}>Nothing overdue. Nothing urgent. Enjoy the calm.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: C.ivory, border: `1px solid ${C.border}`,
+      borderRadius: 18, padding: '14px 16px 10px',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 12,
+      }}>
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 600, letterSpacing: '2.5px',
+            color: C.goldDeep, textTransform: 'uppercase' as const,
+          }}>Needs Attention</div>
+          <div style={{
+            fontFamily: "'Playfair Display', serif", fontSize: 15,
+            color: C.dark, fontWeight: 500, marginTop: 2,
+          }}>
+            {items.filter(i => i.severity === 'overdue').length > 0
+              ? `${items.filter(i => i.severity === 'overdue').length} overdue · ${items.length} total`
+              : `${items.length} item${items.length === 1 ? '' : 's'}`}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {visible.map(item => {
+          const rim = item.severity === 'overdue' ? '#E57373'
+                    : item.severity === 'today' ? C.gold
+                    : C.border;
+          const badgeBg = item.severity === 'overdue' ? 'rgba(229,115,115,0.08)'
+                       : item.severity === 'today' ? C.goldSoft
+                       : C.pearl;
+          const IconC: any = item.kind === 'payment' ? CreditCard
+                          : item.kind === 'invoice' ? FileText
+                          : item.kind === 'todo' ? CheckCircle
+                          : Calendar;
+          return (
+            <button
+              key={item.id}
+              onClick={() => {
+                if (typeof window !== 'undefined' && item.targetSub) {
+                  localStorage.setItem('tdw_pwa_open_sub', item.targetSub);
+                }
+                onJumpToTab && onJumpToTab(item.target);
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 12px', borderRadius: 10,
+                background: badgeBg,
+                border: `1px solid ${rim}`,
+                cursor: 'pointer', fontFamily: 'inherit',
+                textAlign: 'left' as const, width: '100%',
+              }}
+            >
+              <IconC size={14} color={item.severity === 'overdue' ? '#C65757' : item.severity === 'today' ? C.goldDeep : C.muted} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: C.dark, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  {item.label}
+                </div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+                  {item.sub}
+                </div>
+              </div>
+              <ChevronRight size={13} color={C.light} />
+            </button>
+          );
+        })}
+      </div>
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          style={{
+            width: '100%', padding: '8px 12px', marginTop: 8,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontFamily: 'DM Sans, sans-serif',
+            fontSize: 10, color: C.goldDeep, fontWeight: 600,
+            letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+          }}
+        >
+          View all ({hiddenCount} more)
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+// Month grid with dots for bookings / DND / events.
+// Gold filled dot = confirmed booking. Gold ring = multiple bookings same day.
+// Grey dot = DND (renamed from "blocked"). Pink dot = trials / other events.
+// Hot Dates toggle overlays auspicious wedding dates (pink-tinted cells).
+// Tap any day → detail panel shows what's on that day.
+// ══════════════════════════════════════════════════════════════════════════
+
+interface HotDate {
+  id: string;
+  date: string;
+  tradition: string;
+  region: string;
+  note: string | null;
+}
+
+function CalendarPanel({ session, bookings, blockedDates, events, onOpenEvent, onOpenBlockDate, onRefresh }: {
+  session: VendorSession;
+  bookings: any[];
+  blockedDates: any[];
+  events: any[];
+  onOpenEvent?: () => void;
+  onOpenBlockDate?: () => void;
+  onRefresh?: () => void;
+}) {
+  const today = new Date();
+  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [hotDatesOn, setHotDatesOn] = useState(false);
+  const [hotDates, setHotDates] = useState<HotDate[]>([]);
+  const [loadingHot, setLoadingHot] = useState(false);
+
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth(); // 0-11
+  const monthName = cursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  // Load hot dates for the current year when toggle flips on
+  useEffect(() => {
+    if (!hotDatesOn) return;
+    let cancelled = false;
+    setLoadingHot(true);
+    fetch(`${API}/api/hot-dates?year=${year}`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        if (d.success) setHotDates(d.data || []);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingHot(false); });
+    return () => { cancelled = true; };
+  }, [hotDatesOn, year]);
+
+  // Build the 6-week grid (always 42 cells — fills prev/next month for alignment)
+  const firstDayOfMonth = new Date(year, month, 1);
+  const startWeekday = firstDayOfMonth.getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: { date: Date; inMonth: boolean }[] = [];
+  // Prev month tail
+  for (let i = startWeekday - 1; i >= 0; i--) {
+    cells.push({ date: new Date(year, month, -i), inMonth: false });
+  }
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ date: new Date(year, month, d), inMonth: true });
+  }
+  // Next month head
+  while (cells.length < 42) {
+    const last = cells[cells.length - 1].date;
+    cells.push({ date: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1), inMonth: false });
+  }
+
+  // Index everything by YYYY-MM-DD for fast lookup
+  const iso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const bookingsByDay: Record<string, any[]> = {};
+  for (const b of bookings) {
+    if (b.status !== 'confirmed' || !b.event_date) continue;
+    const k = iso(new Date(b.event_date));
+    if (!bookingsByDay[k]) bookingsByDay[k] = [];
+    bookingsByDay[k].push(b);
+  }
+  const blockedByDay: Record<string, any[]> = {};
+  for (const bd of blockedDates) {
+    if (!bd.blocked_date) continue;
+    const k = iso(new Date(bd.blocked_date));
+    if (!blockedByDay[k]) blockedByDay[k] = [];
+    blockedByDay[k].push(bd);
+  }
+  const eventsByDay: Record<string, any[]> = {};
+  for (const ev of events) {
+    if (!ev.event_date) continue;
+    const k = iso(new Date(ev.event_date));
+    if (!eventsByDay[k]) eventsByDay[k] = [];
+    eventsByDay[k].push(ev);
+  }
+  const hotDatesByDay: Record<string, HotDate> = {};
+  for (const hd of hotDates) hotDatesByDay[hd.date] = hd;
+
+  const todayIso = iso(today);
+  const selectedData = selectedDay ? {
+    bookings: bookingsByDay[selectedDay] || [],
+    blocked: blockedByDay[selectedDay] || [],
+    events: eventsByDay[selectedDay] || [],
+    hot: hotDatesByDay[selectedDay] || null,
+  } : null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>
+            Calendar
+          </div>
+          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+            Your schedule at a glance.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={() => onOpenEvent && onOpenEvent()}
+            style={{
+              background: C.dark, color: C.gold, border: 'none',
+              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 11, fontWeight: 500,
+              letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+            }}
+          >
+            <Plus size={12} /> Event
+          </button>
+          <button
+            onClick={() => onOpenBlockDate && onOpenBlockDate()}
+            style={{
+              background: C.ivory, color: C.muted, border: `1px solid ${C.border}`,
+              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 11, fontWeight: 500,
+              letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+            }}
+          >
+            <Lock size={11} /> DND
+          </button>
+        </div>
+      </div>
+
+      {/* Hot Dates toggle */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: hotDatesOn ? '#FCE8E8' : C.ivory,
+        border: `1px solid ${hotDatesOn ? '#F5C5C5' : C.border}`,
+        borderRadius: 12, padding: '10px 14px',
+        transition: 'all 0.2s ease',
+      }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: C.dark, fontFamily: 'DM Sans, sans-serif' }}>
+            Hot Dates
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', marginTop: 2 }}>
+            Auspicious wedding days — don't underprice these.
+          </div>
+        </div>
+        <button
+          onClick={() => setHotDatesOn(!hotDatesOn)}
+          style={{
+            width: 40, height: 22, borderRadius: 11,
+            background: hotDatesOn ? '#E57373' : C.border,
+            border: 'none', cursor: 'pointer', padding: 0,
+            position: 'relative' as const, transition: 'all 0.2s ease',
+          }}
+        >
+          <div style={{
+            position: 'absolute' as const,
+            top: 2, left: hotDatesOn ? 20 : 2,
+            width: 18, height: 18, borderRadius: 9,
+            background: '#fff',
+            transition: 'all 0.2s ease',
+          }} />
+        </button>
+      </div>
+
+      {/* Legend bar */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap' as const, gap: '6px 14px',
+        padding: '10px 14px', background: C.pearl,
+        borderRadius: 10, border: `1px solid ${C.borderSoft}`,
+        fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+      }}>
+        <LegendDot kind="booking" />
+        <LegendDot kind="multiple" />
+        <LegendDot kind="dnd" />
+        <LegendDot kind="event" />
+        {hotDatesOn && <LegendDot kind="hot" />}
+      </div>
+
+      {/* Month navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
+        <button
+          onClick={() => setCursor(new Date(year, month - 1, 1))}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: C.muted }}
+          aria-label="Previous month"
+        >
+          <ChevronDown size={18} style={{ transform: 'rotate(90deg)' }} />
+        </button>
+        <div style={{
+          fontFamily: "'Playfair Display', serif", fontSize: 16,
+          color: C.dark, fontWeight: 500, letterSpacing: '0.5px',
+        }}>
+          {monthName}
+        </div>
+        <button
+          onClick={() => setCursor(new Date(year, month + 1, 1))}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: C.muted }}
+          aria-label="Next month"
+        >
+          <ChevronDown size={18} style={{ transform: 'rotate(-90deg)' }} />
+        </button>
+      </div>
+
+      {/* Weekday headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          <div key={i} style={{
+            textAlign: 'center' as const, fontSize: 10,
+            color: C.light, fontFamily: 'DM Sans, sans-serif',
+            letterSpacing: '1.5px', padding: '4px 0',
+          }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Day grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+        {cells.map((cell, i) => {
+          const key = iso(cell.date);
+          const dayNum = cell.date.getDate();
+          const isToday = key === todayIso;
+          const isSelected = key === selectedDay;
+          const bs = bookingsByDay[key] || [];
+          const bds = blockedByDay[key] || [];
+          const evs = eventsByDay[key] || [];
+          const hot = hotDatesByDay[key];
+          const isHot = hotDatesOn && !!hot;
+
+          const bg = isSelected
+            ? C.dark
+            : isHot
+              ? '#FCE8E8'
+              : isToday
+                ? C.goldSoft
+                : C.ivory;
+          const borderColor = isSelected
+            ? C.dark
+            : isToday
+              ? C.goldBorder
+              : C.border;
+          const dayColor = isSelected
+            ? C.gold
+            : cell.inMonth
+              ? C.dark
+              : C.light;
+
+          return (
+            <button
+              key={i}
+              onClick={() => setSelectedDay(isSelected ? null : key)}
+              style={{
+                aspectRatio: '1',
+                background: bg,
+                border: `1px solid ${borderColor}`,
+                borderRadius: 8, padding: '4px 2px 2px',
+                cursor: 'pointer', fontFamily: 'inherit',
+                display: 'flex', flexDirection: 'column' as const,
+                alignItems: 'center', justifyContent: 'space-between',
+                opacity: cell.inMonth ? 1 : 0.5,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span style={{
+                fontSize: 12, fontWeight: isToday ? 600 : 400,
+                color: dayColor, fontFamily: 'DM Sans, sans-serif',
+              }}>{dayNum}</span>
+              <div style={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' as const, justifyContent: 'center', minHeight: 8 }}>
+                {/* Bookings: filled dot if 1, ring if multiple */}
+                {bs.length === 1 && <Dot color={C.gold} filled />}
+                {bs.length > 1 && <Dot color={C.gold} ring />}
+                {/* DND */}
+                {bds.length > 0 && <Dot color={isSelected ? C.light : C.muted} filled />}
+                {/* Events (trials etc) */}
+                {evs.length > 0 && <Dot color="#E5A5A5" filled />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selected day detail */}
+      {selectedData && (
+        <SelectedDayPanel
+          dateIso={selectedDay!}
+          data={selectedData}
+          onClose={() => setSelectedDay(null)}
+          onRefresh={onRefresh}
+        />
+      )}
+
+      {loadingHot && (
+        <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, fontStyle: 'italic' }}>
+          Loading hot dates…
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dot({ color, filled, ring }: { color: string; filled?: boolean; ring?: boolean }) {
+  return (
+    <span style={{
+      width: 5, height: 5, borderRadius: '50%',
+      background: filled ? color : 'transparent',
+      border: ring ? `1.5px solid ${color}` : 'none',
+      display: 'inline-block',
+    }} />
+  );
+}
+
+function LegendDot({ kind }: { kind: 'booking' | 'multiple' | 'dnd' | 'event' | 'hot' }) {
+  const config = {
+    booking:  { color: C.gold,   label: 'Booking',         filled: true  },
+    multiple: { color: C.gold,   label: 'Multiple',        ring: true    },
+    dnd:      { color: C.muted,  label: 'DND',             filled: true  },
+    event:    { color: '#E5A5A5', label: 'Trial / Event',  filled: true  },
+    hot:      { color: '#E57373', label: 'Hot date',       filled: true  },
+  }[kind] as any;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <Dot color={config.color} filled={config.filled} ring={config.ring} />
+      <span>{config.label}</span>
+    </span>
+  );
+}
+
+function SelectedDayPanel({ dateIso, data, onClose, onRefresh }: {
+  dateIso: string;
+  data: { bookings: any[]; blocked: any[]; events: any[]; hot: HotDate | null };
+  onClose: () => void;
+  onRefresh?: () => void;
+}) {
+  const d = new Date(dateIso + 'T00:00:00');
+  const pretty = d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const nothingOnDay = data.bookings.length === 0 && data.blocked.length === 0 && data.events.length === 0;
+
+  const handleUnblock = async (id: string) => {
+    if (!confirm('Unblock this date?')) return;
+    try {
+      const r = await fetch(`${API}/api/availability/${id}`, { method: 'DELETE' });
+      const j = await r.json();
+      if (j.success && onRefresh) onRefresh();
+    } catch {}
+  };
+
+  const handleDeleteEvent = async (id: string) => {
+    if (!confirm('Delete this event?')) return;
+    try {
+      const r = await fetch(`${API}/api/events/${id}`, { method: 'DELETE' });
+      const j = await r.json();
+      if (j.success && onRefresh) onRefresh();
+    } catch {}
+  };
+
+  return (
+    <div style={{
+      background: C.ivory, borderRadius: 14,
+      border: `1px solid ${C.border}`,
+      padding: '16px 16px 14px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, color: C.dark, fontWeight: 500 }}>
+            {pretty}
+          </div>
+          {data.hot && (
+            <div style={{ fontSize: 10, color: '#B91C1C', marginTop: 2, fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>
+              ● Hot date{data.hot.note ? ` · ${data.hot.note}` : ''}
+            </div>
+          )}
+        </div>
+        <button onClick={onClose} style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: C.muted, padding: 4,
+        }}>
+          <X size={16} />
+        </button>
+      </div>
+
+      {nothingOnDay ? (
+        <div style={{ fontSize: 12, color: C.muted, fontStyle: 'italic', padding: '6px 0' }}>
+          Nothing scheduled.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {data.bookings.map((b, i) => (
+            <div key={'b-' + i} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', borderRadius: 10,
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            }}>
+              <Dot color={C.gold} filled />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.dark }}>
+                  {b.users?.name || b.client_name || 'Booking'}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                  {b.event_type || 'Event'}{b.event_time ? ` · ${b.event_time}` : ''}{b.venue ? ` · ${b.venue}` : ''}
+                </div>
+              </div>
+              {b.amount && (
+                <div style={{ fontSize: 12, color: C.goldDeep, fontWeight: 600 }}>
+                  ₹{fmtINR(b.amount)}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {data.events.map((ev, i) => (
+            <div key={'e-' + i} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', borderRadius: 10,
+              background: '#FEF5F5', border: '1px solid #F5D5D5',
+            }}>
+              <Dot color="#E5A5A5" filled />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.dark }}>
+                  {ev.title || 'Event'}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                  {ev.event_type || 'Trial'}{ev.event_time ? ` · ${ev.event_time}` : ''}
+                </div>
+              </div>
+              <button onClick={() => handleDeleteEvent(ev.id)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: C.muted, padding: 4,
+              }}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+
+          {data.blocked.map((bd, i) => (
+            <div key={'bd-' + i} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', borderRadius: 10,
+              background: C.pearl, border: `1px solid ${C.border}`,
+            }}>
+              <Dot color={C.muted} filled />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.dark }}>DND</div>
+                {bd.reason && (
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{bd.reason}</div>
+                )}
+              </div>
+              <button onClick={() => handleUnblock(bd.id)} style={{
+                background: 'transparent', border: `1px solid ${C.border}`,
+                borderRadius: 6, padding: '4px 10px', fontSize: 10, color: C.muted,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+                Unblock
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // List + add assistants per vendor. Per-event assignment comes in 9C.
 // Works for all tiers; usage caps come with pricing tier.
 // ══════════════════════════════════════════════════════════════════════════
