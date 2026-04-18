@@ -5146,12 +5146,175 @@ app.delete('/api/couple/vendors/:vendorId', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// COUPLE V2 — WhatsApp Templates (Session 10 Turn 7)
+// ══════════════════════════════════════════════════════════════
+
+// List templates for a couple
+app.get('/api/couple/wa-templates/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { data, error } = await supabase
+      .from('couple_whatsapp_templates')
+      .select('*')
+      .eq('couple_id', coupleId)
+      .order('context', { ascending: true })
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('wa-templates list error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Bulk seed defaults for a new couple
+app.post('/api/couple/wa-templates/bulk', async (req, res) => {
+  try {
+    const { couple_id, templates } = req.body || {};
+    if (!couple_id || !Array.isArray(templates) || templates.length === 0) {
+      return res.status(400).json({ success: false, error: 'couple_id and templates required' });
+    }
+    const rows = templates.map((t, i) => ({
+      couple_id,
+      context: t.context,
+      template_key: t.template_key || null,
+      label: t.label,
+      body: t.body,
+      is_default: !!t.is_default,
+      is_custom: false,
+      sort_order: t.sort_order != null ? t.sort_order : i,
+    }));
+    const { data, error } = await supabase
+      .from('couple_whatsapp_templates')
+      .insert(rows)
+      .select();
+    if (error) throw error;
+    await supabase.from('users').update({ wa_templates_seeded: true }).eq('id', couple_id);
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('wa-templates bulk error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create a custom template
+app.post('/api/couple/wa-templates', async (req, res) => {
+  try {
+    const { couple_id, context, label, body, sort_order } = req.body || {};
+    if (!couple_id || !context || !label || !body) {
+      return res.status(400).json({ success: false, error: 'couple_id, context, label, body required' });
+    }
+    const { data, error } = await supabase
+      .from('couple_whatsapp_templates')
+      .insert([{
+        couple_id, context, label, body,
+        is_default: false, is_custom: true,
+        sort_order: sort_order || 99,
+      }])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('wa-templates create error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update a template (edit body, change default flag, etc.)
+app.patch('/api/couple/wa-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const updates = { ...(req.body || {}), updated_at: new Date().toISOString() };
+
+    // If setting is_default=true, unset other defaults in same context first
+    if (updates.is_default === true) {
+      const { data: existing } = await supabase
+        .from('couple_whatsapp_templates').select('couple_id, context').eq('id', templateId).maybeSingle();
+      if (existing) {
+        await supabase
+          .from('couple_whatsapp_templates')
+          .update({ is_default: false })
+          .eq('couple_id', existing.couple_id)
+          .eq('context', existing.context)
+          .neq('id', templateId);
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('couple_whatsapp_templates')
+      .update(updates)
+      .eq('id', templateId)
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('wa-templates update error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete a template (only custom templates should be deleted)
+app.delete('/api/couple/wa-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const { error } = await supabase
+      .from('couple_whatsapp_templates').delete().eq('id', templateId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('wa-templates delete error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// COUPLE V2 — Feedback (Session 10 Turn 7)
+// ══════════════════════════════════════════════════════════════
+
+app.post('/api/couple/feedback', async (req, res) => {
+  try {
+    const { couple_id, rating, message, screen } = req.body || {};
+    if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    const { data, error } = await supabase
+      .from('couple_feedback')
+      .insert([{
+        couple_id,
+        rating: rating || null,
+        message: message || null,
+        screen: screen || null,
+      }])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('feedback error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Mark founding bride intro as shown
+app.patch('/api/couple/mark-founding-intro/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { error } = await supabase
+      .from('users')
+      .update({ founding_intro_shown: true })
+      .eq('id', coupleId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('mark founding intro error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── Co-Planner System ──
 
 // Generate co-planner invite link
 app.post('/api/co-planner/invite', async (req, res) => {
   try {
-    const { user_id } = req.body;
+    const { user_id, role, invitee_name } = req.body;
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
 
     const { data: existing } = await supabase.from('co_planners').select('id, status').eq('primary_user_id', user_id);
@@ -5181,7 +5344,13 @@ app.post('/api/co-planner/invite', async (req, res) => {
     let inviteCode = 'CP';
     for (let i = 0; i < 6; i++) inviteCode += chars[Math.floor(Math.random() * chars.length)];
 
-    await supabase.from('co_planners').insert([{ primary_user_id: user_id, invite_code: inviteCode, status: 'pending' }]);
+    await supabase.from('co_planners').insert([{
+      primary_user_id: user_id,
+      invite_code: inviteCode,
+      status: 'pending',
+      role: role || 'inner_circle',
+      invitee_name: invitee_name || null,
+    }]);
 
     const link = 'https://thedreamwedding.in/join/' + inviteCode;
     logActivity('co_planner_invite', `Co-planner invite: ${inviteCode} (cost: ${tokenCost})`);

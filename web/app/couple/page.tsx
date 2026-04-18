@@ -523,14 +523,6 @@ function totalGuestCount(guests: Guest[]): { headcount: number; households: numb
   return { headcount, households };
 }
 
-function buildWhatsAppNudge(bride: string, groom: string, guest: Guest, events: string[], weddingDate: string): string {
-  const pendingEvents = events.filter(ev => guest.event_invites?.[ev]?.invited && guest.event_invites?.[ev]?.rsvp === 'pending');
-  const evList = pendingEvents.length > 0 ? pendingEvents.join(', ') : 'our wedding';
-  const dateStr = weddingDate ? new Date(weddingDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
-  const coupleStr = groom ? `${bride} and ${groom}` : bride;
-  return `Hi ${guest.name}! 💛 Just a gentle reminder — ${coupleStr} would love to have you at ${evList}${dateStr ? ` on ${dateStr}` : ''}. Could you let us know if you'll be able to join? 🙏`;
-}
-
 // ─────────────────────────────────────────────────────────────
 // MOODBOARD TYPES + HELPERS
 // ─────────────────────────────────────────────────────────────
@@ -655,8 +647,343 @@ function vendorStatusCounts(vendors: Vendor[]): Record<VendorStatus, number> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// WHATSAPP TEMPLATE SYSTEM
+// Templates use {curly_braces} for variables. At send time we
+// resolve vars against the context object and open wa.me.
+// ─────────────────────────────────────────────────────────────
+
+type TemplateContext = 'guest' | 'vendor' | 'moodboard' | 'invite';
+
+interface WATemplate {
+  id: string;
+  couple_id: string;
+  context: TemplateContext;
+  template_key: string | null;
+  label: string;
+  body: string;
+  is_default: boolean;
+  is_custom: boolean;
+  sort_order: number;
+}
+
+// Default templates seeded on first use
+const DEFAULT_WA_TEMPLATES: Array<Partial<WATemplate> & { context: TemplateContext; label: string; body: string }> = [
+  // Guest templates
+  {
+    context: 'guest', template_key: 'rsvp_nudge', label: 'RSVP reminder', is_default: true, sort_order: 0,
+    body: "Hi {guest_name}! 💛 Gentle reminder — {couple_name} would love to have you at {events}{wedding_date_suffix}. Could you let us know if you'll be able to join? 🙏",
+  },
+  {
+    context: 'guest', template_key: 'wedding_details', label: 'Share wedding details', sort_order: 1,
+    body: "Hi {guest_name}! We can't wait to have you at {couple_name}'s wedding. Here are the details:\n\n{events_list}\n\n{wedding_date_suffix_clean}\nVenue: {venue}\n\nPlease do let us know if you have any questions. Looking forward to celebrating with you! 💛",
+  },
+  {
+    context: 'guest', template_key: 'thank_you', label: 'Post-wedding thank you', sort_order: 2,
+    body: "Dear {guest_name}, thank you so much for being part of {couple_name}'s special day. Your presence and blessings meant the world to us. We're so grateful. 💛",
+  },
+
+  // Vendor templates
+  {
+    context: 'vendor', template_key: 'vendor_greet', label: 'Initial outreach', is_default: true, sort_order: 0,
+    body: "Hi {vendor_name} team,\n\n{couple_name} is planning their wedding and came across your work. Would love to chat about availability and a quote.\n\nEvent: {event}\nDate: {wedding_date}\n\nLooking forward to hearing from you!",
+  },
+  {
+    context: 'vendor', template_key: 'vendor_quote_request', label: 'Ask for quote', sort_order: 1,
+    body: "Hi {vendor_name} team, could you please share a detailed quote for {event}? We'd love to understand your packages and options. Thank you!",
+  },
+  {
+    context: 'vendor', template_key: 'vendor_payment_reminder', label: 'Payment reminder', sort_order: 2,
+    body: "Hi {vendor_name} team, just a friendly note — the next payment of approximately {balance_due} is due soon. Please let me know if you'd like to confirm a date. Thank you!",
+  },
+
+  // Moodboard templates
+  {
+    context: 'moodboard', template_key: 'curated_share', label: 'Share curated view', is_default: true, sort_order: 0,
+    body: "✨ {couple_name}'s vision for {event}\n\nCome take a look at the moodboard we've curated — a few pieces that feel just right.\n\nWith love,\n{bride_name}",
+  },
+
+  // Invite templates
+  {
+    context: 'invite', template_key: 'invite_core_duo', label: 'Core Duo invite', is_default: true, sort_order: 0,
+    body: "Hi! 💛 I'm planning our wedding on The Dream Wedding and would love for you to plan it with me as my Core Duo. You'll have full access to everything.\n\nTap to join: {magic_link}",
+  },
+  {
+    context: 'invite', template_key: 'invite_inner_circle', label: 'Inner Circle invite', sort_order: 1,
+    body: "Hi! 💛 I'm planning our wedding on The Dream Wedding and would love your help. I'm giving you Inner Circle access — you'll see most things (except sensitive budget details).\n\nTap to join: {magic_link}",
+  },
+  {
+    context: 'invite', template_key: 'invite_bridesmaid', label: 'Bridesmaid invite', sort_order: 2,
+    body: "Hi! 💛 You're officially on my bridesmaid squad! I'd love you to help me build out the moodboard and keep tabs on the checklist. Tap to join:\n\n{magic_link}",
+  },
+];
+
+// Context to variable list — used in Settings UI
+const TEMPLATE_VARIABLES: Record<TemplateContext, string[]> = {
+  guest:     ['{guest_name}', '{couple_name}', '{bride_name}', '{groom_name}', '{events}', '{events_list}', '{wedding_date}', '{wedding_date_suffix}', '{wedding_date_suffix_clean}', '{venue}'],
+  vendor:    ['{vendor_name}', '{couple_name}', '{bride_name}', '{groom_name}', '{event}', '{balance_due}', '{wedding_date}'],
+  moodboard: ['{couple_name}', '{bride_name}', '{groom_name}', '{event}', '{pin_count}'],
+  invite:    ['{inviter_name}', '{role}', '{magic_link}', '{couple_name}'],
+};
+
+// Resolve template variables. Unknown vars pass through unchanged.
+function renderTemplate(body: string, vars: Record<string, string | undefined>): string {
+  return body.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? '');
+}
+
+// Get the default template for a given context, else the first one
+function getDefaultTemplate(templates: WATemplate[], context: TemplateContext): WATemplate | null {
+  const inCtx = templates.filter(t => t.context === context);
+  if (inCtx.length === 0) return null;
+  return inCtx.find(t => t.is_default) || inCtx[0];
+}
+
+function templatesForContext(templates: WATemplate[], context: TemplateContext): WATemplate[] {
+  return templates
+    .filter(t => t.context === context)
+    .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+// Format phone for wa.me — add 91 country code if missing
+function phoneForWhatsApp(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  if (digits.length === 10) return '91' + digits;
+  return digits;
+}
+
+// Build wedding date pretty string + events list for template vars
+function buildCoupleVars(session: CoupleSession): Record<string, string> {
+  const coupleName = session.partnerName ? `${session.name} & ${session.partnerName}` : session.name;
+  const dateStr = session.weddingDate
+    ? new Date(session.weddingDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+  return {
+    couple_name: coupleName,
+    bride_name: session.name,
+    groom_name: session.partnerName || '',
+    wedding_date: dateStr,
+    wedding_date_suffix: dateStr ? ` on ${dateStr}` : '',
+    wedding_date_suffix_clean: dateStr ? `Date: ${dateStr}` : '',
+    events: session.events.join(', '),
+    events_list: session.events.map(e => `• ${e}`).join('\n'),
+    venue: (session as any).venue || '',
+  };
+}
+
+// Open WhatsApp with a rendered template
+function openWhatsApp(phone: string | null, message: string) {
+  const p = phoneForWhatsApp(phone);
+  const base = p ? `https://wa.me/${p}` : `https://wa.me/`;
+  window.open(`${base}?text=${encodeURIComponent(message)}`, '_blank');
+}
+
+// ─────────────────────────────────────────────────────────────
 // SHARED UI
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// WHATSAPP BUTTON — smart default picker
+// If only one template exists, opens WhatsApp immediately.
+// If 2+, shows picker sheet first.
+// ─────────────────────────────────────────────────────────────
+
+interface WhatsAppButtonProps {
+  context: TemplateContext;
+  templates: WATemplate[];
+  phone?: string | null;             // If null, uses generic wa.me (user picks contact)
+  vars: Record<string, string>;      // All variable values for this use
+  // Optional presentation overrides — each usage site can style differently
+  children?: React.ReactNode;        // If provided, renders as a wrapper around children
+  label?: string;                    // Button text (default: "WhatsApp")
+  compact?: boolean;                 // Small icon-only mode
+  iconOnly?: boolean;                // Just the icon, no label
+  style?: React.CSSProperties;       // Extra style override
+  onBeforeSend?: () => void | Promise<void>; // Called before WhatsApp opens
+}
+
+function WhatsAppButton({
+  context, templates, phone, vars, children, label = 'WhatsApp',
+  compact, iconOnly, style, onBeforeSend,
+}: WhatsAppButtonProps) {
+  const [showPicker, setShowPicker] = useState(false);
+  const ctxTemplates = templatesForContext(templates, context);
+
+  const send = async (template: WATemplate) => {
+    if (onBeforeSend) await onBeforeSend();
+    const message = renderTemplate(template.body, vars);
+    openWhatsApp(phone || null, message);
+  };
+
+  const handleTap = async () => {
+    if (ctxTemplates.length === 0) {
+      // No templates yet — send blank or with minimal greeting
+      if (onBeforeSend) await onBeforeSend();
+      openWhatsApp(phone || null, '');
+      return;
+    }
+    if (ctxTemplates.length === 1) {
+      await send(ctxTemplates[0]);
+      return;
+    }
+    // 2+ templates → picker
+    setShowPicker(true);
+  };
+
+  // Wrapper-style usage — clickable children
+  if (children) {
+    return (
+      <>
+        <div onClick={handleTap} style={{ cursor: 'pointer' }}>{children}</div>
+        {showPicker && (
+          <TemplatePickerSheet
+            templates={ctxTemplates}
+            vars={vars}
+            onPick={async t => { setShowPicker(false); await send(t); }}
+            onClose={() => setShowPicker(false)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Default button rendering
+  if (iconOnly) {
+    return (
+      <>
+        <button onClick={handleTap} style={{
+          width: 44, background: C.goldSoft,
+          border: 'none', borderLeft: `1px solid ${C.border}`,
+          cursor: 'pointer', display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, ...style,
+        }}>
+          <Phone size={15} color={C.gold} />
+        </button>
+        {showPicker && (
+          <TemplatePickerSheet
+            templates={ctxTemplates}
+            vars={vars}
+            onPick={async t => { setShowPicker(false); await send(t); }}
+            onClose={() => setShowPicker(false)}
+          />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleTap}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: compact ? '8px 12px' : '10px 14px', borderRadius: 10,
+          background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+          cursor: 'pointer', ...style,
+        }}
+      >
+        <Phone size={compact ? 12 : 13} color={C.gold} />
+        <span style={{
+          fontSize: compact ? 11 : 12, color: C.goldDeep,
+          fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+        }}>
+          {label}
+        </span>
+      </button>
+      {showPicker && (
+        <TemplatePickerSheet
+          templates={ctxTemplates}
+          vars={vars}
+          onPick={async t => { setShowPicker(false); await send(t); }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// Template picker bottom sheet
+function TemplatePickerSheet({ templates, vars, onPick, onClose }: {
+  templates: WATemplate[];
+  vars: Record<string, string>;
+  onPick: (t: WATemplate) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 210, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '70vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+        <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          Pick a message
+        </p>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+          Edit any of these in Settings → Templates.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+          {templates.map(t => {
+            const preview = renderTemplate(t.body, vars).slice(0, 100);
+            return (
+              <button
+                key={t.id}
+                onClick={() => onPick(t)}
+                style={{
+                  display: 'flex', flexDirection: 'column' as const,
+                  background: C.ivory, border: `1px solid ${t.is_default ? C.goldBorder : C.border}`,
+                  borderRadius: 12, padding: '12px 14px',
+                  cursor: 'pointer', textAlign: 'left' as const,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                    {t.label}
+                  </span>
+                  {t.is_default && (
+                    <span style={{
+                      fontSize: 9, color: C.goldDeep, background: C.goldSoft,
+                      border: `1px solid ${C.goldBorder}`, borderRadius: 6,
+                      padding: '1px 5px', fontFamily: 'DM Sans, sans-serif',
+                      fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' as const,
+                    }}>Default</span>
+                  )}
+                </div>
+                <p style={{
+                  margin: 0, fontSize: 11, color: C.muted,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
+                  lineHeight: '15px',
+                  overflow: 'hidden' as const,
+                  display: '-webkit-box' as any,
+                  WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any,
+                }}>
+                  {preview}{preview.length >= 100 ? '…' : ''}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <GhostButton label="Cancel" onTap={onClose} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function GoldButton({ label, onTap, fullWidth = false }: {
   label: string; onTap: () => void; fullWidth?: boolean;
@@ -749,6 +1076,8 @@ function useCoupleData(session: CoupleSession | null) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [pins, setPins] = useState<MoodboardPin[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [waTemplates, setWaTemplates] = useState<WATemplate[]>([]);
+  const [showFoundingIntro, setShowFoundingIntro] = useState(false);
   const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(false);
 
@@ -786,8 +1115,8 @@ function useCoupleData(session: CoupleSession | null) {
         const userD = await userRes.json();
         const alreadySeeded = !!userD?.data?.checklist_seeded;
 
-        // Parallel load: checklist, budget, expenses, shagun, guests, moodboard, vendors
-        const [checklistRes, budgetRes, expensesRes, shagunRes, guestsRes, pinsRes, vendorsRes] = await Promise.all([
+        // Parallel load: checklist, budget, expenses, shagun, guests, moodboard, vendors, templates
+        const [checklistRes, budgetRes, expensesRes, shagunRes, guestsRes, pinsRes, vendorsRes, templatesRes] = await Promise.all([
           fetch(`${API}/api/couple/checklist/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/budget/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/expenses/${session.id}`).then(r => r.json()),
@@ -795,7 +1124,28 @@ function useCoupleData(session: CoupleSession | null) {
           fetch(`${API}/api/couple/guests/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/moodboard/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/vendors/${session.id}`).then(r => r.json()),
+          fetch(`${API}/api/couple/wa-templates/${session.id}`).then(r => r.json()),
         ]);
+
+        // Seed WhatsApp templates if user has never been seeded
+        const templatesSeeded = !!userD?.data?.wa_templates_seeded;
+        let finalTemplates: WATemplate[] = templatesRes.success ? (templatesRes.data || []) : [];
+        if (!templatesSeeded && finalTemplates.length === 0) {
+          try {
+            const seedRes = await fetch(`${API}/api/couple/wa-templates/bulk`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ couple_id: session.id, templates: DEFAULT_WA_TEMPLATES }),
+            });
+            const seedD = await seedRes.json();
+            if (seedD.success) finalTemplates = seedD.data || [];
+          } catch {}
+        }
+
+        // Check if founding bride intro should show
+        if (mounted && userD?.data?.founding_bride && !userD?.data?.founding_intro_shown) {
+          setShowFoundingIntro(true);
+        }
 
         const existing: ChecklistTask[] = checklistRes.success ? (checklistRes.data || []) : [];
 
@@ -816,13 +1166,14 @@ function useCoupleData(session: CoupleSession | null) {
           if (mounted) { setTasks(existing); setSeeded(alreadySeeded); }
         }
 
-        // Budget/expenses/shagun/guests/moodboard/vendors
+        // Budget/expenses/shagun/guests/moodboard/vendors/templates
         if (mounted && budgetRes.success)   setBudget(budgetRes.data);
         if (mounted && expensesRes.success) setExpenses(expensesRes.data || []);
         if (mounted && shagunRes.success)   setShagun(shagunRes.data || []);
         if (mounted && guestsRes.success)   setGuests(guestsRes.data || []);
         if (mounted && pinsRes.success)     setPins(pinsRes.data || []);
         if (mounted && vendorsRes.success)  setVendors(vendorsRes.data || []);
+        if (mounted)                        setWaTemplates(finalTemplates);
       } catch (e) {
         // Network failure — fall through silently
       }
@@ -1113,6 +1464,83 @@ function useCoupleData(session: CoupleSession | null) {
     } catch {}
   };
 
+  // ── WhatsApp template mutations ─────────────────────────────
+
+  const addTemplate = async (payload: Partial<WATemplate>) => {
+    if (!session?.id) return null;
+    try {
+      const res = await fetch(`${API}/api/couple/wa-templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, couple_id: session.id }),
+      });
+      const d = await res.json();
+      if (d.success && d.data) {
+        setWaTemplates(prev => [...prev, d.data]);
+        return d.data as WATemplate;
+      }
+    } catch {}
+    return null;
+  };
+
+  const updateTemplate = async (id: string, patch: Partial<WATemplate>) => {
+    // Local optimistic update — handle is_default toggle (unset siblings)
+    setWaTemplates(prev => prev.map(t => {
+      if (t.id === id) return { ...t, ...patch } as WATemplate;
+      if (patch.is_default === true) {
+        const target = prev.find(x => x.id === id);
+        if (target && t.context === target.context) return { ...t, is_default: false };
+      }
+      return t;
+    }));
+    try {
+      const res = await fetch(`${API}/api/couple/wa-templates/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const d = await res.json();
+      if (d.success && d.data) {
+        // Refetch to ensure server-side default-unset is reflected
+        const listRes = await fetch(`${API}/api/couple/wa-templates/${session?.id}`);
+        const listD = await listRes.json();
+        if (listD.success) setWaTemplates(listD.data || []);
+      }
+    } catch {}
+  };
+
+  const deleteTemplate = async (id: string) => {
+    setWaTemplates(prev => prev.filter(t => t.id !== id));
+    try {
+      await fetch(`${API}/api/couple/wa-templates/${id}`, { method: 'DELETE' });
+    } catch {}
+  };
+
+  // Submit feedback
+  const submitFeedback = async (payload: { rating: string; message: string; screen: string }) => {
+    if (!session?.id) return false;
+    try {
+      const res = await fetch(`${API}/api/couple/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, couple_id: session.id }),
+      });
+      const d = await res.json();
+      return !!d.success;
+    } catch {
+      return false;
+    }
+  };
+
+  // Mark founding bride intro as shown
+  const dismissFoundingIntro = async () => {
+    setShowFoundingIntro(false);
+    if (!session?.id) return;
+    try {
+      await fetch(`${API}/api/couple/mark-founding-intro/${session.id}`, { method: 'PATCH' });
+    } catch {}
+  };
+
   return {
     tasks, loading, seeded, refreshTasks, toggleComplete, updateTask, deleteTask, addTask,
     budget, expenses, shagun, refreshBudget,
@@ -1121,6 +1549,9 @@ function useCoupleData(session: CoupleSession | null) {
     guests, addGuest, updateGuest, deleteGuest,
     pins, fetchOGPreview, addPin, updatePin, deletePin,
     vendors, addVendor, updateVendor, deleteVendor,
+    waTemplates, addTemplate, updateTemplate, deleteTemplate,
+    submitFeedback,
+    showFoundingIntro, dismissFoundingIntro,
   };
 }
 
@@ -3588,12 +4019,13 @@ function ReceiptViewer({ expense, canEdit, onClose, onEdit }: {
 type GuestFilter = 'all' | 'bride' | 'groom' | 'pending' | 'confirmed' | 'declined';
 
 function GuestTool({
-  session, guests, loading,
+  session, guests, loading, templates,
   onAdd, onUpdate, onDelete, onBack,
 }: {
   session: CoupleSession;
   guests: Guest[];
   loading: boolean;
+  templates: WATemplate[];
   onAdd: (payload: Partial<Guest>) => Promise<Guest | null>;
   onUpdate: (id: string, patch: Partial<Guest>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -3857,13 +4289,11 @@ function GuestTool({
                 guest={g}
                 events={session.events}
                 canEdit={canEditTool}
+                session={session}
+                templates={templates}
                 onTap={() => setEditingGuest(g)}
-                onNudge={async () => {
-                  const msg = buildWhatsAppNudge(session.name, session.partnerName, g, session.events, session.weddingDate);
-                  const phone = (g.phone || '').replace(/\D/g, '');
-                  if (!phone) return;
+                onNudgeSent={async () => {
                   await onUpdate(g.id, { nudge_sent_at: new Date().toISOString() });
-                  window.open(`https://wa.me/${phone.length > 10 ? phone : '91' + phone}?text=${encodeURIComponent(msg)}`, '_blank');
                 }}
               />
             ))}
@@ -3925,9 +4355,10 @@ function GuestTool({
 }
 
 // Single guest row
-function GuestRow({ guest, events, canEdit: canEditRow, onTap, onNudge }: {
+function GuestRow({ guest, events, canEdit: canEditRow, session, templates, onTap, onNudgeSent }: {
   guest: Guest; events: string[]; canEdit: boolean;
-  onTap: () => void; onNudge: () => void;
+  session: CoupleSession; templates: WATemplate[];
+  onTap: () => void; onNudgeSent: () => void;
 }) {
   const invites = guest.event_invites || {};
   const invitedEvents = events.filter(ev => invites[ev]?.invited);
@@ -3938,6 +4369,16 @@ function GuestRow({ guest, events, canEdit: canEditRow, onTap, onNudge }: {
   const sideColor = guest.side === 'bride' ? '#B8629E' : '#5A8CA8';
   const hasPhone = !!(guest.phone && guest.phone.replace(/\D/g, '').length >= 10);
   const canNudge = hasPhone && pendingCount > 0 && canEditRow;
+
+  // Build template vars for this guest
+  const coupleVars = buildCoupleVars(session);
+  const pendingEvents = events.filter(ev => invites[ev]?.invited && invites[ev]?.rsvp === 'pending');
+  const vars = {
+    ...coupleVars,
+    guest_name: guest.name,
+    events: pendingEvents.length > 0 ? pendingEvents.join(', ') : invitedEvents.join(', '),
+    events_list: (pendingEvents.length > 0 ? pendingEvents : invitedEvents).map(e => `• ${e}`).join('\n'),
+  };
 
   return (
     <div style={{
@@ -4026,18 +4467,14 @@ function GuestRow({ guest, events, canEdit: canEditRow, onTap, onNudge }: {
         )}
       </button>
       {canNudge && (
-        <button
-          onClick={onNudge}
-          style={{
-            width: 44, background: C.goldSoft,
-            border: 'none', borderLeft: `1px solid ${C.border}`,
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <Phone size={15} color={C.gold} />
-        </button>
+        <WhatsAppButton
+          context="guest"
+          templates={templates}
+          phone={guest.phone}
+          vars={vars}
+          iconOnly
+          onBeforeSend={onNudgeSent}
+        />
       )}
     </div>
   );
@@ -4550,12 +4987,13 @@ function bulkBtnStyle(active: boolean): React.CSSProperties {
 // ─────────────────────────────────────────────────────────────
 
 function MoodboardTool({
-  session, pins, loading,
+  session, pins, loading, templates,
   onFetchPreview, onAdd, onUpdate, onDelete, onBack,
 }: {
   session: CoupleSession;
   pins: MoodboardPin[];
   loading: boolean;
+  templates: WATemplate[];
   onFetchPreview: (url: string) => Promise<OGPreview | null>;
   onAdd: (payload: Partial<MoodboardPin>) => Promise<MoodboardPin | null>;
   onUpdate: (id: string, patch: Partial<MoodboardPin>) => Promise<void>;
@@ -4770,6 +5208,7 @@ function MoodboardTool({
           session={session}
           pins={pins.filter(p => p.event === activeEvent && !p.is_suggestion)}
           event={activeEvent}
+          templates={templates}
           onUpdatePin={onUpdate}
           onClose={() => setShowCurate(false)}
         />
@@ -5420,10 +5859,11 @@ function TypeChoice({ icon, label, sub, onTap }: { icon: React.ReactNode; label:
 }
 
 // Curated share modal — pick pins, get shareable text summary
-function CuratedShareModal({ session, pins, event, onUpdatePin, onClose }: {
+function CuratedShareModal({ session, pins, event, templates, onUpdatePin, onClose }: {
   session: CoupleSession;
   pins: MoodboardPin[];
   event: string;
+  templates: WATemplate[];
   onUpdatePin: (id: string, patch: Partial<MoodboardPin>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -5441,21 +5881,21 @@ function CuratedShareModal({ session, pins, event, onUpdatePin, onClose }: {
     });
   };
 
-  const saveAndShare = async () => {
-    // Update curated flags for all pins in this event
+  const coupleVars = buildCoupleVars(session);
+  const vars = {
+    ...coupleVars,
+    event,
+    pin_count: String(selected.size),
+  };
+
+  const persistCurated = async () => {
     for (const p of pins) {
       const shouldBe = selected.has(p.id);
       if (p.is_curated !== shouldBe) {
         await onUpdatePin(p.id, { is_curated: shouldBe });
       }
     }
-    // Share to WhatsApp
-    const coupleName = session.partnerName ? `${session.name} & ${session.partnerName}` : session.name;
-    const text = `✨ ${coupleName}'s vision for ${event}\n\nCome take a look at the moodboard we've curated — a few pieces that feel just right.\n\n(Tap to open the full view — coming soon)\n\nWith love,\n${session.name}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-    onClose();
   };
-
   return (
     <div
       style={{
@@ -5545,22 +5985,22 @@ function CuratedShareModal({ session, pins, event, onUpdatePin, onClose }: {
           <div style={{ flex: 1 }}>
             <GhostButton label="Cancel" onTap={onClose} />
           </div>
-          <button
-            onClick={saveAndShare} disabled={selected.size === 0}
-            style={{
-              padding: '12px 24px', borderRadius: 12,
-              background: C.dark, border: 'none',
-              cursor: selected.size > 0 ? 'pointer' : 'default',
-              color: C.gold, fontFamily: 'DM Sans, sans-serif',
-              fontSize: 12, fontWeight: 400, letterSpacing: '1.5px',
-              textTransform: 'uppercase' as const,
-              opacity: selected.size > 0 ? 1 : 0.4,
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            <Share2 size={12} color={C.gold} />
-            Share
-          </button>
+          <div style={{ opacity: selected.size > 0 ? 1 : 0.4, pointerEvents: selected.size > 0 ? 'auto' : 'none' }}>
+            <WhatsAppButton
+              context="moodboard"
+              templates={templates}
+              vars={vars}
+              label="Share"
+              style={{
+                padding: '12px 24px', borderRadius: 12,
+                background: C.dark, border: 'none',
+              }}
+              onBeforeSend={async () => {
+                await persistCurated();
+                onClose();
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -5681,7 +6121,7 @@ function SuggestionsModal({ suggestions, onApprove, onReject, onClose }: {
 // ─────────────────────────────────────────────────────────────
 
 function VendorTool({
-  session, vendors, expenses, loading,
+  session, vendors, expenses, loading, templates,
   onAdd, onUpdate, onDelete,
   onAddExpense, onUpdateExpense, onDeleteExpense,
   onBack,
@@ -5690,6 +6130,7 @@ function VendorTool({
   vendors: Vendor[];
   expenses: Expense[];
   loading: boolean;
+  templates: WATemplate[];
   onAdd: (payload: Partial<Vendor>) => Promise<Vendor | null>;
   onUpdate: (id: string, patch: Partial<Vendor>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -5884,6 +6325,7 @@ function VendorTool({
           expenses={expensesForVendor(expenses, viewingVendor.name)}
           canEdit={canEditTool}
           canSeeMoney={canSeeMoney}
+          templates={templates}
           onClose={() => setViewingVendor(null)}
           onUpdate={async (patch) => {
             await onUpdate(viewingVendor.id, patch);
@@ -6291,7 +6733,7 @@ function VendorEditor({ mode, session, events, vendor, onClose, onSave, onDelete
 
 // Vendor detail sheet — shows vendor + their linked expenses + quick payment log
 function VendorDetailSheet({
-  session, vendor, expenses, canEdit: canEditVendor, canSeeMoney,
+  session, vendor, expenses, canEdit: canEditVendor, canSeeMoney, templates,
   onClose, onUpdate, onDelete,
   onAddExpense, onUpdateExpense, onDeleteExpense,
 }: {
@@ -6300,6 +6742,7 @@ function VendorDetailSheet({
   expenses: Expense[];
   canEdit: boolean;
   canSeeMoney: boolean;
+  templates: WATemplate[];
   onClose: () => void;
   onUpdate: (patch: Partial<Vendor>) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -6316,11 +6759,13 @@ function VendorDetailSheet({
   const balanceDue = vendorBalanceDue(vendor, expenses);
   const hasPhone = !!(vendor.phone && vendor.phone.replace(/\D/g, '').length >= 10);
 
-  const whatsAppOpen = () => {
-    if (!hasPhone) return;
-    const phone = (vendor.phone || '').replace(/\D/g, '');
-    const msg = `Hi ${vendor.name} team,`;
-    window.open(`https://wa.me/${phone.length > 10 ? phone : '91' + phone}?text=${encodeURIComponent(msg)}`, '_blank');
+  // Build template vars for this vendor
+  const coupleVars = buildCoupleVars(session);
+  const vars = {
+    ...coupleVars,
+    vendor_name: vendor.name,
+    event: vendor.events.join(', ') || 'our wedding',
+    balance_due: balanceDue > 0 ? fmtINRFull(balanceDue) : '',
   };
 
   return (
@@ -6380,14 +6825,16 @@ function VendorDetailSheet({
         {/* Quick actions */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' as const }}>
           {hasPhone && (
-            <button onClick={whatsAppOpen} style={{
-              flex: 1, minWidth: 120, padding: '10px 12px', borderRadius: 10,
-              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            }}>
-              <Phone size={13} color={C.gold} />
-              <span style={{ fontSize: 12, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>WhatsApp</span>
-            </button>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <WhatsAppButton
+                context="vendor"
+                templates={templates}
+                phone={vendor.phone}
+                vars={vars}
+                label="WhatsApp"
+                style={{ width: '100%' }}
+              />
+            </div>
           )}
           {vendor.website && (
             <a
@@ -6609,17 +7056,57 @@ function VendorDetailSheet({
 // CIRCLE SCREEN
 // ─────────────────────────────────────────────────────────────
 
-function CircleScreen({ session }: { session: CoupleSession }) {
+function CircleScreen({ session, templates }: { session: CoupleSession; templates: WATemplate[] }) {
   const [collaborators, setCollaborators] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [generatedInvite, setGeneratedInvite] = useState<{ link: string; role: string; template_key: string } | null>(null);
+
+  const refreshCollaborators = async () => {
+    try {
+      const res = await fetch(`${API}/api/co-planner/list/${session.id}`);
+      const d = await res.json();
+      if (d.success) setCollaborators(d.data || []);
+    } catch {}
+  };
 
   useEffect(() => {
-    fetch(`${API}/api/co-planner/list/${session.id}`)
-      .then(r => r.json())
-      .then(d => { if (d.success) setCollaborators(d.data || []); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    refreshCollaborators().finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
+
+  const generateInvite = async (role: 'core_duo' | 'inner_circle' | 'bridesmaid') => {
+    setInviting(true); setInviteError('');
+    try {
+      const res = await fetch(`${API}/api/co-planner/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: session.id }),
+      });
+      const d = await res.json();
+      if (!d.success) {
+        setInviteError(d.error || 'Could not generate invite');
+        setInviting(false);
+        return;
+      }
+      const templateKey = role === 'core_duo' ? 'invite_core_duo'
+        : role === 'inner_circle' ? 'invite_inner_circle'
+        : 'invite_bridesmaid';
+      setGeneratedInvite({ link: d.data.link, role, template_key: templateKey });
+      await refreshCollaborators();
+    } catch (e) {
+      setInviteError('Network error. Try again.');
+    }
+    setInviting(false);
+  };
+
+  const closeInviteFlow = () => {
+    setShowInvite(false);
+    setGeneratedInvite(null);
+    setInviteError('');
+  };
 
   const roleLabels: Record<string, string> = {
     core_duo: 'Core Duo', inner_circle: 'Inner Circle',
@@ -6627,7 +7114,7 @@ function CircleScreen({ session }: { session: CoupleSession }) {
   };
 
   return (
-    <div style={{ padding: '72px 24px 100px' }}>
+    <div style={{ padding: '72px 20px 100px' }}>
       <h1 style={{
         fontFamily: 'Playfair Display, serif', fontSize: 24,
         color: C.dark, margin: '0 0 4px', fontWeight: 400,
@@ -6636,28 +7123,46 @@ function CircleScreen({ session }: { session: CoupleSession }) {
         The people helping you plan.
       </p>
 
+      {/* Invite button */}
+      <button
+        onClick={() => setShowInvite(true)}
+        style={{
+          width: '100%', padding: '14px', borderRadius: 12,
+          background: C.dark, border: 'none', cursor: 'pointer',
+          color: C.gold, fontFamily: 'DM Sans, sans-serif',
+          fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, marginBottom: 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        <Plus size={14} color={C.gold} />
+        Invite someone
+      </button>
+
+      {/* Role explainer */}
       <div style={{
         background: C.pearl, border: `1px solid ${C.border}`,
         borderRadius: 14, padding: '16px 18px', marginBottom: 24,
       }}>
         <p style={{
-          margin: '0 0 10px', fontSize: 11, color: C.muted, fontWeight: 500,
+          margin: '0 0 10px', fontSize: 10, color: C.muted, fontWeight: 500,
           letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
         }}>Roles</p>
         {[
-          { role: 'Core Duo',     desc: 'Full access. For your partner.'                                        },
-          { role: 'Inner Circle', desc: 'Most things, not your budget details. For parents and siblings.'       },
-          { role: 'Bridesmaid',   desc: 'Moodboard suggestions and checklist view. For friends.'               },
+          { role: 'Core Duo',     desc: 'Full access. For your partner.'                                  },
+          { role: 'Inner Circle', desc: 'Most things, not sensitive budget details. For parents.'         },
+          { role: 'Bridesmaid',   desc: 'Moodboard suggestions and checklist view. For close friends.'    },
         ].map(r => (
-          <div key={r.role} style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.goldDeep, fontWeight: 500, fontFamily: 'DM Sans, sans-serif', minWidth: 100 }}>{r.role}</span>
-            <span style={{ fontSize: 12, color: C.muted, fontWeight: 300, fontFamily: 'DM Sans, sans-serif' }}>{r.desc}</span>
+          <div key={r.role} style={{ marginBottom: 8, display: 'flex', gap: 10 }}>
+            <span style={{ fontSize: 12, color: C.goldDeep, fontWeight: 500, fontFamily: 'DM Sans, sans-serif', minWidth: 96 }}>{r.role}</span>
+            <span style={{ fontSize: 12, color: C.muted, fontWeight: 300, fontFamily: 'DM Sans, sans-serif', flex: 1 }}>{r.desc}</span>
           </div>
         ))}
       </div>
 
+      {/* Collaborator list */}
       {loading ? (
-        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Loading...</p>
+        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
       ) : collaborators.length === 0 ? (
         <div style={{
           background: C.ivory, border: `1px solid ${C.border}`,
@@ -6691,18 +7196,518 @@ function CircleScreen({ session }: { session: CoupleSession }) {
                   {roleLabels[c.role] || 'Co-planner'} · {c.status === 'active' ? 'Active' : 'Invite sent'}
                 </p>
               </div>
+              {c.status === 'pending' && c.invite_code && (
+                <button
+                  onClick={() => {
+                    const link = `https://thedreamwedding.in/join/${c.invite_code}`;
+                    navigator.clipboard?.writeText(link);
+                  }}
+                  style={{
+                    padding: '6px 10px', borderRadius: 8,
+                    background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                    fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                  }}
+                >
+                  Copy link
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
+      {/* Invite modal */}
+      {showInvite && (
+        <InviteModal
+          session={session}
+          templates={templates}
+          generated={generatedInvite}
+          inviting={inviting}
+          error={inviteError}
+          onGenerate={generateInvite}
+          onClose={closeInviteFlow}
+        />
+      )}
+    </div>
+  );
+}
+
+// Invite generation modal — role pick + template-driven share
+function InviteModal({
+  session, templates, generated, inviting, error, onGenerate, onClose,
+}: {
+  session: CoupleSession;
+  templates: WATemplate[];
+  generated: { link: string; role: string; template_key: string } | null;
+  inviting: boolean;
+  error: string;
+  onGenerate: (role: 'core_duo' | 'inner_circle' | 'bridesmaid') => Promise<void>;
+  onClose: () => void;
+}) {
+  const roleOptions: Array<{ id: 'core_duo' | 'inner_circle' | 'bridesmaid'; label: string; desc: string }> = [
+    { id: 'core_duo',     label: 'Core Duo',     desc: 'Full access. Usually your partner.' },
+    { id: 'inner_circle', label: 'Inner Circle', desc: 'Most things, not sensitive budget details.' },
+    { id: 'bridesmaid',   label: 'Bridesmaid',   desc: 'Moodboard suggestions, checklist view.' },
+  ];
+
+  const coupleVars = buildCoupleVars(session);
+
+  // If we have a generated invite, find the matching template
+  const inviteTemplates = templates.filter(t => t.context === 'invite');
+  const matchedTemplate = generated
+    ? inviteTemplates.find(t => t.template_key === generated.template_key) || inviteTemplates[0]
+    : null;
+
+  const shareVars = generated ? {
+    ...coupleVars,
+    inviter_name: session.name,
+    role: roleOptions.find(r => r.id === generated.role)?.label || 'collaborator',
+    magic_link: generated.link,
+  } : {};
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        {!generated ? (
+          <>
+            <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+              Who are you inviting?
+            </p>
+            <p style={{ margin: '0 0 18px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              Pick their role. You can always change it later.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+              {roleOptions.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => onGenerate(r.id)}
+                  disabled={inviting}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    background: C.ivory, border: `1px solid ${C.border}`,
+                    borderRadius: 12, padding: '14px 16px', cursor: inviting ? 'default' : 'pointer',
+                    textAlign: 'left' as const, width: '100%',
+                    opacity: inviting ? 0.5 : 1,
+                  }}
+                >
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12,
+                    background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <Users size={16} color={C.gold} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{r.label}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{r.desc}</p>
+                  </div>
+                  <ChevronRight size={14} color={C.mutedLight} />
+                </button>
+              ))}
+            </div>
+
+            {error && <div style={{ marginTop: 14 }}><ErrorBanner msg={error} /></div>}
+
+            <div style={{ marginTop: 18 }}>
+              <GhostButton label="Cancel" onTap={onClose} />
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+              Invite ready.
+            </p>
+            <p style={{ margin: '0 0 18px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              Share it with them on WhatsApp, or copy the link.
+            </p>
+
+            <div style={{
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+              borderRadius: 10, padding: '12px 14px', marginBottom: 14,
+            }}>
+              <p style={{
+                margin: 0, fontSize: 10, color: C.goldDeep, fontWeight: 500,
+                letterSpacing: '1px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+              }}>Magic link</p>
+              <p style={{
+                margin: '4px 0 0', fontSize: 13, color: C.dark, fontFamily: 'monospace' as const,
+                wordBreak: 'break-all' as const, lineHeight: '18px',
+              }}>
+                {generated.link}
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+              <button
+                onClick={() => navigator.clipboard?.writeText(generated.link)}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: 10,
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                  fontSize: 12, fontWeight: 500,
+                }}
+              >
+                Copy link
+              </button>
+              <div style={{ flex: 1 }}>
+                <WhatsAppButton
+                  context="invite"
+                  templates={matchedTemplate ? [matchedTemplate] : inviteTemplates}
+                  vars={shareVars}
+                  label="Share on WhatsApp"
+                  style={{ width: '100%' }}
+                  onBeforeSend={onClose}
+                />
+              </div>
+            </div>
+
+            <GhostButton label="Done" onTap={onClose} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// TEMPLATES SETTINGS SCREEN
+// ─────────────────────────────────────────────────────────────
+
+function TemplatesScreen({
+  session, templates,
+  onUpdate, onAdd, onDelete, onBack,
+}: {
+  session: CoupleSession;
+  templates: WATemplate[];
+  onUpdate: (id: string, patch: Partial<WATemplate>) => Promise<void>;
+  onAdd: (payload: Partial<WATemplate>) => Promise<WATemplate | null>;
+  onDelete: (id: string) => Promise<void>;
+  onBack: () => void;
+}) {
+  const [editingTemplate, setEditingTemplate] = useState<WATemplate | null>(null);
+  const [addContext, setAddContext] = useState<TemplateContext | null>(null);
+
+  const contexts: { id: TemplateContext; label: string; description: string }[] = [
+    { id: 'guest',     label: 'Guests',    description: 'RSVP nudges, details, thank-yous' },
+    { id: 'vendor',    label: 'Vendors',   description: 'Outreach, quotes, payment reminders' },
+    { id: 'moodboard', label: 'Moodboard', description: 'Curated vision shares' },
+    { id: 'invite',    label: 'Circle',    description: 'CoShare invites by role' },
+  ];
+
+  return (
+    <div style={{ padding: '0 0 60px' }}>
+      {/* Sticky header */}
       <div style={{
-        marginTop: 16, padding: '12px 16px',
-        background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12,
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '72px 20px 16px', background: C.cream,
+        position: 'sticky' as const, top: 0, zIndex: 30,
+        borderBottom: `1px solid ${C.border}`,
       }}>
-        <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px' }}>
-          💛 Invite links coming in the next update. For now, share your planning progress directly from each tool.
+        <button onClick={onBack} style={{
+          width: 36, height: 36, borderRadius: 18, background: C.ivory,
+          border: `1px solid ${C.border}`, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+        }}>
+          <ChevronRight size={16} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <div>
+          <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+            Message templates
+          </p>
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            Personalise what goes out on WhatsApp
+          </p>
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        {contexts.map(ctx => {
+          const list = templatesForContext(templates, ctx.id);
+          return (
+            <div key={ctx.id} style={{ marginBottom: 24 }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'baseline', marginBottom: 8,
+              }}>
+                <div>
+                  <p style={{
+                    margin: 0, fontSize: 10, color: C.goldDeep, fontWeight: 500,
+                    letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+                  }}>{ctx.label}</p>
+                  <p style={{
+                    margin: '2px 0 0', fontSize: 11, color: C.muted,
+                    fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
+                  }}>{ctx.description}</p>
+                </div>
+                <button onClick={() => setAddContext(ctx.id)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                  padding: '4px 0',
+                }}>+ Add</button>
+              </div>
+              {list.length === 0 ? (
+                <div style={{
+                  background: C.pearl, border: `1px dashed ${C.border}`,
+                  borderRadius: 10, padding: '12px 14px', textAlign: 'center' as const,
+                }}>
+                  <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                    No templates yet.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+                  {list.map(t => (
+                    <button key={t.id} onClick={() => setEditingTemplate(t)} style={{
+                      background: C.ivory,
+                      border: `1px solid ${t.is_default ? C.goldBorder : C.border}`,
+                      borderRadius: 10, padding: '10px 14px',
+                      cursor: 'pointer', textAlign: 'left' as const, width: '100%',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                          {t.label}
+                        </span>
+                        {t.is_default && (
+                          <span style={{
+                            fontSize: 9, color: C.goldDeep, background: C.goldSoft,
+                            border: `1px solid ${C.goldBorder}`, borderRadius: 6,
+                            padding: '1px 5px', fontFamily: 'DM Sans, sans-serif',
+                            fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' as const,
+                          }}>Default</span>
+                        )}
+                        {t.is_custom && (
+                          <span style={{
+                            fontSize: 9, color: C.muted, background: C.cream,
+                            border: `1px solid ${C.border}`, borderRadius: 6,
+                            padding: '1px 5px', fontFamily: 'DM Sans, sans-serif',
+                            fontWeight: 500, letterSpacing: '0.3px', textTransform: 'uppercase' as const,
+                          }}>Custom</span>
+                        )}
+                      </div>
+                      <p style={{
+                        margin: 0, fontSize: 11, color: C.muted,
+                        fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
+                        lineHeight: '15px',
+                        display: '-webkit-box' as any,
+                        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any,
+                        overflow: 'hidden' as const,
+                      }}>
+                        {t.body.slice(0, 140)}{t.body.length > 140 ? '…' : ''}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {editingTemplate && (
+        <TemplateEditor
+          template={editingTemplate}
+          onClose={() => setEditingTemplate(null)}
+          onSave={async patch => {
+            await onUpdate(editingTemplate.id, patch);
+            setEditingTemplate(null);
+          }}
+          onDelete={editingTemplate.is_custom
+            ? async () => { await onDelete(editingTemplate.id); setEditingTemplate(null); }
+            : undefined
+          }
+        />
+      )}
+
+      {addContext && (
+        <TemplateEditor
+          newContext={addContext}
+          onClose={() => setAddContext(null)}
+          onSave={async patch => {
+            await onAdd({ ...patch, context: addContext, is_custom: true });
+            setAddContext(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TemplateEditor({ template, newContext, onClose, onSave, onDelete }: {
+  template?: WATemplate;
+  newContext?: TemplateContext;
+  onClose: () => void;
+  onSave: (patch: Partial<WATemplate>) => Promise<void>;
+  onDelete?: () => Promise<void>;
+}) {
+  const context = template?.context || newContext!;
+  const [label, setLabel] = useState(template?.label || '');
+  const [body, setBody] = useState(template?.body || '');
+  const [isDefault, setIsDefault] = useState(template?.is_default || false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const vars = TEMPLATE_VARIABLES[context];
+
+  const insertVar = (v: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) { setBody(body + v); return; }
+    const start = textarea.selectionStart || body.length;
+    const end = textarea.selectionEnd || body.length;
+    const next = body.slice(0, start) + v + body.slice(end);
+    setBody(next);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + v.length, start + v.length);
+    }, 0);
+  };
+
+  const handleSave = async () => {
+    if (!label.trim() || !body.trim()) return;
+    const patch: Partial<WATemplate> = {
+      label: label.trim(),
+      body: body.trim(),
+    };
+    if (template) patch.is_default = isDefault;
+    await onSave(patch);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        <p style={{ margin: '0 0 16px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          {template ? 'Edit template' : 'Add template'}
         </p>
+
+        <InputField label="Name" value={label} onChange={setLabel} placeholder="e.g. Payment reminder" />
+
+        <label style={{
+          display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+          fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+        }}>Message</label>
+        <textarea
+          ref={textareaRef}
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          rows={6}
+          placeholder="Hi {guest_name}, ..."
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            padding: '12px 14px', borderRadius: 10,
+            border: `1px solid ${C.border}`, background: C.ivory,
+            fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+            outline: 'none', marginBottom: 10, resize: 'vertical' as const, lineHeight: '18px',
+          }}
+        />
+
+        {/* Variable chips */}
+        <label style={{
+          display: 'block', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+          fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+        }}>Tap to insert</label>
+        <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 4, marginBottom: 14 }}>
+          {vars.map(v => (
+            <button
+              key={v}
+              onClick={() => insertVar(v)}
+              style={{
+                padding: '4px 10px', borderRadius: 12,
+                background: C.ivory, border: `1px solid ${C.goldBorder}`,
+                color: C.goldDeep, fontSize: 11,
+                fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+              }}
+            >{v}</button>
+          ))}
+        </div>
+
+        {/* Set as default (only for existing templates) */}
+        {template && (
+          <button
+            onClick={() => setIsDefault(v => !v)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              background: isDefault ? C.goldSoft : C.ivory,
+              border: `1px solid ${isDefault ? C.goldBorder : C.border}`,
+              borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
+              textAlign: 'left' as const, marginBottom: 14,
+            }}
+          >
+            <div style={{
+              width: 20, height: 20, borderRadius: 10, flexShrink: 0,
+              background: isDefault ? C.gold : C.cream,
+              border: `1.5px solid ${C.goldBorder}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {isDefault && <Check size={12} color={C.cream} />}
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                Set as default
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                Used when there's no picker
+              </p>
+            </div>
+          </button>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {onDelete && (
+            <button onClick={onDelete} style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: '#FEF2F2', border: '1px solid #FECACA',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0,
+            }}>
+              <Trash2 size={16} color="#B91C1C" />
+            </button>
+          )}
+          <div style={{ flex: 1 }}>
+            <GhostButton label="Cancel" onTap={onClose} />
+          </div>
+          <button onClick={handleSave} disabled={!label.trim() || !body.trim()} style={{
+            padding: '12px 24px', borderRadius: 12,
+            background: C.dark, border: 'none',
+            cursor: label.trim() && body.trim() ? 'pointer' : 'default',
+            color: C.gold, fontFamily: 'DM Sans, sans-serif',
+            fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+            textTransform: 'uppercase' as const,
+            opacity: label.trim() && body.trim() ? 1 : 0.4,
+          }}>Save</button>
+        </div>
       </div>
     </div>
   );
@@ -6712,8 +7717,11 @@ function CircleScreen({ session }: { session: CoupleSession }) {
 // PROFILE OVERLAY
 // ─────────────────────────────────────────────────────────────
 
-function ProfileOverlay({ session, onClose, onLogout }: {
-  session: CoupleSession; onClose: () => void; onLogout: () => void;
+function ProfileOverlay({ session, onClose, onLogout, onOpenTemplates }: {
+  session: CoupleSession;
+  onClose: () => void;
+  onLogout: () => void;
+  onOpenTemplates: () => void;
 }) {
   const tierLabel: Record<string, string> = { free: 'Basic', premium: 'Gold', elite: 'Platinum' };
   const days = daysToGo(session.weddingDate);
@@ -6775,6 +7783,34 @@ function ProfileOverlay({ session, onClose, onLogout }: {
           </div>
         )}
         <div style={{ height: 1, background: C.border, margin: '4px 0 16px' }} />
+
+        {/* Settings */}
+        <p style={{
+          fontSize: 10, color: C.muted, letterSpacing: '2px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, margin: '0 0 8px',
+        }}>Settings</p>
+        <button
+          onClick={onOpenTemplates}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: C.ivory, border: `1px solid ${C.border}`,
+            borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
+            width: '100%', textAlign: 'left' as const, marginBottom: 12,
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+              Message templates
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              Customise your WhatsApp messages
+            </p>
+          </div>
+          <ChevronRight size={14} color={C.mutedLight} />
+        </button>
+
+        <div style={{ height: 1, background: C.border, margin: '16px 0' }} />
+
         <GhostButton label="Sign out" onTap={onLogout} />
       </div>
     </div>
@@ -7067,6 +8103,7 @@ export default function CoupleApp() {
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [prefillCode, setPrefillCode] = useState<string | null>(null);
 
   // Shared data hook — declared here so all children render against the
@@ -7168,6 +8205,7 @@ export default function CoupleApp() {
                 session={session}
                 guests={checklist.guests}
                 loading={checklist.loading}
+                templates={checklist.waTemplates}
                 onAdd={checklist.addGuest}
                 onUpdate={checklist.updateGuest}
                 onDelete={checklist.deleteGuest}
@@ -7179,6 +8217,7 @@ export default function CoupleApp() {
                 session={session}
                 pins={checklist.pins}
                 loading={checklist.loading}
+                templates={checklist.waTemplates}
                 onFetchPreview={checklist.fetchOGPreview}
                 onAdd={checklist.addPin}
                 onUpdate={checklist.updatePin}
@@ -7192,6 +8231,7 @@ export default function CoupleApp() {
                 vendors={checklist.vendors}
                 expenses={checklist.expenses}
                 loading={checklist.loading}
+                templates={checklist.waTemplates}
                 onAdd={checklist.addVendor}
                 onUpdate={checklist.updateVendor}
                 onDelete={checklist.deleteVendor}
@@ -7230,7 +8270,7 @@ export default function CoupleApp() {
               />
             )}
             {!activeTool && activeTab === 'circle' && (
-              <CircleScreen session={session} />
+              <CircleScreen session={session} templates={checklist.waTemplates} />
             )}
           </>
         )}
@@ -7278,7 +8318,22 @@ export default function CoupleApp() {
         )}
 
         {showProfile && (
-          <ProfileOverlay session={session} onClose={() => setShowProfile(false)} onLogout={handleLogout} />
+          <ProfileOverlay
+            session={session}
+            onClose={() => setShowProfile(false)}
+            onLogout={handleLogout}
+            onOpenTemplates={() => { setShowProfile(false); setShowTemplates(true); }}
+          />
+        )}
+        {showTemplates && (
+          <TemplatesScreen
+            session={session}
+            templates={checklist.waTemplates}
+            onBack={() => setShowTemplates(false)}
+            onAdd={checklist.addTemplate}
+            onUpdate={checklist.updateTemplate}
+            onDelete={checklist.deleteTemplate}
+          />
         )}
       </div>
     </div>
