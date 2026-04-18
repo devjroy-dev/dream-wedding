@@ -132,6 +132,7 @@ export default function VendorMobilePage() {
   const [paymentSchedules, setPaymentSchedules] = useState<any[]>([]);
   const [todos, setTodos] = useState<any[]>([]);
   const [reminders, setReminders] = useState<any[]>([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -256,7 +257,7 @@ export default function VendorMobilePage() {
 
     const loadAll = async () => {
       try {
-        const [bRes, iRes, cRes, blockRes, schedRes, vRes, aiRes, tRes, eRes, remRes] = await Promise.all([
+        const [bRes, iRes, cRes, blockRes, schedRes, vRes, aiRes, tRes, eRes, remRes, teamRes] = await Promise.all([
           fetch(`${API}/api/bookings/vendor/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/invoices/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/vendor-clients/${vId}`).then(r => r.json()).catch(() => ({})),
@@ -267,6 +268,7 @@ export default function VendorMobilePage() {
           fetch(`${API}/api/todos/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/events/${vId}`).then(r => r.json()).catch(() => ({})),
           fetch(`${API}/api/reminders/${vId}`).then(r => r.json()).catch(() => ({})),
+          fetch(`${API}/api/team/${vId}`).then(r => r.json()).catch(() => ({})),
         ]);
         if (bRes.success) setBookings(bRes.data || []);
         if (iRes.success) setInvoices(iRes.data || []);
@@ -278,6 +280,7 @@ export default function VendorMobilePage() {
         if (tRes.success) setTodos(tRes.data || []);
         if (eRes.success) setEvents(eRes.data || []);
         if (remRes.success) setReminders(remRes.data || []);
+        if (teamRes.success) setTeamMembers(teamRes.data || []);
         // Leads = bookings with pending_confirmation status
         if (bRes.success) setLeads((bRes.data || []).filter((b: any) => b.status === 'pending_confirmation' || b.status === 'pending'));
       } catch (e) {
@@ -598,8 +601,14 @@ export default function VendorMobilePage() {
       {showQuickTodo && (
         <QuickTodoSheet
           vendorId={session.vendorId}
+          vendorName={session.vendorName}
+          clients={clients}
+          teamMembers={teamMembers}
           onClose={() => setShowQuickTodo(false)}
-          onSaved={(newTodo: any) => { setTodos(prev => [newTodo, ...prev]); setShowQuickTodo(false); }}
+          onSaved={(newTodo: any) => { setTodos(prev => [newTodo, ...prev]); }}
+          onClientCreated={(newClient: any) => {
+            setClients(prev => [newClient, ...prev]);
+          }}
         />
       )}
 
@@ -1112,7 +1121,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '18px' }}>
           <span style={{
             fontFamily: "'Playfair Display', serif",
-            fontSize: '15px', fontStyle: 'italic', fontWeight: 400,
+            fontSize: '15px', fontWeight: 400,
             color: C.goldDeep, letterSpacing: '0.4px',
           }}>{today}</span>
           <div style={{ flex: 1, height: '1px', background: 'rgba(201,168,76,0.25)' }} />
@@ -1255,8 +1264,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
               Unlocking in {daysUntilPulseReady} {daysUntilPulseReady === 1 ? 'day' : 'days'}.
             </div>
             <div style={{
-              fontSize: '11px', color: C.muted,
-              fontStyle: 'italic', lineHeight: 1.55,
+              fontSize: '11px', color: C.muted, lineHeight: 1.55,
               maxWidth: '280px', margin: '0 auto',
             }}>
               We need at least 15 days of your data to tell you anything meaningful about your business.
@@ -1300,8 +1308,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           }}>{nextEvent.users?.name || nextEvent.client_name || 'Client'}</div>
           <div style={{
             fontFamily: 'DM Sans, sans-serif',
-            fontSize: '13px', color: C.muted,
-            fontStyle: 'italic', fontWeight: 400,
+            fontSize: '13px', color: C.muted, fontWeight: 400,
           }}>
             {nextEvent.event_date
               ? new Date(nextEvent.event_date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -1592,7 +1599,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
                 background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`,
                 padding: '24px 20px', textAlign: 'center',
               }}>
-                <div style={{ fontSize: '13px', color: C.muted, fontStyle: 'italic' }}>All clear. Add a to-do to get started.</div>
+                <div style={{ fontSize: '13px', color: C.muted }}>All clear. Add a to-do to get started.</div>
               </div>
             ) : (
               <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
@@ -2115,7 +2122,7 @@ function CalendarTab({ session, bookings, blockedDates, events, onRefresh, onAdd
       {showBlock && (
         <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <input type="date" value={blockDate} onChange={e => setBlockDate(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} />
-          <input type="text" placeholder="Reason (optional)" value={blockReason} onChange={e => setBlockReason(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} />
+          <input type="text" placeholder="Reason" value={blockReason} onChange={e => setBlockReason(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} />
           <button onClick={handleBlock} style={{ background: C.gold, color: C.ivory, border: 'none', borderRadius: '10px', padding: '12px', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
             Block Date
           </button>
@@ -2276,7 +2283,7 @@ function ToolsTab({ session, tier, activeSubTool, setActiveSubTool, clients, inv
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingTop: '12px' }}>
       <div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>Power Mode</div>
-        <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, marginTop: '4px', fontStyle: 'italic' }}>Every tool to run your business, in one place.</div>
+        <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '12px', color: C.muted, marginTop: '4px' }}>Every tool to run your business, in one place.</div>
       </div>
 
       {SECTIONS.map((section) => (
@@ -2532,7 +2539,6 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
                 marginTop: '10px', paddingTop: '10px',
                 borderTop: `1px solid ${C.borderSoft}`,
                 fontSize: '11px', color: C.muted,
-                fontStyle: 'italic',
               }}>
                 {unpaidCount} unpaid invoice{unpaidCount === 1 ? '' : 's'} · ₹{fmtINR(total - paid)} outstanding
               </div>
@@ -3891,7 +3897,7 @@ function CalendarPanel({ session, bookings, blockedDates, events, onOpenEvent, o
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>
             Calendar
           </div>
-          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4 }}>
             Your schedule at a glance.
           </div>
         </div>
@@ -4083,7 +4089,7 @@ function CalendarPanel({ session, bookings, blockedDates, events, onOpenEvent, o
       )}
 
       {loadingHot && (
-        <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, fontStyle: 'italic' }}>
+        <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const }}>
           Loading hot dates…
         </div>
       )}
@@ -4172,7 +4178,7 @@ function SelectedDayPanel({ dateIso, data, onClose, onRefresh }: {
       </div>
 
       {nothingOnDay ? (
-        <div style={{ fontSize: 12, color: C.muted, fontStyle: 'italic', padding: '6px 0' }}>
+        <div style={{ fontSize: 12, color: C.muted, padding: '6px 0' }}>
           Nothing scheduled.
         </div>
       ) : (
@@ -4387,7 +4393,7 @@ function TeamPanel({ session, vendorName, bookings, todos, clients }: {
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>
           Team
         </div>
-        <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+        <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4 }}>
           Your crew, assignments, and what you owe them.
         </div>
       </div>
@@ -4459,7 +4465,6 @@ function TeamPanel({ session, vendorName, bookings, todos, clients }: {
         marginTop: 8, padding: '10px 12px',
         background: C.pearl, borderRadius: 10,
         fontSize: 10, color: C.muted, lineHeight: 1.5,
-        fontStyle: 'italic' as const,
       }}>
         Tip: Each card is a full workflow. Tap one to open it; tap back to return here.
       </div>
@@ -4574,7 +4579,7 @@ function MyTeamPanel({ session, members, onBack, onChanged }: {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, color: C.dark, fontWeight: 500 }}>
                     {m.name}
-                    {!isActive && <span style={{ fontSize: 9, color: C.muted, marginLeft: 6, fontStyle: 'italic' as const }}>inactive</span>}
+                    {!isActive && <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>inactive</span>}
                   </div>
                   <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
                     {m.role || 'Team member'}
@@ -4691,7 +4696,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
         onClose={onClose}
       />
 
-      <FieldLabel>Name *</FieldLabel>
+      <FieldLabel required>Name</FieldLabel>
       <input
         type="text" value={name} onChange={e => setName(e.target.value)}
         placeholder="e.g. Vivek Sharma"
@@ -4704,7 +4709,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
         }}
       />
 
-      <FieldLabel>Phone *</FieldLabel>
+      <FieldLabel required>Phone</FieldLabel>
       <input
         type="tel" value={phone} inputMode="numeric"
         onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))}
@@ -4906,36 +4911,139 @@ function TeamTasksPanel({ session, members, todos, clients, vendorName, onBack }
 }
 
 function TeamAssignmentsPanel({ members, todos, bookings, onBack }: any) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const activeMembers = members.filter((m: any) => m.active !== false && m.status !== 'inactive');
+
+  // Compose timeline of upcoming items per member (next 60 days)
+  const buildTimeline = (memberId: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const items: { date: Date; kind: 'task' | 'booking'; label: string; sub: string }[] = [];
+
+    todos.forEach((t: any) => {
+      if (!Array.isArray(t.assigned_to) || !t.assigned_to.includes(memberId)) return;
+      if (t.done) return;
+      if (!t.due_date) return;
+      const d = new Date(t.due_date);
+      if (isNaN(d.getTime())) return;
+      items.push({
+        date: d,
+        kind: 'task',
+        label: t.title || 'Task',
+        sub: t.client_name ? `Client: ${t.client_name}` : 'To-do',
+      });
+    });
+
+    bookings.forEach((b: any) => {
+      if (!Array.isArray(b.assigned_to) || !b.assigned_to.includes(memberId)) return;
+      if (!b.event_date) return;
+      const d = new Date(b.event_date);
+      if (isNaN(d.getTime())) return;
+      items.push({
+        date: d,
+        kind: 'booking',
+        label: b.client_name || b.users?.name || 'Booking',
+        sub: b.event_type || 'Wedding',
+      });
+    });
+
+    return items.sort((a, b) => a.date.getTime() - b.date.getTime());
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 8 }}>
       <SubPanelHeader title="Assignments" onBack={onBack} />
 
-      {members.length === 0 ? (
+      <div style={{
+        padding: '14px 16px', background: C.pearl, borderRadius: 12,
+        border: `1px solid ${C.border}`, fontSize: 12, color: C.muted, lineHeight: 1.55,
+      }}>
+        Tap a name to see what each member is working on next.
+      </div>
+
+      {activeMembers.length === 0 ? (
         <div style={{ padding: 30, background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}`, textAlign: 'center' as const }}>
           <div style={{ fontSize: 13, color: C.muted }}>Add team members first to see their assignments.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
-          {members.filter((m: any) => m.active !== false && m.status !== 'inactive').map((m: any) => {
+          {activeMembers.map((m: any) => {
             const memTasks = todos.filter((t: any) => Array.isArray(t.assigned_to) && t.assigned_to.includes(m.id) && !t.done);
             const memBookings = bookings.filter((b: any) => Array.isArray(b.assigned_to) && b.assigned_to.includes(m.id));
+            const isExpanded = expandedId === m.id;
+            const timeline = isExpanded ? buildTimeline(m.id) : [];
+
             return (
-              <div key={m.id} style={{ padding: 14, background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 16,
-                    background: C.goldSoft, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, fontWeight: 600, color: C.goldDeep, fontFamily: "'Playfair Display', serif",
-                  }}>{(m.name || '?')[0].toUpperCase()}</div>
-                  <div>
-                    <div style={{ fontSize: 14, color: C.dark, fontWeight: 500 }}>{m.name}</div>
-                    <div style={{ fontSize: 10, color: C.muted }}>{m.role || 'Team member'}</div>
+              <div key={m.id} style={{ background: C.ivory, borderRadius: 12, border: `1px solid ${isExpanded ? C.goldBorder : C.border}` }}>
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : m.id)}
+                  style={{
+                    width: '100%', padding: 14, background: 'transparent',
+                    border: 'none', cursor: 'pointer', textAlign: 'left' as const,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 16,
+                      background: C.goldSoft, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 600, color: C.goldDeep, fontFamily: "'Playfair Display', serif",
+                    }}>{(m.name || '?')[0].toUpperCase()}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, color: C.dark, fontWeight: 500 }}>{m.name}</div>
+                      <div style={{ fontSize: 10, color: C.muted }}>{m.role || 'Team member'}</div>
+                    </div>
+                    <ChevronRight size={14} color={C.muted} style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.muted }}>
-                  <span><strong style={{ color: C.dark }}>{memTasks.length}</strong> open task{memTasks.length === 1 ? '' : 's'}</span>
-                  <span><strong style={{ color: C.dark }}>{memBookings.length}</strong> booking{memBookings.length === 1 ? '' : 's'}</span>
-                </div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.muted }}>
+                    <span><strong style={{ color: C.dark }}>{memTasks.length}</strong> open task{memTasks.length === 1 ? '' : 's'}</span>
+                    <span><strong style={{ color: C.dark }}>{memBookings.length}</strong> booking{memBookings.length === 1 ? '' : 's'}</span>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${C.borderSoft}`, marginTop: 4 }}>
+                    {timeline.length === 0 ? (
+                      <div style={{ padding: '14px 0', fontSize: 12, color: C.muted, textAlign: 'center' as const }}>
+                        Nothing assigned yet
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, paddingTop: 12 }}>
+                        {timeline.map((item, idx) => {
+                          const isToday = item.date.toDateString() === new Date().toDateString();
+                          const isPast = item.date < new Date(new Date().setHours(0, 0, 0, 0));
+                          return (
+                            <div key={idx} style={{
+                              display: 'flex', gap: 10, alignItems: 'flex-start',
+                              padding: '8px 10px',
+                              background: isPast ? C.redSoft : isToday ? C.goldSoft : C.pearl,
+                              borderRadius: 8,
+                              border: `1px solid ${isPast ? C.redBorder : isToday ? C.goldBorder : C.border}`,
+                            }}>
+                              <div style={{
+                                width: 38, textAlign: 'center' as const, flexShrink: 0,
+                                paddingRight: 6, borderRight: `1px solid ${C.borderSoft}`,
+                              }}>
+                                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: '1px' }}>
+                                  {item.date.toLocaleDateString('en-IN', { month: 'short' })}
+                                </div>
+                                <div style={{ fontSize: 16, fontFamily: "'Playfair Display', serif", color: isPast ? C.red : C.dark, fontWeight: 500 }}>
+                                  {item.date.getDate()}
+                                </div>
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, color: C.dark, fontWeight: 500 }}>{item.label}</div>
+                                <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                                  {item.kind === 'booking' ? '🎉' : '✓'} {item.sub}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -4946,6 +5054,15 @@ function TeamAssignmentsPanel({ members, todos, bookings, onBack }: any) {
 }
 
 function TeamBookingsPanel({ session, members, bookings, onBack }: any) {
+  const [activeBooking, setActiveBooking] = useState<any>(null);
+  const [bookingsLocal, setBookingsLocal] = useState<any[]>(bookings || []);
+  useEffect(() => { setBookingsLocal(bookings || []); }, [bookings]);
+
+  const handleAssignmentSaved = (bookingId: string, newAssignedTo: string[]) => {
+    setBookingsLocal(prev => prev.map((b: any) => b.id === bookingId ? { ...b, assigned_to: newAssignedTo } : b));
+    setActiveBooking(null);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 8 }}>
       <SubPanelHeader title="Bookings" onBack={onBack} />
@@ -4954,20 +5071,29 @@ function TeamBookingsPanel({ session, members, bookings, onBack }: any) {
         padding: '14px 16px', background: C.pearl, borderRadius: 12,
         border: `1px solid ${C.border}`, fontSize: 12, color: C.muted, lineHeight: 1.55,
       }}>
-        Assign team members to upcoming weddings. Tap any booking to pick who's on the crew that day.
+        Tap any booking to assign team members. Track who's working which wedding.
       </div>
 
-      {bookings.length === 0 ? (
+      {bookingsLocal.length === 0 ? (
         <div style={{ padding: 30, background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}`, textAlign: 'center' as const, fontSize: 13, color: C.muted }}>
           No bookings to assign.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
-          {bookings.slice(0, 20).map((b: any) => {
+          {bookingsLocal.slice(0, 20).map((b: any) => {
             const assignedIds = Array.isArray(b.assigned_to) ? b.assigned_to : [];
             const assignees = assignedIds.map((id: string) => members.find((m: any) => m.id === id)?.name).filter(Boolean);
             return (
-              <div key={b.id} style={{ padding: 12, background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}` }}>
+              <button
+                key={b.id}
+                onClick={() => setActiveBooking(b)}
+                style={{
+                  padding: 12, background: C.ivory,
+                  borderRadius: 12, border: `1px solid ${C.border}`,
+                  textAlign: 'left' as const, cursor: 'pointer',
+                  fontFamily: 'inherit', width: '100%',
+                }}
+              >
                 <div style={{ fontSize: 13, color: C.dark, fontWeight: 500 }}>
                   {b.client_name || b.users?.name || 'Booking'}
                 </div>
@@ -4975,19 +5101,137 @@ function TeamBookingsPanel({ session, members, bookings, onBack }: any) {
                   {b.event_date ? new Date(b.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No date'}
                   {b.event_type ? ` · ${b.event_type}` : ''}
                 </div>
-                <div style={{ fontSize: 11, color: assignees.length ? C.goldDeep : C.light, marginTop: 6, fontStyle: assignees.length ? 'normal' as const : 'italic' as const }}>
-                  {assignees.length ? `Crew: ${assignees.join(', ')}` : 'No crew assigned yet'}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.borderSoft}`,
+                }}>
+                  <div style={{ fontSize: 11, color: assignees.length ? C.goldDeep : C.light }}>
+                    {assignees.length ? `Crew: ${assignees.join(', ')}` : 'Tap to assign crew'}
+                  </div>
+                  <ChevronRight size={12} color={C.muted} />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
 
-      <div style={{ padding: '10px 12px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 10, fontSize: 10, color: C.goldDeep, lineHeight: 1.5 }}>
-        <strong>Coming soon:</strong> Tap a booking to assign crew members directly.
-      </div>
+      {activeBooking && (
+        <BookingAssignSheet
+          booking={activeBooking}
+          members={members}
+          onClose={() => setActiveBooking(null)}
+          onSaved={(ids) => handleAssignmentSaved(activeBooking.id, ids)}
+        />
+      )}
     </div>
+  );
+}
+
+function BookingAssignSheet({ booking, members, onClose, onSaved }: {
+  booking: any;
+  members: any[];
+  onClose: () => void;
+  onSaved: (ids: string[]) => void;
+}) {
+  const [selectedIds, setSelectedIds] = useState<string[]>(Array.isArray(booking.assigned_to) ? booking.assigned_to : []);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const activeMembers = members.filter((m: any) => m.active !== false && m.status !== 'inactive');
+
+  const toggleMember = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleSave = async () => {
+    setSubmitting(true); setError('');
+    try {
+      const r = await fetch(`${API}/api/bookings/${booking.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assigned_to: selectedIds }),
+      });
+      const d = await r.json();
+      if (d.success) onSaved(selectedIds);
+      else setError(d.error || 'Could not save.');
+    } catch { setError('Network error.'); } finally { setSubmitting(false); }
+  };
+
+  return (
+    <SheetOverlay onClose={onClose}>
+      <SheetHeader
+        eyebrow={booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'Booking'}
+        title={booking.client_name || booking.users?.name || 'Booking'}
+        onClose={onClose}
+      />
+
+      <div style={{
+        padding: '12px 14px', background: C.pearl, borderRadius: 10,
+        marginBottom: 14, fontSize: 12, color: C.muted, lineHeight: 1.5,
+      }}>
+        Pick everyone who's working this booking. Tap names to toggle.
+      </div>
+
+      {activeMembers.length === 0 ? (
+        <div style={{ padding: 20, background: C.ivory, borderRadius: 10, fontSize: 12, color: C.muted, textAlign: 'center' as const, border: `1px solid ${C.border}` }}>
+          Add team members in My Team first.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, marginBottom: 14 }}>
+          {activeMembers.map((m: any) => {
+            const checked = selectedIds.includes(m.id);
+            return (
+              <button
+                key={m.id}
+                onClick={() => toggleMember(m.id)}
+                style={{
+                  padding: '10px 12px', background: checked ? C.goldSoft : C.ivory,
+                  border: `1px solid ${checked ? C.gold : C.border}`,
+                  borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  textAlign: 'left' as const,
+                }}
+              >
+                <div style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  background: checked ? C.dark : 'transparent',
+                  border: `1.5px solid ${checked ? C.dark : C.muted}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  {checked && <CheckCircle size={11} color={C.gold} />}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: C.dark, fontWeight: 500 }}>{m.name}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{m.role || 'Team member'}{m.rate ? ` · ₹${fmtINR(parseInt(m.rate))}` : ''}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {error && (
+        <div style={{ background: C.redSoft, border: `1px solid ${C.redBorder}`, borderRadius: 8, padding: '10px 12px', fontSize: 11, color: C.red, marginBottom: 12 }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onClose} disabled={submitting} style={{
+          flex: 1, padding: 13, borderRadius: 12,
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, cursor: 'pointer',
+          fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+        }}>Cancel</button>
+        <button onClick={handleSave} disabled={submitting} style={{
+          flex: 2, padding: 14, borderRadius: 12,
+          background: submitting ? C.border : C.dark,
+          color: submitting ? C.light : C.gold,
+          border: 'none', cursor: submitting ? 'default' : 'pointer',
+          fontSize: 11, fontWeight: 600, letterSpacing: '1.8px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+        }}>{submitting ? 'Saving…' : `Save (${selectedIds.length})`}</button>
+      </div>
+    </SheetOverlay>
   );
 }
 
@@ -5169,7 +5413,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
     <SheetOverlay onClose={onClose}>
       <SheetHeader eyebrow="New" title="Log payment owed" onClose={onClose} />
 
-      <FieldLabel>Team member *</FieldLabel>
+      <FieldLabel required>Team member</FieldLabel>
       <select
         value={memberId}
         onChange={e => setMemberId(e.target.value)}
@@ -5188,7 +5432,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
         ))}
       </select>
 
-      <FieldLabel>Amount *</FieldLabel>
+      <FieldLabel required>Amount</FieldLabel>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         background: C.ivory, border: `1px solid ${C.border}`,
@@ -5359,7 +5603,7 @@ function TeamBroadcastPanel({ session, members, vendorName, onBack }: any) {
 
       {/* Message */}
       <div>
-        <FieldLabel>Message *</FieldLabel>
+        <FieldLabel required>Message</FieldLabel>
         <textarea
           value={message}
           onChange={e => setMessage(e.target.value)}
@@ -5452,7 +5696,7 @@ function TeamBroadcastPanel({ session, members, vendorName, onBack }: any) {
             >
               <Users size={14} /> As group
             </button>
-            <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, fontStyle: 'italic' as const }}>
+            <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const }}>
               Opens WhatsApp — you'll create the group and paste
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
@@ -5473,7 +5717,7 @@ function TeamBroadcastPanel({ session, members, vendorName, onBack }: any) {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, fontStyle: 'italic' as const, marginTop: 4 }}>
+            <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, marginTop: 4 }}>
               Or tap a name to send direct 1-on-1
             </div>
           </div>
@@ -5519,7 +5763,7 @@ function AssistantsPanel({ session }: { session: VendorSession }) {
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: C.dark, letterSpacing: '0.2px' }}>
             Your Team
           </div>
-          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+          <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 12, color: C.muted, marginTop: 4 }}>
             Assistants and freelancers you work with.
           </div>
         </div>
@@ -5728,7 +5972,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
         onClose={onClose}
       />
 
-      <FieldLabel>Name</FieldLabel>
+      <FieldLabel required>Name</FieldLabel>
       <input
         type="text" value={name} onChange={e => { setName(e.target.value); setError(''); }}
         placeholder="e.g. Priya Sharma"
@@ -5741,7 +5985,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
         }}
       />
 
-      <FieldLabel>Phone</FieldLabel>
+      <FieldLabel required>Phone</FieldLabel>
       <div style={{ position: 'relative', marginBottom: 14 }}>
         <span style={{
           position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
@@ -5760,7 +6004,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
         />
       </div>
 
-      <FieldLabel>Role (optional)</FieldLabel>
+      <FieldLabel>Role</FieldLabel>
       <input
         type="text" value={role} onChange={e => setRole(e.target.value)}
         placeholder="e.g. Makeup assistant, Second shooter, Coordinator"
@@ -5773,7 +6017,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
         }}
       />
 
-      <FieldLabel>Notes (optional)</FieldLabel>
+      <FieldLabel>Notes</FieldLabel>
       <textarea
         value={notes} onChange={e => setNotes(e.target.value)}
         placeholder="Anything important about working with them"
@@ -6427,7 +6671,7 @@ function PaiRequestSheet({ userType, userId, hasPending, onClose, onSubmitted }:
             It's invite-only during beta. Tell us why you'd like early access.
           </div>
 
-          <FieldLabel>Why you'd like PAi (optional)</FieldLabel>
+          <FieldLabel>Why you'd like PAi</FieldLabel>
           <textarea
             value={reason}
             onChange={e => setReason(e.target.value)}
@@ -6871,8 +7115,7 @@ function DreamAiModal({ vendorData, aiRequestSent, onClose, onRequestSent }: any
         }}>Dream Ai</div>
         <div style={{
           fontFamily: "'Playfair Display', serif",
-          fontSize: '18px', color: '#FAF6F0',
-          fontStyle: 'italic', fontWeight: 300,
+          fontSize: '18px', color: '#FAF6F0', fontWeight: 300,
           marginBottom: '24px', lineHeight: 1.3,
         }}>Run your business from WhatsApp.</div>
 
@@ -7341,7 +7584,7 @@ function ToolsGrid({ tier }: { tier: Tier }) {
             <div style={{
               fontFamily: 'DM Sans, sans-serif',
               fontSize: '10px', color: C.light,
-              textAlign: 'center', marginTop: '10px', fontStyle: 'italic',
+              textAlign: 'center', marginTop: '10px',
             }}>
               Manage your subscription from the business portal.
             </div>
@@ -7501,7 +7744,7 @@ function SheetHeader({ eyebrow, title, onClose }: { eyebrow: string; title: stri
   );
 }
 
-function FieldLabel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+function FieldLabel({ children, style, required }: { children: React.ReactNode; style?: React.CSSProperties; required?: boolean }) {
   return (
     <div style={{
       fontFamily: 'DM Sans, sans-serif',
@@ -7509,7 +7752,10 @@ function FieldLabel({ children, style }: { children: React.ReactNode; style?: Re
       letterSpacing: '1.5px', textTransform: 'uppercase',
       color: C.muted, marginBottom: '6px',
       ...style,
-    }}>{children}</div>
+    }}>
+      {children}
+      {required && <span style={{ color: '#C65757', marginLeft: 4, letterSpacing: 0 }}>*</span>}
+    </div>
   );
 }
 
@@ -7655,7 +7901,7 @@ function QuickInvoiceSheet({
             )}
           </div>
           {savedInvoice._clientWasCreated && (
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 4, fontStyle: 'italic' }}>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
               New client added — complete profile in Clients tab.
             </div>
           )}
@@ -7697,7 +7943,7 @@ function QuickInvoiceSheet({
     <SheetOverlay onClose={onClose}>
       <SheetHeader eyebrow="Quick Action" title="Create Invoice" onClose={onClose} />
 
-      <FieldLabel>Client Name</FieldLabel>
+      <FieldLabel required>Client Name</FieldLabel>
       <div style={{ position: 'relative', marginBottom: 14 }}>
         <input
           type="text"
@@ -7788,7 +8034,7 @@ function QuickInvoiceSheet({
 
       {!selectedClient && (
         <>
-          <FieldLabel>Client Phone (optional)</FieldLabel>
+          <FieldLabel>Client Phone</FieldLabel>
           <input
             type="tel"
             value={clientPhone}
@@ -7830,7 +8076,7 @@ function QuickInvoiceSheet({
         />
       </div>
 
-      <FieldLabel>Description (optional)</FieldLabel>
+      <FieldLabel required>Description</FieldLabel>
       <input
         type="text"
         value={description}
@@ -7967,7 +8213,7 @@ function QuickBlockDateSheet({
       }
       onSaved(d.data);
 
-      // Step 2 (optional): if vendor linked a client, auto-create the client + a calendar event
+      // Step 2: if vendor linked a client, auto-create the client + a calendar event
       if (linkClient && clientName.trim()) {
         let createdClientId: string | null = null;
         if (clientPhone.trim()) {
@@ -8026,7 +8272,7 @@ function QuickBlockDateSheet({
         Couples won't be able to request this date. Optionally link a client so it shows on your calendar.
       </div>
 
-      <FieldLabel>Date</FieldLabel>
+      <FieldLabel required>Date</FieldLabel>
       <input
         type="date"
         value={blockDate}
@@ -8041,7 +8287,7 @@ function QuickBlockDateSheet({
         }}
       />
 
-      <FieldLabel>Reason / Title (optional)</FieldLabel>
+      <FieldLabel required>Reason / Title</FieldLabel>
       <input
         type="text"
         value={reason}
@@ -8069,7 +8315,7 @@ function QuickBlockDateSheet({
           marginBottom: '10px',
         }}
       >
-        {linkClient ? '✓ Linked to a client (will create calendar event)' : '+ Link to a client (optional)'}
+        {linkClient ? '✓ Linked to a client (will create calendar event)' : '+ Link to a client'}
       </button>
 
       {linkClient && (
@@ -8084,7 +8330,7 @@ function QuickBlockDateSheet({
               fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '10px', boxSizing: 'border-box',
             }}
           />
-          <FieldLabel>Client phone (optional)</FieldLabel>
+          <FieldLabel>Client phone</FieldLabel>
           <input
             type="tel" value={clientPhone} onChange={e => setClientPhone(e.target.value)}
             placeholder="e.g. 9876543210"
@@ -8094,7 +8340,7 @@ function QuickBlockDateSheet({
               fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
             }}
           />
-          <div style={{ fontSize: '10px', color: C.light, marginTop: '6px', fontStyle: 'italic' }}>
+          <div style={{ fontSize: '10px', color: C.light, marginTop: '6px' }}>
             If phone is provided, a new client will be added to your CRM.
           </div>
         </div>
@@ -8273,7 +8519,7 @@ function QuickReminderSheet({
           <div style={{
             fontFamily: 'DM Sans, sans-serif',
             fontSize: '11px', color: C.muted,
-            marginBottom: '14px', fontStyle: 'italic',
+            marginBottom: '14px',
           }}>
             What kind of reminder would you like to send?
           </div>
@@ -8482,22 +8728,77 @@ function QuickReminderSheet({
 // ══════════════════════════════════════════════════════════════════════════
 
 function QuickTodoSheet({
-  vendorId, onClose, onSaved,
+  vendorId, vendorName, clients, teamMembers, onClose, onSaved, onClientCreated,
 }: {
-  vendorId: string; onClose: () => void; onSaved: (todo: any) => void;
+  vendorId: string;
+  vendorName: string;
+  clients: any[];
+  teamMembers: any[];
+  onClose: () => void;
+  onSaved: (todo: any) => void;
+  onClientCreated?: (client: any) => void;
 }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [priority, setPriority] = useState<'low' | 'med' | 'high'>('med');
+  const [clientName, setClientName] = useState('');
+  const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [assignedIds, setAssignedIds] = useState<string[]>([]);
+  const [sendWhatsApp, setSendWhatsApp] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [savedTodo, setSavedTodo] = useState<any>(null);
+
+  const activeMembers = teamMembers.filter((m: any) => m.active !== false && m.status !== 'inactive');
+
+  const matches = clientName.trim().length >= 2 && !selectedClient
+    ? clients.filter((c: any) => c.name?.toLowerCase().includes(clientName.trim().toLowerCase())).slice(0, 5)
+    : [];
 
   const canSave = !!title.trim() && !submitting;
+
+  const pickClient = (c: any) => {
+    setSelectedClient(c);
+    setClientName(c.name || '');
+    setShowSuggestions(false);
+  };
+  const clearClient = () => {
+    setSelectedClient(null);
+    setClientName('');
+  };
+
+  const toggleAssignee = (id: string) => {
+    setAssignedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
 
   const handleSave = async () => {
     if (!canSave) return;
     setError(''); setSubmitting(true);
     try {
+      let clientId = selectedClient?.id || null;
+      let clientNameFinal = selectedClient?.name || clientName.trim() || null;
+
+      // Auto-create incomplete client if name typed but no match
+      if (!clientId && clientName.trim()) {
+        try {
+          const cr = await fetch(API + '/api/vendor-clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              vendor_id: vendorId,
+              name: clientName.trim(),
+              profile_incomplete: true,
+            }),
+          });
+          const cd = await cr.json();
+          if (cd.success && cd.data) {
+            clientId = cd.data.id;
+            onClientCreated && onClientCreated(cd.data);
+          }
+        } catch { /* non-fatal */ }
+      }
+
       const r = await fetch(API + '/api/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8505,23 +8806,131 @@ function QuickTodoSheet({
           vendor_id: vendorId,
           title: title.trim(),
           due_date: dueDate || null,
-          priority,
           done: false,
+          assigned_to: assignedIds,
+          client_id: clientId,
+          client_name: clientNameFinal,
+          notes: priority === 'high' ? 'High priority' : (priority === 'low' ? 'Low priority' : null),
         }),
       });
       const d = await r.json();
-      if (d.success && d.data) onSaved(d.data);
-      else setError(d.error || 'Could not create to-do');
+      if (d.success && d.data) {
+        onSaved(d.data);
+        // If WhatsApp toggle on AND assignees, show post-save screen
+        if (sendWhatsApp && assignedIds.length > 0) {
+          setSavedTodo(d.data);
+        } else {
+          onClose();
+        }
+      } else {
+        setError(d.error || 'Could not create to-do');
+      }
     } catch {
       setError('Network error. Please try again.');
     } finally { setSubmitting(false); }
   };
 
+  // ── Post-save WhatsApp send screen
+  if (savedTodo) {
+    const recipients = activeMembers.filter((m: any) => assignedIds.includes(m.id));
+    const taskMsg = `📋 New task from ${vendorName || 'studio'}:\n\n*${title.trim()}*${dueDate ? `\n📅 Due: ${new Date(dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}${selectedClient || clientName ? `\n👤 Client: ${selectedClient?.name || clientName.trim()}` : ''}${priority === 'high' ? '\n⚠️ High priority' : ''}`;
+
+    const sendIndividual = (m: any) => {
+      const phone = (m.phone || '').replace(/\D/g, '');
+      if (!phone) { alert(`${m.name} has no phone on file.`); return; }
+      const url = `https://wa.me/91${phone}?text=${encodeURIComponent(taskMsg)}`;
+      window.open(url, '_blank');
+    };
+
+    const sendAsGroup = () => {
+      const url = `https://wa.me/?text=${encodeURIComponent(taskMsg)}`;
+      window.open(url, '_blank');
+      // Log broadcast
+      fetch(`${API}/api/team-broadcasts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          message: taskMsg,
+          recipient_ids: assignedIds,
+          recipient_count: assignedIds.length,
+          template_key: 'task_assignment',
+        }),
+      }).catch(() => {});
+    };
+
+    return (
+      <SheetOverlay onClose={onClose}>
+        <SheetHeader eyebrow="Task Created" title="Send to team?" onClose={onClose} />
+
+        <div style={{
+          padding: '14px 16px', borderRadius: 12, marginBottom: 14,
+          background: C.champagne, border: `1px solid ${C.goldBorder}`,
+        }}>
+          <div style={{ fontSize: 11, color: C.goldDeep, fontWeight: 500, letterSpacing: '1.2px', textTransform: 'uppercase' as const, marginBottom: 6 }}>Task</div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: C.dark, fontWeight: 500, marginBottom: 4 }}>{title.trim()}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>
+            Assigned to: {recipients.map((m: any) => m.name).join(', ')}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 8 }}>
+          <button
+            onClick={sendAsGroup}
+            style={{
+              width: '100%', padding: 14, borderRadius: 12, marginBottom: 8,
+              background: '#25D366', color: '#fff', border: 'none',
+              cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+              fontFamily: 'DM Sans, sans-serif',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+          >
+            <Users size={14} /> Send as group
+          </button>
+          <div style={{ fontSize: 10, color: C.muted, textAlign: 'center' as const, marginBottom: 14 }}>
+            Opens WhatsApp — you'll create the group
+          </div>
+
+          <div style={{ fontSize: 10, letterSpacing: '1.5px', textTransform: 'uppercase' as const, color: C.muted, fontWeight: 500, marginBottom: 8 }}>
+            Or send individually
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            {recipients.map((m: any) => (
+              <button
+                key={m.id}
+                onClick={() => sendIndividual(m)}
+                style={{
+                  padding: '10px 8px', borderRadius: 8,
+                  background: C.ivory, color: '#25D366',
+                  border: `1px solid ${C.border}`, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 500,
+                  fontFamily: 'DM Sans, sans-serif',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+              >
+                <Send size={10} /> {m.name.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={onClose} style={{
+          width: '100%', padding: 12, borderRadius: 12,
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, cursor: 'pointer',
+          fontSize: 11, fontWeight: 500, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+          marginTop: 12,
+        }}>Skip — Done</button>
+      </SheetOverlay>
+    );
+  }
+
   return (
     <SheetOverlay onClose={onClose}>
       <SheetHeader eyebrow="Quick Action" title="Add a To-Do" onClose={onClose} />
 
-      <FieldLabel>What needs doing?</FieldLabel>
+      <FieldLabel required>What needs doing?</FieldLabel>
       <input
         type="text" value={title} onChange={e => setTitle(e.target.value)}
         placeholder="e.g. Confirm Saturday's venue"
@@ -8534,7 +8943,118 @@ function QuickTodoSheet({
         }}
       />
 
-      <FieldLabel>Due date (optional)</FieldLabel>
+      {/* Client autocomplete */}
+      <FieldLabel>Client</FieldLabel>
+      <div style={{ position: 'relative' as const, marginBottom: 14 }}>
+        <input
+          type="text"
+          value={clientName}
+          onChange={(e) => {
+            setClientName(e.target.value);
+            if (selectedClient && e.target.value !== selectedClient.name) setSelectedClient(null);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+          placeholder="Type client name…"
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            background: C.ivory, border: `1px solid ${selectedClient ? C.goldBorder : C.border}`,
+            borderRadius: 12, padding: '13px 14px',
+            fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
+            outline: 'none',
+          }}
+        />
+        {selectedClient && (
+          <button
+            onClick={clearClient}
+            style={{
+              position: 'absolute' as const, top: 10, right: 10,
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+              borderRadius: 12, padding: '4px 10px',
+              fontSize: 10, color: C.goldDeep,
+              cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+            }}
+          >✓ From list</button>
+        )}
+        {showSuggestions && matches.length > 0 && (
+          <div style={{
+            position: 'absolute' as const, top: '100%', left: 0, right: 0,
+            marginTop: 4, background: C.ivory,
+            border: `1px solid ${C.border}`, borderRadius: 10,
+            boxShadow: '0 6px 18px rgba(44,36,32,0.1)',
+            maxHeight: 200, overflowY: 'auto' as const, zIndex: 10,
+          }}>
+            {matches.map((c: any) => (
+              <button
+                key={c.id}
+                onClick={() => pickClient(c)}
+                style={{
+                  width: '100%', padding: '10px 14px',
+                  background: 'transparent', border: 'none',
+                  borderBottom: `1px solid ${C.borderSoft}`,
+                  textAlign: 'left' as const, cursor: 'pointer',
+                  fontFamily: 'inherit', display: 'flex',
+                  alignItems: 'center', gap: 10,
+                }}
+              >
+                <div style={{
+                  width: 30, height: 30, borderRadius: 15,
+                  background: C.goldSoft, display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 600, color: C.goldDeep,
+                  fontFamily: "'Playfair Display', serif",
+                }}>{(c.name || '?')[0].toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: C.dark, fontWeight: 500 }}>{c.name}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        {showSuggestions && clientName.trim().length >= 2 && matches.length === 0 && !selectedClient && (
+          <div style={{
+            position: 'absolute' as const, top: '100%', left: 0, right: 0,
+            marginTop: 4, padding: '10px 14px',
+            background: C.champagne, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10, fontSize: 11, color: C.muted, zIndex: 10,
+          }}>
+            No match. Will be added as a new client.
+          </div>
+        )}
+      </div>
+
+      {/* Team assignees */}
+      {activeMembers.length > 0 && (
+        <>
+          <FieldLabel>Assign to team</FieldLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6, marginBottom: 14 }}>
+            {activeMembers.map((m: any) => {
+              const checked = assignedIds.includes(m.id);
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => toggleAssignee(m.id)}
+                  style={{
+                    padding: '8px 12px', borderRadius: 50,
+                    background: checked ? C.dark : C.ivory,
+                    color: checked ? C.gold : C.dark,
+                    border: `1px solid ${checked ? C.dark : C.border}`,
+                    cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 11, fontWeight: 500,
+                    display: 'flex', alignItems: 'center', gap: 5,
+                  }}
+                >
+                  {checked && <CheckCircle size={11} color={C.gold} />}
+                  {m.name}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <FieldLabel>Due date</FieldLabel>
       <input
         type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
         style={{
@@ -8557,12 +9077,47 @@ function QuickTodoSheet({
               color: priority === p ? (p === 'high' ? C.red : p === 'med' ? C.goldDeep : C.dark) : C.muted,
               border: `1px solid ${priority === p ? (p === 'high' ? C.redBorder : p === 'med' ? C.goldBorder : C.border) : C.border}`,
               borderRadius: '10px', padding: '10px',
-              fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px',
+              fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '1px',
               cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
             }}
           >{p === 'med' ? 'Medium' : p}</button>
         ))}
       </div>
+
+      {/* WhatsApp toggle — only shows when assignees > 0 */}
+      {assignedIds.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: sendWhatsApp ? C.goldSoft : C.pearl,
+          border: `1px solid ${sendWhatsApp ? C.goldBorder : C.border}`,
+          borderRadius: 12, padding: '12px 14px', marginBottom: 16,
+          transition: 'all 0.2s ease',
+        }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: C.dark, fontFamily: 'DM Sans, sans-serif' }}>
+              Notify on WhatsApp
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+              You'll get send options after saving
+            </div>
+          </div>
+          <button
+            onClick={() => setSendWhatsApp(!sendWhatsApp)}
+            style={{
+              width: 40, height: 22, borderRadius: 11,
+              background: sendWhatsApp ? C.gold : C.border,
+              border: 'none', cursor: 'pointer', padding: 0,
+              position: 'relative' as const, transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{
+              position: 'absolute' as const, top: 2, left: sendWhatsApp ? 20 : 2,
+              width: 18, height: 18, borderRadius: 9, background: '#fff',
+              transition: 'all 0.2s ease',
+            }} />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -8579,7 +9134,7 @@ function QuickTodoSheet({
             flex: 1, background: 'transparent', color: C.muted,
             border: `1px solid ${C.border}`, borderRadius: '12px',
             padding: '13px', fontSize: '11px', fontWeight: 500,
-            letterSpacing: '1.5px', textTransform: 'uppercase',
+            letterSpacing: '1.5px', textTransform: 'uppercase' as const,
             cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
           }}
         >Cancel</button>
@@ -8587,10 +9142,10 @@ function QuickTodoSheet({
           onClick={handleSave} disabled={!canSave}
           style={{
             flex: 2,
-            background: canSave ? C.gold : C.border,
-            color: canSave ? C.ivory : C.light,
+            background: canSave ? C.dark : C.border,
+            color: canSave ? C.gold : C.light,
             border: 'none', borderRadius: '12px', padding: '14px',
-            fontSize: '11px', fontWeight: 600, letterSpacing: '1.8px', textTransform: 'uppercase',
+            fontSize: '11px', fontWeight: 600, letterSpacing: '1.8px', textTransform: 'uppercase' as const,
             cursor: canSave ? 'pointer' : 'not-allowed', fontFamily: 'DM Sans, sans-serif',
           }}
         >{submitting ? 'Saving…' : 'Add To-Do'}</button>
@@ -8666,7 +9221,7 @@ function QuickEventSheet({
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
         <div style={{ flex: 1 }}>
-          <FieldLabel>Date</FieldLabel>
+          <FieldLabel required>Date</FieldLabel>
           <input
             type="date" value={eventDate} onChange={e => setEventDate(e.target.value)}
             style={{
@@ -8677,7 +9232,7 @@ function QuickEventSheet({
           />
         </div>
         <div style={{ flex: 1 }}>
-          <FieldLabel>Time (optional)</FieldLabel>
+          <FieldLabel>Time</FieldLabel>
           <input
             type="time" value={eventTime} onChange={e => setEventTime(e.target.value)}
             style={{
@@ -8706,7 +9261,7 @@ function QuickEventSheet({
         <option value="venue_visit">Venue visit</option>
       </select>
 
-      <FieldLabel>Link to client (optional)</FieldLabel>
+      <FieldLabel>Link to client</FieldLabel>
       <select
         value={clientId} onChange={e => setClientId(e.target.value)}
         style={{
@@ -8722,7 +9277,7 @@ function QuickEventSheet({
         ))}
       </select>
 
-      <FieldLabel>Notes (optional)</FieldLabel>
+      <FieldLabel>Notes</FieldLabel>
       <textarea
         value={notes} onChange={e => setNotes(e.target.value)}
         placeholder="Anything to remember…"
@@ -8842,7 +9397,7 @@ function TeamActivityFeed({ vendorId }: { vendorId: string }) {
           background: C.ivory, borderRadius: '16px',
           border: `1px solid ${C.border}`, padding: '24px',
           textAlign: 'center', color: C.muted,
-          fontSize: '12px', fontStyle: 'italic',
+          fontSize: '12px',
         }}>Loading…</div>
       </div>
     );
@@ -8919,11 +9474,10 @@ function TeamActivityFeed({ vendorId }: { vendorId: string }) {
         }}>
           <div style={{
             fontFamily: "'Playfair Display', serif",
-            fontSize: '15px', color: C.dark, fontWeight: 400,
-            fontStyle: 'italic', marginBottom: '4px',
+            fontSize: '15px', color: C.dark, fontWeight: 400, marginBottom: '4px',
           }}>Quiet day so far.</div>
           <div style={{
-            fontSize: '11px', color: C.muted, fontStyle: 'italic',
+            fontSize: '11px', color: C.muted,
           }}>{team.length} team member{team.length === 1 ? '' : 's'} on standby.</div>
         </div>
       </div>
@@ -9090,7 +9644,7 @@ function PaymentSchedulesPanel({ session, paymentSchedules, clients, onSavePayme
         marginTop: '16px', padding: '12px 14px',
         background: C.pearl, borderRadius: '10px',
         fontSize: '11px', color: C.muted, lineHeight: 1.55,
-        textAlign: 'center', fontStyle: 'italic',
+        textAlign: 'center',
       }}>
         Need more than 3 instalments? Use the
         <a href="/vendor/mobile/profile/edit" target="_blank" rel="noreferrer" style={{ color: C.goldDeep, textDecoration: 'underline', marginLeft: '4px' }}>business portal →</a>
@@ -9163,7 +9717,7 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
       borderRadius: '12px', padding: '14px', marginBottom: '10px',
     }}>
       <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, letterSpacing: '1px', marginBottom: '4px', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: '10px', color: C.light, marginBottom: '10px', fontStyle: 'italic' }}>{hint}</div>
+      <div style={{ fontSize: '10px', color: C.light, marginBottom: '10px' }}>{hint}</div>
       <div style={{ display: 'flex', gap: '8px' }}>
         <div style={{ flex: 1 }}>
           <FieldLabel>Amount (₹)</FieldLabel>
@@ -9266,8 +9820,7 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
 
       <div style={{
         marginTop: '12px',
-        fontSize: '10px', color: C.light, textAlign: 'center',
-        fontStyle: 'italic', lineHeight: 1.5,
+        fontSize: '10px', color: C.light, textAlign: 'center', lineHeight: 1.5,
       }}>
         More instalments? Use the business portal →
       </div>
@@ -9637,7 +10190,7 @@ function ExpensesPanel({ session, tier, clients }: any) {
                       {isLoss ? '−' : ''}₹{fmtINR(Math.abs(profit))}
                     </div>
                     {m.unpaidInvoiced > 0 && (
-                      <div style={{ fontSize: 9, color: C.muted, fontStyle: 'italic' as const, marginTop: 2 }}>
+                      <div style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>
                         +₹{fmtINR(m.unpaidInvoiced)} expected
                       </div>
                     )}
@@ -10017,7 +10570,7 @@ function AddExpenseSheet({ vendorId, clients, onClose, onSaved }: {
         {/* Client — autocomplete */}
         <div style={{ marginBottom: '14px' }}>
           <div style={{ fontSize: '10px', letterSpacing: '1.5px', textTransform: 'uppercase', color: C.muted, fontWeight: 500, marginBottom: '6px' }}>
-            Link to client <span style={{ textTransform: 'none', letterSpacing: 0, fontStyle: 'italic', color: C.light }}>(optional)</span>
+            Link to client
           </div>
           <div style={{ position: 'relative' }}>
             <input
@@ -10094,7 +10647,7 @@ function AddExpenseSheet({ vendorId, clients, onClose, onSaved }: {
             )}
           </div>
           {selectedClient && (
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: 'italic' }}>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
               This expense will count against {selectedClient.name}'s profit calculation.
             </div>
           )}
@@ -10103,7 +10656,7 @@ function AddExpenseSheet({ vendorId, clients, onClose, onSaved }: {
         {/* Receipt upload */}
         <div style={{ marginBottom: '18px' }}>
           <div style={{ fontSize: '10px', letterSpacing: '1.5px', textTransform: 'uppercase', color: C.muted, fontWeight: 500, marginBottom: '6px' }}>
-            Receipt <span style={{ textTransform: 'none', letterSpacing: 0, fontStyle: 'italic', color: C.light }}>(optional)</span>
+            Receipt
           </div>
           <input
             ref={fileInputRef}
@@ -10656,7 +11209,7 @@ function LegacyTeamPanel({ session, tier }: { session: VendorSession; tier: Tier
           <div style={{ fontSize: '9px', color: C.muted, marginTop: '4px', letterSpacing: '1.5px', textTransform: 'uppercase', fontWeight: 500 }}>Team Members</div>
         </div>
         {tier !== 'prestige' && (
-          <div style={{ fontSize: '10px', color: C.muted, fontStyle: 'italic', textAlign: 'right', maxWidth: '140px' }}>
+          <div style={{ fontSize: '10px', color: C.muted, textAlign: 'right', maxWidth: '140px' }}>
             Upgrade to Prestige for unlimited team
           </div>
         )}
@@ -10843,14 +11396,14 @@ function TeamMemberSheet({ title, initial, onClose, onSave, onDelete }: {
           {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
 
-        <FormLabel>Phone (optional)</FormLabel>
+        <FormLabel>Phone</FormLabel>
         <input
           type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
           placeholder="+91 98765 43210"
           style={{ width: '100%', background: C.pearl, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '13px 14px', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', color: C.dark, outline: 'none', boxSizing: 'border-box', marginBottom: '14px' }}
         />
 
-        <FormLabel>Email (optional)</FormLabel>
+        <FormLabel>Email</FormLabel>
         <input
           type="email" value={email} onChange={(e) => setEmail(e.target.value)}
           placeholder="name@example.com"
@@ -10984,7 +11537,7 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
       <>
         <div style={{ background: C.ivory, borderRadius: '16px', border: `1px solid ${C.goldBorder}`, padding: '16px 18px', marginBottom: '12px' }}>
           <div style={{ fontSize: '9px', fontWeight: 600, letterSpacing: '2.5px', textTransform: 'uppercase', color: C.goldDeep, marginBottom: '8px' }}>Sending · {sentIds.length} / {recipients.length}</div>
-          <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.55, fontStyle: 'italic' }}>
+          <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.55 }}>
             Tap each recipient below — WhatsApp opens with the personalized message. Send it, then return and tap the next.
           </div>
         </div>
@@ -11072,7 +11625,7 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
           marginBottom: '8px',
         }}
       />
-      <div style={{ fontSize: '10px', color: C.muted, marginBottom: '14px', fontStyle: 'italic' }}>
+      <div style={{ fontSize: '10px', color: C.muted, marginBottom: '14px' }}>
         Tip: {'{{name}}'} becomes each client's name automatically.
       </div>
 
@@ -11306,7 +11859,7 @@ function TeamChatPanel({ session, tier }: { session: VendorSession; tier: Tier }
         }}
       >
         {messages.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted, fontSize: '12px', fontStyle: 'italic' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted, fontSize: '12px' }}>
             No messages in this channel yet.
           </div>
         ) : (
@@ -11383,14 +11936,17 @@ function TeamChatPanel({ session, tier }: { session: VendorSession; tier: Tier }
   );
 }
 
-function FormLabel({ children }: { children: React.ReactNode }) {
+function FormLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
     <div style={{
       fontFamily: 'DM Sans, sans-serif',
       fontSize: '9px', fontWeight: 600,
       letterSpacing: '2px', textTransform: 'uppercase',
       color: C.muted, marginBottom: '6px',
-    }}>{children}</div>
+    }}>
+      {children}
+      {required && <span style={{ color: '#C65757', marginLeft: 4, letterSpacing: 0 }}>*</span>}
+    </div>
   );
 }
 
@@ -11477,7 +12033,7 @@ function ProfileScreen({
           }}>{initials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: C.dark, letterSpacing: '0.2px', lineHeight: 1.2 }}>{name}</div>
-            <div style={{ fontSize: '12px', color: C.muted, marginTop: '3px', fontStyle: 'italic' }}>
+            <div style={{ fontSize: '12px', color: C.muted, marginTop: '3px' }}>
               {(session.category || 'Vendor').replace(/-/g, ' ')}{session.city ? ` · ${session.city}` : ''}
             </div>
           </div>
@@ -11583,7 +12139,7 @@ function ProfileScreen({
                       padding: '2px 6px', borderRadius: '3px',
                     }}>Beta</span>
                   </div>
-                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px', fontStyle: 'italic' }}>{item.desc}</div>
+                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{item.desc}</div>
                 </div>
                 <ChevronRight size={14} color={C.light} />
               </button>

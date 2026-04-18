@@ -380,7 +380,15 @@ app.get('/api/bookings/:id', async (req, res) => {
 
 app.patch('/api/bookings/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('bookings').update(req.body).eq('id', req.params.id).select().single();
+    const allowed = [
+      'status', 'event_date', 'event_time', 'event_type',
+      'venue', 'guest_count', 'amount', 'notes',
+      'client_name', 'client_phone', 'client_email',
+      'assigned_to',
+    ];
+    const patch = {};
+    for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+    const { data, error } = await supabase.from('bookings').update(patch).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
