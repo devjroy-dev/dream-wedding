@@ -7,6 +7,7 @@ import {
   Zap, ArrowRight, Sparkles, Phone, Eye, EyeOff,
   Plus, Trash2, Clock, AlertCircle, Check, Edit3, Circle,
   Camera, Paperclip, Image as ImageIcon, Gift, Upload,
+  Link as LinkIcon, Share2, ExternalLink, Smartphone,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -531,6 +532,45 @@ function buildWhatsAppNudge(bride: string, groom: string, guest: Guest, events: 
 }
 
 // ─────────────────────────────────────────────────────────────
+// MOODBOARD TYPES + HELPERS
+// ─────────────────────────────────────────────────────────────
+
+type PinType = 'upload' | 'link' | 'note';
+
+interface MoodboardPin {
+  id: string;
+  couple_id: string;
+  event: string;
+  pin_type: PinType;
+  image_url: string | null;
+  source_url: string | null;
+  source_domain: string | null;
+  title: string | null;
+  note: string | null;
+  is_curated: boolean;
+  is_suggestion: boolean;
+  added_by: string | null;
+  added_by_name: string | null;
+  created_at: string;
+}
+
+interface OGPreview {
+  og_image: string | null;
+  og_title: string | null;
+  og_description: string | null;
+  source_domain: string;
+}
+
+function pinsForEvent(pins: MoodboardPin[], event: string): MoodboardPin[] {
+  if (event === 'All') return pins.filter(p => !p.is_suggestion);
+  return pins.filter(p => p.event === event && !p.is_suggestion);
+}
+
+function suggestionCount(pins: MoodboardPin[]): number {
+  return pins.filter(p => p.is_suggestion).length;
+}
+
+// ─────────────────────────────────────────────────────────────
 // SHARED UI
 // ─────────────────────────────────────────────────────────────
 
@@ -623,6 +663,7 @@ function useCoupleData(session: CoupleSession | null) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [shagun, setShagun] = useState<ShagunEntry[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [pins, setPins] = useState<MoodboardPin[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(false);
 
@@ -660,13 +701,14 @@ function useCoupleData(session: CoupleSession | null) {
         const userD = await userRes.json();
         const alreadySeeded = !!userD?.data?.checklist_seeded;
 
-        // Parallel load: checklist, budget, expenses, shagun, guests
-        const [checklistRes, budgetRes, expensesRes, shagunRes, guestsRes] = await Promise.all([
+        // Parallel load: checklist, budget, expenses, shagun, guests, moodboard
+        const [checklistRes, budgetRes, expensesRes, shagunRes, guestsRes, pinsRes] = await Promise.all([
           fetch(`${API}/api/couple/checklist/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/budget/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/expenses/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/shagun/${session.id}`).then(r => r.json()),
           fetch(`${API}/api/couple/guests/${session.id}`).then(r => r.json()),
+          fetch(`${API}/api/couple/moodboard/${session.id}`).then(r => r.json()),
         ]);
 
         const existing: ChecklistTask[] = checklistRes.success ? (checklistRes.data || []) : [];
@@ -688,11 +730,12 @@ function useCoupleData(session: CoupleSession | null) {
           if (mounted) { setTasks(existing); setSeeded(alreadySeeded); }
         }
 
-        // Budget/expenses/shagun
+        // Budget/expenses/shagun/guests/moodboard
         if (mounted && budgetRes.success)   setBudget(budgetRes.data);
         if (mounted && expensesRes.success) setExpenses(expensesRes.data || []);
         if (mounted && shagunRes.success)   setShagun(shagunRes.data || []);
         if (mounted && guestsRes.success)   setGuests(guestsRes.data || []);
+        if (mounted && pinsRes.success)     setPins(pinsRes.data || []);
       } catch (e) {
         // Network failure — fall through silently
       }
@@ -884,12 +927,68 @@ function useCoupleData(session: CoupleSession | null) {
     } catch {}
   };
 
+  // ── Moodboard mutations ─────────────────────────────────────
+
+  const fetchOGPreview = async (url: string): Promise<OGPreview | null> => {
+    try {
+      const res = await fetch(`${API}/api/couple/moodboard/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const d = await res.json();
+      if (d.success && d.data) return d.data;
+    } catch {}
+    return null;
+  };
+
+  const addPin = async (payload: Partial<MoodboardPin>) => {
+    if (!session?.id) return null;
+    try {
+      const res = await fetch(`${API}/api/couple/moodboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          couple_id: session.id,
+          added_by: session.id,
+          added_by_name: session.name,
+        }),
+      });
+      const d = await res.json();
+      if (d.success && d.data) {
+        setPins(prev => [d.data, ...prev]);
+        return d.data as MoodboardPin;
+      }
+    } catch {}
+    return null;
+  };
+
+  const updatePin = async (id: string, patch: Partial<MoodboardPin>) => {
+    setPins(prev => prev.map(p => p.id === id ? { ...p, ...patch } as MoodboardPin : p));
+    try {
+      await fetch(`${API}/api/couple/moodboard/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+    } catch {}
+  };
+
+  const deletePin = async (id: string) => {
+    setPins(prev => prev.filter(p => p.id !== id));
+    try {
+      await fetch(`${API}/api/couple/moodboard/${id}`, { method: 'DELETE' });
+    } catch {}
+  };
+
   return {
     tasks, loading, seeded, refreshTasks, toggleComplete, updateTask, deleteTask, addTask,
     budget, expenses, shagun, refreshBudget,
     updateBudget, addExpense, updateExpense, deleteExpense,
     addShagun, updateShagun, deleteShagun,
     guests, addGuest, updateGuest, deleteGuest,
+    pins, fetchOGPreview, addPin, updatePin, deletePin,
   };
 }
 
@@ -1378,13 +1477,14 @@ function HomeScreen({ session, onNavTo, tasks, loading, onToggleComplete, budget
 // MY WEDDING SCREEN
 // ─────────────────────────────────────────────────────────────
 
-function MyWeddingScreen({ session, onToolOpen, tasks, budget, expenses, guests }: {
+function MyWeddingScreen({ session, onToolOpen, tasks, budget, expenses, guests, pins }: {
   session: CoupleSession;
   onToolOpen: (id: string) => void;
   tasks: ChecklistTask[];
   budget: CoupleBudget | null;
   expenses: Expense[];
   guests: Guest[];
+  pins: MoodboardPin[];
 }) {
   const days = daysToGo(session.weddingDate);
   const progress = getChecklistProgress(tasks);
@@ -1393,6 +1493,8 @@ function MyWeddingScreen({ session, onToolOpen, tasks, budget, expenses, guests 
   const budgetHealth = getBudgetHealth(totalBudget, committed);
   const guestTotal = totalGuestCount(guests);
   const guestConfirmed = totalConfirmed(guests, session.events);
+  const nonSuggestionPins = pins.filter(p => !p.is_suggestion);
+  const pinSuggestions = pins.filter(p => p.is_suggestion).length;
 
   const progressLabels: Record<string, string> = {
     checklist: progress.total > 0 ? `${progress.done} of ${progress.total} done` : 'Tasks across all your events',
@@ -1402,7 +1504,9 @@ function MyWeddingScreen({ session, onToolOpen, tasks, budget, expenses, guests 
     guests: guestTotal.headcount > 0
       ? `${guestTotal.headcount} guests · ${guestConfirmed} confirmed`
       : "Who's coming to what",
-    moodboard: 'Per-event inspiration boards',
+    moodboard: nonSuggestionPins.length > 0
+      ? `${nonSuggestionPins.length} pin${nonSuggestionPins.length !== 1 ? 's' : ''}${pinSuggestions > 0 ? ` · ${pinSuggestions} suggestion${pinSuggestions !== 1 ? 's' : ''}` : ''}`
+      : 'Per-event inspiration boards',
     vendors:   'Booked, confirmed, paid',
   };
   return (
@@ -3357,12 +3461,42 @@ function GuestTool({
   const [activeEvent, setActiveEvent] = useState<string>('All');
   const [showAdd, setShowAdd] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
+  const [contactImport, setContactImport] = useState<Array<{ name: string; phone: string }> | null>(null);
+  const [contactsSupported, setContactsSupported] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  // Detect Contact Picker API (Android Chrome) — hidden on iOS
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window) {
+      setContactsSupported(true);
+    }
+  }, []);
 
   const canEditTool = canEdit(session.coShareRole, 'guests');
 
   const total = totalGuestCount(guests);
   const pendingNudges = pendingNudgeCount(guests);
   const confirmed = totalConfirmed(guests, session.events);
+
+  // Pick contacts from phonebook
+  const pickContacts = async () => {
+    try {
+      setImporting(true);
+      // @ts-ignore — Contact Picker API not in standard TS lib yet
+      const contacts = await (navigator as any).contacts.select(['name', 'tel'], { multiple: true });
+      if (!contacts || contacts.length === 0) { setImporting(false); return; }
+      const mapped = contacts
+        .map((c: any) => ({
+          name: (c.name?.[0] || '').trim(),
+          phone: (c.tel?.[0] || '').replace(/\s+/g, ''),
+        }))
+        .filter((c: any) => c.name);
+      setContactImport(mapped);
+    } catch (e) {
+      // User cancelled or permission denied — silent
+    }
+    setImporting(false);
+  };
 
   // Filter logic
   const filteredGuests = guests.filter(g => {
@@ -3418,13 +3552,30 @@ function GuestTool({
           </div>
         </div>
         {canEditTool && (
-          <button onClick={() => setShowAdd(true)} style={{
-            width: 36, height: 36, borderRadius: 18, background: C.dark,
-            border: 'none', cursor: 'pointer', display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Plus size={16} color={C.gold} />
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {contactsSupported && (
+              <button
+                onClick={pickContacts}
+                disabled={importing}
+                style={{
+                  width: 36, height: 36, borderRadius: 18, background: C.ivory,
+                  border: `1px solid ${C.goldBorder}`, cursor: importing ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: importing ? 0.5 : 1,
+                }}
+                title="Import from phonebook"
+              >
+                <Smartphone size={14} color={C.gold} />
+              </button>
+            )}
+            <button onClick={() => setShowAdd(true)} style={{
+              width: 36, height: 36, borderRadius: 18, background: C.dark,
+              border: 'none', cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Plus size={16} color={C.gold} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -3523,11 +3674,29 @@ function GuestTool({
             <p style={{ margin: '0 0 6px', fontSize: 16, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
               No guests yet.
             </p>
-            <p style={{ margin: 0, fontSize: 13, color: C.muted, fontWeight: 300, fontFamily: 'DM Sans, sans-serif', lineHeight: '20px' }}>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: C.muted, fontWeight: 300, fontFamily: 'DM Sans, sans-serif', lineHeight: '20px' }}>
               {canEditTool
                 ? 'Start with the people you\u2019re most excited to have there.'
                 : 'Nothing tracked yet.'}
             </p>
+            {canEditTool && contactsSupported && (
+              <button
+                onClick={pickContacts}
+                disabled={importing}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '10px 18px', borderRadius: 10,
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  color: C.goldDeep, fontFamily: 'DM Sans, sans-serif',
+                  fontSize: 12, fontWeight: 500,
+                  cursor: importing ? 'default' : 'pointer',
+                  opacity: importing ? 0.5 : 1,
+                }}
+              >
+                <Smartphone size={13} color={C.gold} />
+                Import from phonebook
+              </button>
+            )}
           </div>
         ) : filteredGuests.length === 0 ? (
           <div style={{
@@ -3585,6 +3754,27 @@ function GuestTool({
           onDelete={async () => {
             await onDelete(editingGuest.id);
             setEditingGuest(null);
+          }}
+        />
+      )}
+      {contactImport && (
+        <ContactImportModal
+          contacts={contactImport}
+          events={session.events}
+          onClose={() => setContactImport(null)}
+          onSave={async (selected) => {
+            // Bulk-add each selected contact as a guest
+            for (const c of selected) {
+              await onAdd({
+                name: c.name,
+                phone: c.phone || null,
+                side: c.side,
+                household_count: c.householdCount,
+                is_household_head: c.householdCount > 1,
+                event_invites: c.invites,
+              });
+            }
+            setContactImport(null);
           }}
         />
       )}
@@ -3986,6 +4176,1356 @@ function GuestEditor({ mode, events, guest, onClose, onSave, onDelete }: {
           }}>
             {mode === 'add' ? 'Add' : 'Save'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONTACT IMPORT MODAL
+// Review imported contacts, set side + events + household count
+// per contact, then bulk-create as guests.
+// ─────────────────────────────────────────────────────────────
+
+interface ImportedContactRow {
+  name: string;
+  phone: string;
+  side: GuestSide;
+  householdCount: number;
+  invites: Record<string, EventInvite>;
+  selected: boolean;
+}
+
+function ContactImportModal({ contacts, events, onClose, onSave }: {
+  contacts: Array<{ name: string; phone: string }>;
+  events: string[];
+  onClose: () => void;
+  onSave: (selected: ImportedContactRow[]) => Promise<void>;
+}) {
+  // Initial state: all selected, bride's side, household 1, all events invited
+  const [rows, setRows] = useState<ImportedContactRow[]>(() =>
+    contacts.map(c => {
+      const invites: Record<string, EventInvite> = {};
+      for (const ev of events) invites[ev] = { invited: true, rsvp: 'pending' };
+      return {
+        name: c.name,
+        phone: c.phone,
+        side: 'bride',
+        householdCount: 1,
+        invites,
+        selected: true,
+      };
+    })
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Bulk actions
+  const [bulkSide, setBulkSide] = useState<GuestSide | null>(null);
+
+  const updateRow = (i: number, patch: Partial<ImportedContactRow>) => {
+    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  };
+
+  const selectAll = () => setRows(prev => prev.map(r => ({ ...r, selected: true })));
+  const selectNone = () => setRows(prev => prev.map(r => ({ ...r, selected: false })));
+
+  const applyBulkSide = (side: GuestSide) => {
+    setRows(prev => prev.map(r => r.selected ? { ...r, side } : r));
+    setBulkSide(side);
+  };
+
+  const selectedCount = rows.filter(r => r.selected).length;
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(rows.filter(r => r.selected));
+    setSaving(false);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          Imported {contacts.length} contact{contacts.length !== 1 ? 's' : ''}
+        </p>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+          Review before adding. You can edit any of them later.
+        </p>
+
+        {/* Bulk controls */}
+        <div style={{
+          display: 'flex', gap: 6, padding: '10px 12px', marginBottom: 12,
+          background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10,
+          alignItems: 'center', flexWrap: 'wrap' as const,
+        }}>
+          <span style={{ fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, marginRight: 'auto' }}>
+            {selectedCount} of {rows.length} selected
+          </span>
+          <button onClick={selectAll} style={bulkBtnStyle(false)}>All</button>
+          <button onClick={selectNone} style={bulkBtnStyle(false)}>None</button>
+          <span style={{ width: 1, height: 16, background: C.border, margin: '0 4px' }} />
+          <button onClick={() => applyBulkSide('bride')} style={bulkBtnStyle(bulkSide === 'bride')}>Bride's</button>
+          <button onClick={() => applyBulkSide('groom')} style={bulkBtnStyle(bulkSide === 'groom')}>Groom's</button>
+        </div>
+
+        {/* Rows */}
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 18 }}>
+          {rows.map((r, i) => (
+            <div key={i} style={{
+              background: r.selected ? C.ivory : C.pearl,
+              border: `1px solid ${r.selected ? C.border : C.border}`,
+              borderRadius: 12, padding: '10px 12px',
+              opacity: r.selected ? 1 : 0.5,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  onClick={() => updateRow(i, { selected: !r.selected })}
+                  style={{
+                    width: 22, height: 22, borderRadius: 11,
+                    background: r.selected ? C.gold : C.cream,
+                    border: `1.5px solid ${C.goldBorder}`,
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  {r.selected && <Check size={12} color={C.cream} />}
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{
+                    margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                    overflow: 'hidden' as const, textOverflow: 'ellipsis' as const, whiteSpace: 'nowrap' as const,
+                  }}>
+                    {r.name}
+                  </p>
+                  {r.phone && (
+                    <p style={{
+                      margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
+                    }}>
+                      {r.phone}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {r.selected && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 10, paddingLeft: 32, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+                  {(['bride', 'groom'] as GuestSide[]).map(s => (
+                    <button key={s} onClick={() => updateRow(i, { side: s })} style={{
+                      padding: '4px 10px', borderRadius: 12,
+                      background: r.side === s ? C.dark : C.ivory,
+                      border: `1px solid ${r.side === s ? C.dark : C.border}`,
+                      color: r.side === s ? C.gold : C.muted,
+                      fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                    }}>{s === 'bride' ? "Bride's" : "Groom's"}</button>
+                  ))}
+                  <span style={{ width: 1, height: 14, background: C.border }} />
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: C.ivory, border: `1px solid ${C.border}`,
+                    borderRadius: 12, padding: '2px 4px 2px 8px',
+                  }}>
+                    <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>+{r.householdCount - 1}</span>
+                    <button
+                      onClick={() => updateRow(i, { householdCount: Math.max(1, r.householdCount - 1) })}
+                      style={{
+                        width: 20, height: 20, borderRadius: 10,
+                        background: C.cream, border: `1px solid ${C.border}`,
+                        cursor: 'pointer', padding: 0, fontSize: 11, color: C.dark,
+                      }}
+                    >−</button>
+                    <button
+                      onClick={() => updateRow(i, { householdCount: r.householdCount + 1 })}
+                      style={{
+                        width: 20, height: 20, borderRadius: 10,
+                        background: C.dark, border: 'none',
+                        cursor: 'pointer', padding: 0, fontSize: 11, color: C.gold,
+                      }}
+                    >+</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <GhostButton label="Cancel" onTap={onClose} />
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={selectedCount === 0 || saving}
+            style={{
+              padding: '12px 24px', borderRadius: 12,
+              background: C.dark, border: 'none',
+              cursor: selectedCount > 0 && !saving ? 'pointer' : 'default',
+              color: C.gold, fontFamily: 'DM Sans, sans-serif',
+              fontSize: 12, fontWeight: 400, letterSpacing: '1.5px',
+              textTransform: 'uppercase' as const,
+              opacity: selectedCount > 0 && !saving ? 1 : 0.4,
+            }}
+          >
+            {saving ? 'Adding…' : `Add ${selectedCount > 0 ? selectedCount : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function bulkBtnStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: '4px 10px', borderRadius: 12,
+    background: active ? C.dark : C.ivory,
+    border: `1px solid ${active ? C.dark : C.border}`,
+    color: active ? C.gold : C.muted,
+    fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOODBOARD TOOL
+// Pure image wall per event. Pins show images only on the board;
+// tapping opens full viewer with notes, source link, vendor tag.
+// ─────────────────────────────────────────────────────────────
+
+function MoodboardTool({
+  session, pins, loading,
+  onFetchPreview, onAdd, onUpdate, onDelete, onBack,
+}: {
+  session: CoupleSession;
+  pins: MoodboardPin[];
+  loading: boolean;
+  onFetchPreview: (url: string) => Promise<OGPreview | null>;
+  onAdd: (payload: Partial<MoodboardPin>) => Promise<MoodboardPin | null>;
+  onUpdate: (id: string, patch: Partial<MoodboardPin>) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onBack: () => void;
+}) {
+  const [activeEvent, setActiveEvent] = useState<string>(session.events[0] || 'All');
+  const [showAdd, setShowAdd] = useState(false);
+  const [showCurate, setShowCurate] = useState(false);
+  const [viewPin, setViewPin] = useState<MoodboardPin | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const canEditBoard = canEdit(session.coShareRole, 'moodboard');
+  const isBridesmaid = session.coShareRole === 'bridesmaid';
+
+  const visiblePins = pinsForEvent(pins, activeEvent);
+  const suggestionsAll = pins.filter(p => p.is_suggestion);
+
+  return (
+    <div style={{ padding: '0 0 120px' }}>
+
+      {/* Sticky header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '72px 20px 16px', background: C.cream,
+        position: 'sticky' as const, top: 0, zIndex: 30,
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={onBack} style={{
+            width: 36, height: 36, borderRadius: 18, background: C.ivory,
+            border: `1px solid ${C.border}`, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            <ChevronRight size={16} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+          </button>
+          <div>
+            <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+              Moodboard
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              {pins.length > 0 ? `${pins.filter(p => !p.is_suggestion).length} pins across your events` : 'Your wedding vision, all in one place'}
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canEditBoard && suggestionsAll.length > 0 && (
+            <button onClick={() => setShowSuggestions(true)} style={{
+              position: 'relative', width: 36, height: 36, borderRadius: 18,
+              background: C.ivory, border: `1px solid ${C.goldBorder}`,
+              cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Bell size={14} color={C.gold} />
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                minWidth: 16, height: 16, borderRadius: 8,
+                background: C.gold, color: C.cream,
+                fontSize: 10, fontWeight: 600, fontFamily: 'DM Sans, sans-serif',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '0 4px',
+              }}>{suggestionsAll.length}</span>
+            </button>
+          )}
+          {(canEditBoard || isBridesmaid) && (
+            <button onClick={() => setShowAdd(true)} style={{
+              width: 36, height: 36, borderRadius: 18, background: C.dark,
+              border: 'none', cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Plus size={16} color={C.gold} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Event tabs */}
+      <div style={{
+        display: 'flex', gap: 6, padding: '12px 20px',
+        overflowX: 'auto' as const, WebkitOverflowScrolling: 'touch' as any,
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        {['All', ...session.events].map(ev => {
+          const active = activeEvent === ev;
+          const count = ev === 'All'
+            ? pinsForEvent(pins, 'All').length
+            : pins.filter(p => p.event === ev && !p.is_suggestion).length;
+          return (
+            <button key={ev} onClick={() => setActiveEvent(ev)} style={{
+              padding: '6px 14px', borderRadius: 18, whiteSpace: 'nowrap' as const,
+              background: active ? C.dark : C.ivory,
+              border: `1px solid ${active ? C.dark : C.border}`,
+              color: active ? C.gold : C.muted,
+              fontSize: 12, fontWeight: active ? 500 : 400,
+              fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', flexShrink: 0,
+            }}>
+              {ev}{count > 0 ? ` · ${count}` : ''}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Action bar — Share curated view */}
+      {canEditBoard && activeEvent !== 'All' && visiblePins.length >= 3 && (
+        <div style={{ padding: '12px 20px 0' }}>
+          <button onClick={() => setShowCurate(true)} style={{
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
+          }}>
+            <Share2 size={14} color={C.gold} />
+            <span style={{ fontSize: 12, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+              Share a curated view with family
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Share-from-anywhere teaser */}
+      {canEditBoard && pins.length >= 2 && (
+        <div style={{ padding: '12px 20px 0' }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12,
+            background: C.pearl, border: `1px dashed ${C.goldBorder}`,
+            borderRadius: 10, padding: '10px 14px',
+          }}>
+            <Smartphone size={16} color={C.gold} style={{ marginTop: 2, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                Share from anywhere — coming with the app
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>
+                See something on Instagram or Pinterest? You'll be able to share it straight into your moodboard when we launch the app.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Board */}
+      <div style={{ padding: '16px 12px' }}>
+        {loading ? (
+          <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', textAlign: 'center', padding: '32px 0' }}>
+            Loading…
+          </p>
+        ) : visiblePins.length === 0 ? (
+          <div style={{
+            background: C.ivory, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '40px 24px', textAlign: 'center', margin: '0 8px',
+          }}>
+            <Heart size={28} color={C.goldBorder} style={{ marginBottom: 10 }} />
+            <p style={{ margin: '0 0 6px', fontSize: 16, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+              {pins.length === 0 ? 'Start pinning your vision.' : `Nothing pinned for ${activeEvent} yet.`}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: C.muted, fontWeight: 300, fontFamily: 'DM Sans, sans-serif', lineHeight: '20px' }}>
+              {canEditBoard || isBridesmaid
+                ? 'Tap + above. Photos, Pinterest links, Instagram — it all lives here.'
+                : 'The bride hasn\u2019t pinned anything yet.'}
+            </p>
+          </div>
+        ) : (
+          // Masonry-esque grid — 2 columns on narrow, pure image wall
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 8,
+          }}>
+            {visiblePins.map(pin => (
+              <PinThumb
+                key={pin.id}
+                pin={pin}
+                onTap={() => setViewPin(pin)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {showAdd && (
+        <PinEditor
+          mode="add"
+          isSuggestion={isBridesmaid}
+          events={session.events}
+          defaultEvent={activeEvent === 'All' ? session.events[0] : activeEvent}
+          onFetchPreview={onFetchPreview}
+          onClose={() => setShowAdd(false)}
+          onSave={async payload => {
+            await onAdd(payload);
+            setShowAdd(false);
+          }}
+        />
+      )}
+      {viewPin && (
+        <PinViewer
+          pin={viewPin}
+          canEdit={canEditBoard}
+          onClose={() => setViewPin(null)}
+          onToggleCurate={async () => {
+            await onUpdate(viewPin.id, { is_curated: !viewPin.is_curated });
+            setViewPin({ ...viewPin, is_curated: !viewPin.is_curated });
+          }}
+          onDelete={async () => {
+            await onDelete(viewPin.id);
+            setViewPin(null);
+          }}
+        />
+      )}
+      {showCurate && (
+        <CuratedShareModal
+          session={session}
+          pins={pins.filter(p => p.event === activeEvent && !p.is_suggestion)}
+          event={activeEvent}
+          onUpdatePin={onUpdate}
+          onClose={() => setShowCurate(false)}
+        />
+      )}
+      {showSuggestions && (
+        <SuggestionsModal
+          suggestions={suggestionsAll}
+          onApprove={async id => { await onUpdate(id, { is_suggestion: false }); }}
+          onReject={async id => { await onDelete(id); }}
+          onClose={() => setShowSuggestions(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Single pin thumbnail — image only, no text clutter
+function PinThumb({ pin, onTap }: { pin: MoodboardPin; onTap: () => void }) {
+  const hasImage = !!pin.image_url;
+  return (
+    <button
+      onClick={onTap}
+      style={{
+        position: 'relative', background: hasImage ? C.cream : C.pearl,
+        border: `1px solid ${pin.is_curated ? C.goldBorder : C.border}`,
+        borderRadius: 12, overflow: 'hidden' as const, cursor: 'pointer',
+        padding: 0, width: '100%', aspectRatio: '3 / 4',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      {hasImage ? (
+        <img
+          src={pin.image_url || ''}
+          alt=""
+          style={{
+            width: '100%', height: '100%', objectFit: 'cover' as const,
+            display: 'block' as const,
+          }}
+          loading="lazy"
+          onError={e => {
+            // Fallback if image 404s — show note/title instead
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      ) : (
+        <div style={{
+          display: 'flex', flexDirection: 'column' as const,
+          alignItems: 'center', justifyContent: 'center',
+          padding: 16, textAlign: 'center' as const,
+        }}>
+          {pin.pin_type === 'link'
+            ? <LinkIcon size={20} color={C.gold} style={{ marginBottom: 8 }} />
+            : <Edit3 size={20} color={C.gold} style={{ marginBottom: 8 }} />}
+          <p style={{
+            margin: 0, fontSize: 11, color: C.dark, fontFamily: 'Playfair Display, serif',
+            lineHeight: '16px',
+            display: '-webkit-box' as any,
+            WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' as any,
+            overflow: 'hidden' as const,
+          }}>
+            {pin.note || pin.title || pin.source_domain || 'Note'}
+          </p>
+        </div>
+      )}
+
+      {/* Curated badge */}
+      {pin.is_curated && (
+        <div style={{
+          position: 'absolute', top: 6, right: 6,
+          width: 22, height: 22, borderRadius: 11,
+          background: C.gold, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+        }}>
+          <Sparkles size={11} color={C.cream} />
+        </div>
+      )}
+
+      {/* Source domain chip — bottom left if it's a link with image */}
+      {hasImage && pin.pin_type === 'link' && pin.source_domain && (
+        <div style={{
+          position: 'absolute', bottom: 6, left: 6,
+          padding: '2px 7px', borderRadius: 10,
+          background: 'rgba(44,36,32,0.7)', color: C.cream,
+          fontSize: 9, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          letterSpacing: '0.3px',
+          display: 'flex', alignItems: 'center', gap: 3,
+        }}>
+          <LinkIcon size={8} color={C.cream} />
+          <span>{pin.source_domain.slice(0, 16)}</span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+// Full-screen pin viewer
+function PinViewer({ pin, canEdit: canEditPin, onClose, onToggleCurate, onDelete }: {
+  pin: MoodboardPin;
+  canEdit: boolean;
+  onClose: () => void;
+  onToggleCurate: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.94)',
+        zIndex: 250, display: 'flex', flexDirection: 'column' as const,
+      }}
+      onClick={onClose}
+    >
+      {/* Top bar */}
+      <div style={{
+        padding: 'max(16px, env(safe-area-inset-top)) 16px 12px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <button onClick={onClose} style={{
+          width: 36, height: 36, borderRadius: 18,
+          background: 'rgba(255,255,255,0.15)', border: 'none',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <X size={16} color={C.cream} />
+        </button>
+        {canEditPin && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={e => { e.stopPropagation(); onToggleCurate(); }}
+              style={{
+                padding: '8px 14px', borderRadius: 18,
+                background: pin.is_curated ? C.gold : 'rgba(255,255,255,0.15)',
+                border: 'none', cursor: 'pointer',
+                fontSize: 12, color: pin.is_curated ? C.dark : C.cream,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              <Sparkles size={12} color={pin.is_curated ? C.dark : C.cream} />
+              {pin.is_curated ? 'Curated' : 'Curate'}
+            </button>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                if (confirm('Remove this pin?')) onDelete();
+              }}
+              style={{
+                width: 36, height: 36, borderRadius: 18,
+                background: 'rgba(255,255,255,0.15)', border: 'none',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Trash2 size={14} color={C.cream} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Image */}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}
+      >
+        {pin.image_url ? (
+          <img
+            src={pin.image_url}
+            alt=""
+            style={{
+              maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' as const,
+              borderRadius: 8,
+            }}
+          />
+        ) : (
+          <div style={{
+            maxWidth: 320, padding: 32, background: C.cream,
+            borderRadius: 14, textAlign: 'center' as const,
+          }}>
+            {pin.pin_type === 'link'
+              ? <LinkIcon size={28} color={C.gold} style={{ marginBottom: 12 }} />
+              : <Edit3 size={28} color={C.gold} style={{ marginBottom: 12 }} />}
+            <p style={{
+              margin: 0, fontSize: 16, color: C.dark, fontFamily: 'Playfair Display, serif', lineHeight: '24px',
+            }}>
+              {pin.note || pin.title || pin.source_url || 'Note'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Info footer */}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          padding: '16px 20px max(20px, env(safe-area-inset-bottom))',
+          background: 'rgba(44,36,32,0.92)',
+        }}
+      >
+        <p style={{
+          margin: 0, fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif',
+          fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const,
+        }}>
+          {pin.event}
+        </p>
+        {pin.note && (
+          <p style={{ margin: '6px 0 0', fontSize: 14, color: C.cream, fontFamily: 'DM Sans, sans-serif', lineHeight: '20px' }}>
+            {pin.note}
+          </p>
+        )}
+        {pin.pin_type === 'link' && pin.source_url && (
+          <a
+            href={pin.source_url}
+            target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              marginTop: 10, padding: '6px 12px', borderRadius: 14,
+              background: 'rgba(255,255,255,0.15)',
+              textDecoration: 'none', color: C.cream,
+              fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+            }}
+          >
+            <ExternalLink size={11} color={C.cream} />
+            <span>Open on {pin.source_domain || 'source'}</span>
+          </a>
+        )}
+        {pin.added_by_name && (
+          <p style={{ margin: '10px 0 0', fontSize: 10, color: C.cream, opacity: 0.6, fontFamily: 'DM Sans, sans-serif' }}>
+            Added by {pin.added_by_name}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Pin add modal — upload, URL, or note
+function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, onClose, onSave }: {
+  mode: 'add' | 'edit';
+  isSuggestion: boolean;
+  events: string[];
+  defaultEvent: string;
+  onFetchPreview: (url: string) => Promise<OGPreview | null>;
+  onClose: () => void;
+  onSave: (payload: Partial<MoodboardPin>) => Promise<void>;
+}) {
+  type Step = 'type' | 'upload' | 'link' | 'note';
+  const [step, setStep] = useState<Step>('type');
+
+  const [event, setEvent] = useState(defaultEvent);
+  const [note, setNote] = useState('');
+
+  // Upload state
+  const [imageUrl, setImageUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Link state
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [preview, setPreview] = useState<OGPreview | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
+
+  const handleUpload = async (file: File) => {
+    setUploading(true); setUploadError('');
+    const url = await uploadReceipt(file);
+    if (url) setImageUrl(url);
+    else setUploadError('Could not upload. Try again.');
+    setUploading(false);
+  };
+
+  const handleFetchPreview = async () => {
+    if (!sourceUrl.trim()) return;
+    setFetching(true); setFetchError('');
+    // Normalise — add https if missing
+    let url = sourceUrl.trim();
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    const p = await onFetchPreview(url);
+    if (p) {
+      setPreview(p);
+      setSourceUrl(url);
+    } else {
+      setFetchError('Could not load preview. You can still save the link.');
+    }
+    setFetching(false);
+  };
+
+  const saveUpload = async () => {
+    if (!imageUrl) return;
+    await onSave({
+      event,
+      pin_type: 'upload',
+      image_url: imageUrl,
+      note: note.trim() || null,
+      is_suggestion: isSuggestion,
+    });
+  };
+
+  const saveLink = async () => {
+    if (!sourceUrl.trim()) return;
+    let url = sourceUrl.trim();
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+    // If no preview was fetched yet, try once silently
+    let p = preview;
+    if (!p) {
+      p = await onFetchPreview(url);
+    }
+
+    await onSave({
+      event,
+      pin_type: 'link',
+      source_url: url,
+      source_domain: p?.source_domain || new URL(url).hostname.replace(/^www\./, ''),
+      image_url: p?.og_image || null,
+      title: p?.og_title || null,
+      note: note.trim() || null,
+      is_suggestion: isSuggestion,
+    });
+  };
+
+  const saveNote = async () => {
+    if (!note.trim()) return;
+    await onSave({
+      event,
+      pin_type: 'note',
+      note: note.trim(),
+      is_suggestion: isSuggestion,
+    });
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        {step === 'type' && (
+          <>
+            <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+              Add to your moodboard
+            </p>
+            <p style={{ margin: '0 0 20px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              {isSuggestion ? 'Your suggestion will be sent to the bride for approval.' : 'Pick how you want to add.'}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+              <TypeChoice icon={<Camera size={18} color={C.gold} />} label="Photo or upload" sub="Take a photo or pick from your gallery" onTap={() => setStep('upload')} />
+              <TypeChoice icon={<LinkIcon size={18} color={C.gold} />} label="Paste a link" sub="Instagram, Pinterest, any website" onTap={() => setStep('link')} />
+              <TypeChoice icon={<Edit3 size={18} color={C.gold} />} label="Just an idea" sub="Text-only note" onTap={() => setStep('note')} />
+            </div>
+            <div style={{ marginTop: 20 }}>
+              <GhostButton label="Cancel" onTap={onClose} />
+            </div>
+          </>
+        )}
+
+        {step !== 'type' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <button onClick={() => setStep('type')} style={{
+                width: 32, height: 32, borderRadius: 16, background: C.ivory,
+                border: `1px solid ${C.border}`, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <ChevronRight size={14} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+              </button>
+              <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+                {step === 'upload' ? 'Add a photo' : step === 'link' ? 'Paste a link' : 'Your idea'}
+              </p>
+            </div>
+
+            {/* Event picker — shared across all modes */}
+            <label style={{
+              display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+              fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+            }}>Which event?</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6, marginBottom: 14 }}>
+              {events.map(ev => (
+                <button key={ev} onClick={() => setEvent(ev)} style={{
+                  padding: '6px 12px', borderRadius: 16,
+                  background: event === ev ? C.dark : C.ivory,
+                  border: `1px solid ${event === ev ? C.dark : C.border}`,
+                  color: event === ev ? C.gold : C.muted,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                }}>{ev}</button>
+              ))}
+            </div>
+
+            {/* Upload mode */}
+            {step === 'upload' && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file" accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUpload(file);
+                  }}
+                />
+                {imageUrl ? (
+                  <div style={{
+                    position: 'relative', width: '100%', aspectRatio: '3 / 4',
+                    background: C.pearl, borderRadius: 12, overflow: 'hidden' as const,
+                    marginBottom: 14,
+                  }}>
+                    <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' as const }} />
+                    <button onClick={() => setImageUrl('')} style={{
+                      position: 'absolute', top: 8, right: 8,
+                      width: 28, height: 28, borderRadius: 14,
+                      background: 'rgba(44,36,32,0.7)', border: 'none',
+                      cursor: 'pointer', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <X size={12} color={C.cream} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    style={{
+                      width: '100%', aspectRatio: '3 / 4',
+                      background: C.ivory, border: `2px dashed ${C.goldBorder}`,
+                      borderRadius: 12, cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column' as const,
+                      alignItems: 'center', justifyContent: 'center', gap: 8,
+                      marginBottom: 14,
+                    }}
+                  >
+                    <Camera size={28} color={C.gold} />
+                    <span style={{ fontSize: 13, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                      {uploading ? 'Uploading…' : 'Tap to add photo'}
+                    </span>
+                  </button>
+                )}
+                {uploadError && <ErrorBanner msg={uploadError} />}
+
+                <label style={{
+                  display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+                }}>Note (optional)</label>
+                <textarea
+                  value={note} onChange={e => setNote(e.target.value)}
+                  placeholder="What do you love about this?"
+                  rows={2}
+                  style={{
+                    width: '100%', boxSizing: 'border-box' as const,
+                    padding: '10px 14px', borderRadius: 10,
+                    border: `1px solid ${C.border}`, background: C.ivory,
+                    fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+                    outline: 'none', marginBottom: 18, resize: 'vertical' as const,
+                  }}
+                />
+                <button
+                  onClick={saveUpload} disabled={!imageUrl}
+                  style={{
+                    width: '100%', padding: '14px', borderRadius: 12,
+                    background: C.dark, border: 'none',
+                    cursor: imageUrl ? 'pointer' : 'default',
+                    color: C.gold, fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+                    textTransform: 'uppercase' as const,
+                    opacity: imageUrl ? 1 : 0.4,
+                  }}
+                >Add to moodboard</button>
+              </>
+            )}
+
+            {/* Link mode */}
+            {step === 'link' && (
+              <>
+                <label style={{
+                  display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+                }}>URL</label>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                  <input
+                    type="url" value={sourceUrl}
+                    onChange={e => { setSourceUrl(e.target.value); setPreview(null); setFetchError(''); }}
+                    placeholder="instagram.com/p/..."
+                    style={{
+                      flex: 1, boxSizing: 'border-box' as const,
+                      padding: '12px 14px', borderRadius: 10,
+                      border: `1px solid ${C.border}`, background: C.ivory,
+                      fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.dark, outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={handleFetchPreview} disabled={!sourceUrl.trim() || fetching}
+                    style={{
+                      padding: '12px 16px', borderRadius: 10,
+                      background: C.ivory, border: `1px solid ${C.goldBorder}`,
+                      color: C.goldDeep, fontFamily: 'DM Sans, sans-serif',
+                      fontSize: 12, fontWeight: 500, cursor: sourceUrl.trim() && !fetching ? 'pointer' : 'default',
+                      whiteSpace: 'nowrap' as const,
+                      opacity: sourceUrl.trim() && !fetching ? 1 : 0.4,
+                    }}
+                  >{fetching ? '…' : 'Preview'}</button>
+                </div>
+
+                {preview && (
+                  <div style={{
+                    background: C.ivory, border: `1px solid ${C.border}`,
+                    borderRadius: 12, overflow: 'hidden' as const, marginBottom: 14,
+                  }}>
+                    {preview.og_image ? (
+                      <div style={{ width: '100%', aspectRatio: '16 / 10', background: C.pearl }}>
+                        <img src={preview.og_image} alt="" style={{
+                          width: '100%', height: '100%', objectFit: 'cover' as const, display: 'block' as const,
+                        }} />
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: 20, background: C.pearl, textAlign: 'center' as const,
+                      }}>
+                        <LinkIcon size={20} color={C.muted} />
+                        <p style={{ margin: '6px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                          No preview image — will save as link
+                        </p>
+                      </div>
+                    )}
+                    <div style={{ padding: 10 }}>
+                      <p style={{ margin: 0, fontSize: 10, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                        {preview.source_domain}
+                      </p>
+                      {preview.og_title && (
+                        <p style={{ margin: '2px 0 0', fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', lineHeight: '16px' }}>
+                          {preview.og_title}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {fetchError && (
+                  <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const }}>
+                    {fetchError}
+                  </p>
+                )}
+
+                <label style={{
+                  display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+                }}>Note (optional)</label>
+                <textarea
+                  value={note} onChange={e => setNote(e.target.value)}
+                  placeholder="Your thoughts on this?"
+                  rows={2}
+                  style={{
+                    width: '100%', boxSizing: 'border-box' as const,
+                    padding: '10px 14px', borderRadius: 10,
+                    border: `1px solid ${C.border}`, background: C.ivory,
+                    fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+                    outline: 'none', marginBottom: 18, resize: 'vertical' as const,
+                  }}
+                />
+                <button
+                  onClick={saveLink} disabled={!sourceUrl.trim()}
+                  style={{
+                    width: '100%', padding: '14px', borderRadius: 12,
+                    background: C.dark, border: 'none',
+                    cursor: sourceUrl.trim() ? 'pointer' : 'default',
+                    color: C.gold, fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+                    textTransform: 'uppercase' as const,
+                    opacity: sourceUrl.trim() ? 1 : 0.4,
+                  }}
+                >Add to moodboard</button>
+              </>
+            )}
+
+            {/* Note mode */}
+            {step === 'note' && (
+              <>
+                <label style={{
+                  display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+                }}>Your idea</label>
+                <textarea
+                  value={note} onChange={e => setNote(e.target.value)}
+                  placeholder="e.g. Marigold strings over the mandap…"
+                  rows={5}
+                  autoFocus
+                  style={{
+                    width: '100%', boxSizing: 'border-box' as const,
+                    padding: '12px 14px', borderRadius: 10,
+                    border: `1px solid ${C.border}`, background: C.ivory,
+                    fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.dark,
+                    outline: 'none', marginBottom: 18, resize: 'vertical' as const, lineHeight: '20px',
+                  }}
+                />
+                <button
+                  onClick={saveNote} disabled={!note.trim()}
+                  style={{
+                    width: '100%', padding: '14px', borderRadius: 12,
+                    background: C.dark, border: 'none',
+                    cursor: note.trim() ? 'pointer' : 'default',
+                    color: C.gold, fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 13, fontWeight: 400, letterSpacing: '1.5px',
+                    textTransform: 'uppercase' as const,
+                    opacity: note.trim() ? 1 : 0.4,
+                  }}
+                >Add to moodboard</button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TypeChoice({ icon, label, sub, onTap }: { icon: React.ReactNode; label: string; sub: string; onTap: () => void }) {
+  return (
+    <button onClick={onTap} style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      background: C.ivory, border: `1px solid ${C.border}`,
+      borderRadius: 12, padding: '14px 16px', cursor: 'pointer',
+      textAlign: 'left' as const, width: '100%',
+    }}>
+      <div style={{
+        width: 40, height: 40, borderRadius: 12,
+        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1 }}>
+        <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{label}</p>
+        <p style={{ margin: '2px 0 0', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{sub}</p>
+      </div>
+      <ChevronRight size={14} color={C.mutedLight} />
+    </button>
+  );
+}
+
+// Curated share modal — pick pins, get shareable text summary
+function CuratedShareModal({ session, pins, event, onUpdatePin, onClose }: {
+  session: CoupleSession;
+  pins: MoodboardPin[];
+  event: string;
+  onUpdatePin: (id: string, patch: Partial<MoodboardPin>) => Promise<void>;
+  onClose: () => void;
+}) {
+  const MAX_CURATED = 6;
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(pins.filter(p => p.is_curated).map(p => p.id))
+  );
+
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < MAX_CURATED) next.add(id);
+      return next;
+    });
+  };
+
+  const saveAndShare = async () => {
+    // Update curated flags for all pins in this event
+    for (const p of pins) {
+      const shouldBe = selected.has(p.id);
+      if (p.is_curated !== shouldBe) {
+        await onUpdatePin(p.id, { is_curated: shouldBe });
+      }
+    }
+    // Share to WhatsApp
+    const coupleName = session.partnerName ? `${session.name} & ${session.partnerName}` : session.name;
+    const text = `✨ ${coupleName}'s vision for ${event}\n\nCome take a look at the moodboard we've curated — a few pieces that feel just right.\n\n(Tap to open the full view — coming soon)\n\nWith love,\n${session.name}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    onClose();
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          Curate a view
+        </p>
+        <p style={{ margin: '0 0 18px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+          Pick up to {MAX_CURATED} pins that capture your vision for {event}. Family sees a clean, focused view — no opinion fatigue.
+        </p>
+
+        <p style={{
+          fontSize: 11, color: C.goldDeep, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          marginBottom: 10,
+        }}>
+          {selected.size} of {MAX_CURATED} selected
+        </p>
+
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+          marginBottom: 18,
+        }}>
+          {pins.map(p => {
+            const isSelected = selected.has(p.id);
+            return (
+              <button
+                key={p.id}
+                onClick={() => toggle(p.id)}
+                style={{
+                  position: 'relative', padding: 0,
+                  background: C.ivory,
+                  border: `2px solid ${isSelected ? C.gold : C.border}`,
+                  borderRadius: 12, overflow: 'hidden' as const,
+                  cursor: 'pointer', width: '100%', aspectRatio: '3 / 4',
+                  opacity: !isSelected && selected.size >= MAX_CURATED ? 0.4 : 1,
+                }}
+              >
+                {p.image_url ? (
+                  <img src={p.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' as const }} />
+                ) : (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: '100%', height: '100%', padding: 10, background: C.pearl,
+                  }}>
+                    <p style={{
+                      margin: 0, fontSize: 10, color: C.dark, fontFamily: 'Playfair Display, serif',
+                      textAlign: 'center' as const, lineHeight: '14px',
+                      display: '-webkit-box' as any,
+                      WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' as any,
+                      overflow: 'hidden' as const,
+                    }}>
+                      {p.note || p.title || ''}
+                    </p>
+                  </div>
+                )}
+                {isSelected && (
+                  <div style={{
+                    position: 'absolute', top: 6, right: 6,
+                    width: 24, height: 24, borderRadius: 12, background: C.gold,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Check size={14} color={C.cream} />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <GhostButton label="Cancel" onTap={onClose} />
+          </div>
+          <button
+            onClick={saveAndShare} disabled={selected.size === 0}
+            style={{
+              padding: '12px 24px', borderRadius: 12,
+              background: C.dark, border: 'none',
+              cursor: selected.size > 0 ? 'pointer' : 'default',
+              color: C.gold, fontFamily: 'DM Sans, sans-serif',
+              fontSize: 12, fontWeight: 400, letterSpacing: '1.5px',
+              textTransform: 'uppercase' as const,
+              opacity: selected.size > 0 ? 1 : 0.4,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Share2 size={12} color={C.gold} />
+            Share
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Suggestions inbox modal (owner/core_duo view)
+function SuggestionsModal({ suggestions, onApprove, onReject, onClose }: {
+  suggestions: MoodboardPin[];
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(44,36,32,0.5)',
+        zIndex: 200, display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(20px, env(safe-area-inset-bottom))',
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          boxSizing: 'border-box' as const, maxHeight: '92vh',
+          overflowY: 'auto' as const,
+        }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto 16px' }} />
+
+        <p style={{ margin: '0 0 4px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          Suggestions from your Circle
+        </p>
+        <p style={{ margin: '0 0 18px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+          Approve what you love. Dismiss what doesn't fit. Your vision stays yours.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+          {suggestions.map(s => (
+            <div key={s.id} style={{
+              display: 'flex', gap: 12,
+              background: C.ivory, border: `1px solid ${C.border}`,
+              borderRadius: 12, padding: 10,
+            }}>
+              <div style={{
+                width: 80, height: 80, flexShrink: 0, borderRadius: 8,
+                background: C.pearl, overflow: 'hidden' as const,
+              }}>
+                {s.image_url ? (
+                  <img src={s.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' as const }} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {s.pin_type === 'link'
+                      ? <LinkIcon size={14} color={C.gold} />
+                      : <Edit3 size={14} color={C.gold} />}
+                  </div>
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const }}>
+                <p style={{
+                  margin: 0, fontSize: 10, color: C.goldDeep, fontWeight: 500,
+                  letterSpacing: '1px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+                }}>{s.event}</p>
+                <p style={{
+                  margin: '2px 0 0', fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                  lineHeight: '16px',
+                  display: '-webkit-box' as any,
+                  WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any,
+                  overflow: 'hidden' as const,
+                }}>
+                  {s.note || s.title || s.source_domain || 'Suggestion'}
+                </p>
+                <p style={{
+                  margin: 'auto 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300,
+                }}>
+                  From {s.added_by_name || 'your Circle'}
+                </p>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button onClick={() => onApprove(s.id)} style={{
+                    flex: 1, padding: '6px 10px', borderRadius: 8,
+                    background: C.dark, border: 'none', cursor: 'pointer',
+                    color: C.gold, fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 11, fontWeight: 500, letterSpacing: '0.5px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  }}>
+                    <Check size={11} color={C.gold} />
+                    Approve
+                  </button>
+                  <button onClick={() => onReject(s.id)} style={{
+                    flex: 1, padding: '6px 10px', borderRadius: 8,
+                    background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                    color: C.muted, fontFamily: 'DM Sans, sans-serif',
+                    fontSize: 11, fontWeight: 400,
+                  }}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <GhostButton label="Close" onTap={onClose} />
         </div>
       </div>
     </div>
@@ -4561,7 +6101,19 @@ export default function CoupleApp() {
                 onBack={() => setActiveTool(null)}
               />
             )}
-            {activeTool && activeTool !== 'checklist' && activeTool !== 'budget' && activeTool !== 'guests' && (
+            {activeTool === 'moodboard' && (
+              <MoodboardTool
+                session={session}
+                pins={checklist.pins}
+                loading={checklist.loading}
+                onFetchPreview={checklist.fetchOGPreview}
+                onAdd={checklist.addPin}
+                onUpdate={checklist.updatePin}
+                onDelete={checklist.deletePin}
+                onBack={() => setActiveTool(null)}
+              />
+            )}
+            {activeTool && activeTool !== 'checklist' && activeTool !== 'budget' && activeTool !== 'guests' && activeTool !== 'moodboard' && (
               <ToolPlaceholder toolId={activeTool} session={session} onBack={() => setActiveTool(null)} />
             )}
             {!activeTool && activeTab === 'home' && (
@@ -4584,6 +6136,7 @@ export default function CoupleApp() {
                 budget={checklist.budget}
                 expenses={checklist.expenses}
                 guests={checklist.guests}
+                pins={checklist.pins}
               />
             )}
             {!activeTool && activeTab === 'circle' && (

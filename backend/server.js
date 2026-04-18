@@ -4868,6 +4868,188 @@ app.delete('/api/couple/guests/:guestId', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// COUPLE V2 — Moodboard (Session 10 Turn 5)
+// Per-event boards with uploads (Cloudinary) + links (OG preview).
+// ══════════════════════════════════════════════════════════════
+
+// Server-side OG metadata fetch. Avoids CORS issues and gives us
+// server-cached thumbnail URLs that survive source-page changes.
+app.post('/api/couple/moodboard/preview', async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ success: false, error: 'url required' });
+
+    let parsed;
+    try { parsed = new URL(url); }
+    catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
+
+    const sourceDomain = parsed.hostname.replace(/^www\./, '');
+
+    // Fetch with timeout
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
+    let html = '';
+    try {
+      const fetchRes = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; TDW-Preview/1.0)',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+        redirect: 'follow',
+      });
+      clearTimeout(timer);
+      const buf = await fetchRes.text();
+      html = buf.slice(0, 256 * 1024); // OG tags are in <head>
+    } catch (e) {
+      clearTimeout(timer);
+      return res.json({
+        success: true,
+        data: { og_image: null, og_title: null, og_description: null, source_domain: sourceDomain },
+      });
+    }
+
+    // Extract OG / Twitter meta tags
+    const grabMeta = (property) => {
+      const patterns = [
+        new RegExp('<meta[^>]+(?:property|name)=["\']' + property + '["\'][^>]*content=["\']([^"\']+)["\']', 'i'),
+        new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']' + property + '["\']', 'i'),
+      ];
+      for (const re of patterns) {
+        const m = html.match(re);
+        if (m && m[1]) return m[1];
+      }
+      return null;
+    };
+
+    const decodeEntities = (s) => {
+      if (!s) return s;
+      return s
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
+        .replace(/&apos;/g, "'").replace(/&nbsp;/g, ' ');
+    };
+
+    let ogImage = grabMeta('og:image') || grabMeta('twitter:image') || grabMeta('twitter:image:src');
+    let ogTitle = grabMeta('og:title') || grabMeta('twitter:title');
+    let ogDescription = grabMeta('og:description') || grabMeta('twitter:description') || grabMeta('description');
+
+    // Fallback: look for first <img> with src
+    if (!ogImage) {
+      const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (imgMatch) ogImage = imgMatch[1];
+    }
+
+    // Fallback title to <title>
+    if (!ogTitle) {
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) ogTitle = titleMatch[1].trim();
+    }
+
+    // Resolve relative image URLs
+    if (ogImage && !ogImage.startsWith('http')) {
+      try {
+        ogImage = new URL(ogImage, url).href;
+      } catch { /* leave as-is */ }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        og_image: ogImage ? decodeEntities(ogImage) : null,
+        og_title: ogTitle ? decodeEntities(ogTitle).slice(0, 200) : null,
+        og_description: ogDescription ? decodeEntities(ogDescription).slice(0, 500) : null,
+        source_domain: sourceDomain,
+      },
+    });
+  } catch (error) {
+    console.error('moodboard preview error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// List pins for a couple
+app.get('/api/couple/moodboard/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { data, error } = await supabase
+      .from('couple_moodboard_pins')
+      .select('*')
+      .eq('couple_id', coupleId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('moodboard list error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create a pin
+app.post('/api/couple/moodboard', async (req, res) => {
+  try {
+    const {
+      couple_id, event, pin_type, image_url, source_url, source_domain,
+      title, note, is_suggestion, added_by, added_by_name,
+    } = req.body || {};
+    if (!couple_id || !event || !pin_type) {
+      return res.status(400).json({ success: false, error: 'couple_id, event, pin_type required' });
+    }
+    const { data, error } = await supabase
+      .from('couple_moodboard_pins')
+      .insert([{
+        couple_id, event, pin_type,
+        image_url: image_url || null,
+        source_url: source_url || null,
+        source_domain: source_domain || null,
+        title: title || null,
+        note: note || null,
+        is_curated: false,
+        is_suggestion: !!is_suggestion,
+        added_by: added_by || null,
+        added_by_name: added_by_name || null,
+      }])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('moodboard create error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update a pin
+app.patch('/api/couple/moodboard/:pinId', async (req, res) => {
+  try {
+    const { pinId } = req.params;
+    const { data, error } = await supabase
+      .from('couple_moodboard_pins')
+      .update(req.body || {})
+      .eq('id', pinId)
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('moodboard update error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete a pin
+app.delete('/api/couple/moodboard/:pinId', async (req, res) => {
+  try {
+    const { pinId } = req.params;
+    const { error } = await supabase.from('couple_moodboard_pins').delete().eq('id', pinId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('moodboard delete error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── Co-Planner System ──
 
 // Generate co-planner invite link
