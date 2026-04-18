@@ -1703,9 +1703,9 @@ function DiscoverTeaser({ session }: { session: CoupleSession | null }) {
         fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.muted,
         fontWeight: 300, lineHeight: '22px', margin: '0 0 28px',
       }}>
-        India's finest wedding professionals — photographers, decorators,
-        mehendi artists, caterers — curated and verified, right here.
-        You'll be the first to know when we open.
+        A curated marketplace for your wedding. Book India's finest photographers,
+        decorators, and artists — or shop couture, jewellery, and keepsakes from
+        designers we trust. Every service, every product, handpicked by us.
       </p>
       {!submitted ? (
         <div>
@@ -8349,6 +8349,563 @@ function ProfileOverlay({ session, onClose, onLogout, onOpenTemplates }: {
 }
 
 // ─────────────────────────────────────────────────────────────
+// ENTRY SCREEN
+// Shown when there's no invite code in the URL and no active session.
+// Inline: sign-in for returning users + access waitlist for newcomers.
+// ─────────────────────────────────────────────────────────────
+
+function EntryScreen({ onSessionRestore }: {
+  onSessionRestore: (s: CoupleSession) => void;
+}) {
+  const [mode, setMode] = useState<'login' | 'forgot' | 'waitlist'>('login');
+
+  return (
+    <div style={{
+      minHeight: '100vh', background: C.cream,
+      fontFamily: 'DM Sans, sans-serif',
+      padding: '56px 24px max(24px, env(safe-area-inset-bottom))',
+    }}>
+      <div style={{ maxWidth: 420, margin: '0 auto' }}>
+        {/* Hero */}
+        <div style={{ textAlign: 'center' as const, marginBottom: 32 }}>
+          <p style={{
+            margin: '0 0 4px', fontSize: 10, color: C.goldDeep, fontWeight: 500,
+            letterSpacing: '3px', textTransform: 'uppercase' as const,
+            fontFamily: 'DM Sans, sans-serif',
+          }}>The Dream Wedding</p>
+          <h1 style={{
+            margin: 0, fontSize: 28, color: C.dark,
+            fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '34px',
+          }}>Your digital maid of honour.</h1>
+          <p style={{
+            margin: '10px 0 0', fontSize: 13, color: C.muted,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
+          }}>
+            Plan your wedding together, beautifully.
+          </p>
+        </div>
+
+        {mode === 'login' && (
+          <LoginForm
+            onSuccess={onSessionRestore}
+            onForgotPassword={() => setMode('forgot')}
+            onRequestInvite={() => setMode('waitlist')}
+          />
+        )}
+        {mode === 'forgot' && (
+          <ForgotPasswordFlow
+            onDone={() => setMode('login')}
+            onBack={() => setMode('login')}
+          />
+        )}
+        {mode === 'waitlist' && (
+          <AccessWaitlistForm
+            onBack={() => setMode('login')}
+          />
+        )}
+
+        {/* Footer */}
+        <p style={{
+          textAlign: 'center' as const,
+          margin: '28px 0 0', fontSize: 10, color: C.mutedLight,
+          fontFamily: 'DM Sans, sans-serif', fontWeight: 300, letterSpacing: '0.3px',
+        }}>
+          Invites are sent personally by our team.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LoginForm({ onSuccess, onForgotPassword, onRequestInvite }: {
+  onSuccess: (s: CoupleSession) => void;
+  onForgotPassword: () => void;
+  onRequestInvite: () => void;
+}) {
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleLogin = async () => {
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+    if (password.length < 1) { setError('Enter your password'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${API}/api/couple/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + clean, password }),
+      });
+      const d = await res.json();
+      if (!d.success) {
+        setError(d.error || 'Could not sign in');
+        setLoading(false);
+        return;
+      }
+      const newSession: CoupleSession = {
+        id: d.data.id,
+        name: d.data.name || '',
+        partnerName: d.data.partner_name || '',
+        weddingDate: d.data.wedding_date || '',
+        events: d.data.events || [],
+        couple_tier: d.data.couple_tier || 'free',
+        coShareRole: 'owner',
+        foundingBride: !!d.data.founding_bride,
+        token_balance: d.data.token_balance || 0,
+      };
+      saveSession(newSession);
+      onSuccess(newSession);
+    } catch {
+      setError('Network error. Try again.');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <p style={{
+        margin: '0 0 12px', fontSize: 10, color: C.muted, fontWeight: 500,
+        letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+      }}>Sign in</p>
+
+      <label style={{
+        display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+      }}>Phone</label>
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <span style={{
+          position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+          fontSize: 15, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        }}>+91</span>
+        <input
+          type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+          placeholder="98765 43210"
+          autoComplete="tel"
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            padding: '12px 16px 12px 46px', borderRadius: 10,
+            border: `1px solid ${C.border}`, background: C.ivory,
+            fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+          }}
+        />
+      </div>
+
+      <label style={{
+        display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+      }}>Password</label>
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <input
+          type={showPassword ? 'text' : 'password'}
+          value={password} onChange={e => setPassword(e.target.value)}
+          placeholder="Your password"
+          autoComplete="current-password"
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            padding: '12px 52px 12px 16px', borderRadius: 10,
+            border: `1px solid ${C.border}`, background: C.ivory,
+            fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+          }}
+        />
+        <button
+          onClick={() => setShowPassword(v => !v)}
+          style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            padding: '6px 10px', borderRadius: 8,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: C.muted, fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          }}
+          type="button"
+        >{showPassword ? 'Hide' : 'Show'}</button>
+      </div>
+
+      <ErrorBanner msg={error} />
+
+      <GoldButton fullWidth label={loading ? 'Signing in…' : 'Sign in'} onTap={handleLogin} />
+
+      <div style={{ textAlign: 'center' as const, margin: '14px 0 20px' }}>
+        <button
+          onClick={onForgotPassword}
+          style={{
+            background: 'none', border: 'none', color: C.muted,
+            fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+            textDecoration: 'underline',
+          }}
+        >Forgot password?</button>
+      </div>
+
+      {/* Divider */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 20px',
+      }}>
+        <div style={{ flex: 1, height: 1, background: C.border }} />
+        <span style={{
+          fontSize: 10, color: C.mutedLight, fontWeight: 500,
+          letterSpacing: '2px', textTransform: 'uppercase' as const,
+          fontFamily: 'DM Sans, sans-serif',
+        }}>New here?</span>
+        <div style={{ flex: 1, height: 1, background: C.border }} />
+      </div>
+
+      <button
+        onClick={onRequestInvite}
+        style={{
+          width: '100%', padding: '14px', borderRadius: 12,
+          background: C.ivory, border: `1px solid ${C.goldBorder}`,
+          cursor: 'pointer',
+          color: C.goldDeep, fontFamily: 'DM Sans, sans-serif',
+          fontSize: 13, fontWeight: 500, letterSpacing: '1.5px',
+          textTransform: 'uppercase' as const,
+        }}
+      >
+        Request an invite
+      </button>
+    </div>
+  );
+}
+
+function ForgotPasswordFlow({ onDone, onBack }: {
+  onDone: () => void;
+  onBack: () => void;
+}) {
+  const [step, setStep] = useState<'phone' | 'otp' | 'new-password' | 'done'>('phone');
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [sessionInfo, setSessionInfo] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSendOtp = async () => {
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+    setLoading(true); setError('');
+    try {
+      // Check if phone exists (but always advance regardless — don't leak existence)
+      await fetch(`${API}/api/couple/forgot-password`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '+91' + clean }),
+      });
+      const res = await fetch(`${API}/api/auth/send-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: clean }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setSessionInfo(d.sessionInfo || '');
+        setStep('otp');
+      } else {
+        setError(d.error || 'Could not send OTP');
+      }
+    } catch {
+      setError('Network error. Try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otp || otp.length < 4) { setError('Enter the OTP'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${API}/api/auth/verify-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionInfo, code: otp }),
+      });
+      const d = await res.json();
+      if (d.success) setStep('new-password');
+      else setError(d.error || 'Invalid OTP');
+    } catch {
+      setError('Network error. Try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleResetPassword = async () => {
+    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+    setLoading(true); setError('');
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    try {
+      const res = await fetch(`${API}/api/couple/reset-password`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: '+91' + clean,
+          new_password: newPassword,
+          otp_verified: true,
+        }),
+      });
+      const d = await res.json();
+      if (d.success) setStep('done');
+      else setError(d.error || 'Could not reset password');
+    } catch {
+      setError('Network error. Try again.');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <p style={{
+        margin: '0 0 12px', fontSize: 10, color: C.muted, fontWeight: 500,
+        letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+      }}>Reset password</p>
+
+      {step === 'phone' && (
+        <>
+          <p style={{
+            margin: '0 0 20px', fontSize: 13, color: C.muted,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
+          }}>
+            Enter your phone number and we'll send you a code.
+          </p>
+          <label style={{
+            display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+            fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+          }}>Phone</label>
+          <div style={{ position: 'relative', marginBottom: 14 }}>
+            <span style={{
+              position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+              fontSize: 15, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+            }}>+91</span>
+            <input
+              type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+              placeholder="98765 43210"
+              style={{
+                width: '100%', boxSizing: 'border-box' as const,
+                padding: '12px 16px 12px 46px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.ivory,
+                fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+              }}
+            />
+          </div>
+          <ErrorBanner msg={error} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <GhostButton label="Back" onTap={onBack} />
+            <div style={{ flex: 1 }}>
+              <GoldButton fullWidth label={loading ? 'Sending…' : 'Send code'} onTap={handleSendOtp} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {step === 'otp' && (
+        <>
+          <p style={{
+            margin: '0 0 20px', fontSize: 13, color: C.muted,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
+          }}>
+            We sent a 6-digit code to +91 {phone.replace(/\D/g, '').slice(-10)}.
+          </p>
+          <InputField label="6-digit code" value={otp} onChange={setOtp} type="tel" placeholder="123456" />
+          <ErrorBanner msg={error} />
+          <GoldButton fullWidth label={loading ? 'Verifying…' : 'Verify'} onTap={handleVerifyOtp} />
+          <div style={{ textAlign: 'center' as const, marginTop: 12 }}>
+            <button onClick={() => { setStep('phone'); setOtp(''); setError(''); }} style={{
+              background: 'none', border: 'none', color: C.muted,
+              fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+            }}>Back</button>
+          </div>
+        </>
+      )}
+
+      {step === 'new-password' && (
+        <>
+          <p style={{
+            margin: '0 0 20px', fontSize: 13, color: C.muted,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
+          }}>
+            Set a new password. At least 8 characters.
+          </p>
+          <label style={{
+            display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+            fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+          }}>New password</label>
+          <div style={{ position: 'relative', marginBottom: 14 }}>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={newPassword} onChange={e => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              style={{
+                width: '100%', boxSizing: 'border-box' as const,
+                padding: '12px 52px 12px 16px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.ivory,
+                fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => setShowPassword(v => !v)}
+              style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                padding: '6px 10px', borderRadius: 8,
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: C.muted, fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+              }}
+              type="button"
+            >{showPassword ? 'Hide' : 'Show'}</button>
+          </div>
+          <label style={{
+            display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+            fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+          }}>Confirm new password</label>
+          <input
+            type={showPassword ? 'text' : 'password'}
+            value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            style={{
+              width: '100%', boxSizing: 'border-box' as const,
+              padding: '12px 16px', borderRadius: 10,
+              border: `1px solid ${C.border}`, background: C.ivory,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
+              outline: 'none', marginBottom: 14,
+            }}
+          />
+          <ErrorBanner msg={error} />
+          <GoldButton fullWidth label={loading ? 'Saving…' : 'Reset password'} onTap={handleResetPassword} />
+        </>
+      )}
+
+      {step === 'done' && (
+        <div style={{ textAlign: 'center' as const, padding: '20px 10px' }}>
+          <Check size={28} color={C.gold} style={{ marginBottom: 10 }} />
+          <p style={{ margin: '0 0 8px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+            Password reset.
+          </p>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            You can sign in with your new password.
+          </p>
+          <GoldButton fullWidth label="Back to sign in" onTap={onDone} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccessWaitlistForm({ onBack }: { onBack: () => void }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [weddingDate, setWeddingDate] = useState('');
+  const [referralSource, setReferralSource] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!name.trim()) { setError('Please enter your name'); return; }
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    if (clean.length !== 10) { setError('Enter a valid 10-digit phone'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${API}/api/couple/access-waitlist`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: '+91' + clean,
+          wedding_date: weddingDate || null,
+          referral_source: referralSource.trim() || null,
+        }),
+      });
+      const d = await res.json();
+      if (d.success) setSubmitted(true);
+      else setError(d.error || 'Could not submit');
+    } catch {
+      setError('Network error. Try again.');
+    }
+    setLoading(false);
+  };
+
+  if (submitted) {
+    return (
+      <div style={{ textAlign: 'center' as const, padding: '20px 10px' }}>
+        <Sparkles size={28} color={C.gold} style={{ marginBottom: 10 }} />
+        <p style={{ margin: '0 0 8px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>
+          You're on the list.
+        </p>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px' }}>
+          We'll reach out personally when an invite is ready for you.
+        </p>
+        <GhostButton label="Back" onTap={onBack} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p style={{
+        margin: '0 0 12px', fontSize: 10, color: C.muted, fontWeight: 500,
+        letterSpacing: '2px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
+      }}>Request an invite</p>
+      <p style={{
+        margin: '0 0 20px', fontSize: 13, color: C.muted,
+        fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px',
+      }}>
+        TDW is invite-only for now. Share a few details and we'll reach out when a spot opens up.
+      </p>
+
+      <InputField label="Your name" value={name} onChange={setName} placeholder="e.g. Priya Sharma" />
+
+      <label style={{
+        display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+      }}>Phone</label>
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <span style={{
+          position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+          fontSize: 15, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        }}>+91</span>
+        <input
+          type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+          placeholder="98765 43210"
+          autoComplete="tel"
+          style={{
+            width: '100%', boxSizing: 'border-box' as const,
+            padding: '12px 16px 12px 46px', borderRadius: 10,
+            border: `1px solid ${C.border}`, background: C.ivory,
+            fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+          }}
+        />
+      </div>
+
+      <label style={{
+        display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+        fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+      }}>Wedding date (optional)</label>
+      <input
+        type="date"
+        value={weddingDate}
+        onChange={e => setWeddingDate(e.target.value)}
+        style={{
+          width: '100%', boxSizing: 'border-box' as const,
+          padding: '12px 16px', borderRadius: 10,
+          border: `1px solid ${C.border}`, background: C.ivory,
+          fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
+          outline: 'none', marginBottom: 14,
+        }}
+      />
+
+      <InputField
+        label="How did you hear about us? (optional)"
+        value={referralSource}
+        onChange={setReferralSource}
+        placeholder="Instagram, a friend, etc."
+      />
+
+      <ErrorBanner msg={error} />
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <GhostButton label="Back" onTap={onBack} />
+        <div style={{ flex: 1 }}>
+          <GoldButton fullWidth label={loading ? 'Submitting…' : 'Request invite'} onTap={handleSubmit} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // ONBOARDING
 // ─────────────────────────────────────────────────────────────
 
@@ -8366,6 +8923,9 @@ function OnboardingFlow({ prefillCode, onComplete }: {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [codeData, setCodeData] = useState<any>(null);
@@ -8409,7 +8969,6 @@ function OnboardingFlow({ prefillCode, onComplete }: {
   const handleVerifyOtp = async () => {
     if (!otp || otp.length < 4) { setError('Please enter the OTP'); return; }
     setLoading(true); setError('');
-    const clean = phone.replace(/\D/g, '').slice(-10);
     try {
       const verRes = await fetch(`${API}/api/auth/verify-otp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -8417,7 +8976,18 @@ function OnboardingFlow({ prefillCode, onComplete }: {
       });
       const verD = await verRes.json();
       if (!verD.success) { setError(verD.error || 'Invalid OTP'); setLoading(false); return; }
+      // OTP good — advance to password step
+      setStep(5);
+    } catch { setError('Network error. Please try again.'); }
+    setLoading(false);
+  };
 
+  const handleCompleteOnboarding = async () => {
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (password !== passwordConfirm) { setError('Passwords do not match'); return; }
+    setLoading(true); setError('');
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    try {
       const isFoundingBride = !!(prefillCode && codeData?.couple_tier === 'elite');
       const userRes = await fetch(`${API}/api/couple/onboard`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -8428,6 +8998,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
           couple_tier: codeData?.couple_tier || 'free',
           founding_bride: isFoundingBride,
           access_code: prefillCode || null,
+          password,
         }),
       });
       const ud = await userRes.json();
@@ -8450,7 +9021,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
     setLoading(false);
   };
 
-  const progressPct = (step / 4) * 100;
+  const progressPct = (step / 5) * 100;
 
   return (
     <div style={{ minHeight: '100vh', background: C.cream, fontFamily: 'DM Sans, sans-serif' }}>
@@ -8568,7 +9139,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
         {/* Step 4 — Phone + OTP */}
         {step === 4 && (
           <div>
-            <p style={{ fontSize: 10, color: C.muted, letterSpacing: '3px', textTransform: 'uppercase' as const, fontWeight: 500, margin: '0 0 12px' }}>Step 4 of 4</p>
+            <p style={{ fontSize: 10, color: C.muted, letterSpacing: '3px', textTransform: 'uppercase' as const, fontWeight: 500, margin: '0 0 12px' }}>Step 4 of 5</p>
             <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 28, color: C.dark, margin: '0 0 8px', fontWeight: 400 }}>
               {!otpSent ? 'Your phone number.' : 'Enter the code.'}
             </h2>
@@ -8607,7 +9178,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
               <>
                 <InputField label="6-digit code" value={otp} onChange={setOtp} type="tel" placeholder="123456" />
                 <ErrorBanner msg={error} />
-                <GoldButton fullWidth label={loading ? 'Verifying…' : "Let's go"} onTap={handleVerifyOtp} />
+                <GoldButton fullWidth label={loading ? 'Verifying…' : 'Continue'} onTap={handleVerifyOtp} />
                 <div style={{ textAlign: 'center', marginTop: 12 }}>
                   <button onClick={() => { setOtpSent(false); setOtp(''); setError(''); }} style={{
                     background: 'none', border: 'none', color: C.muted,
@@ -8616,6 +9187,69 @@ function OnboardingFlow({ prefillCode, onComplete }: {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Step 5 — Set password */}
+        {step === 5 && (
+          <div>
+            <p style={{ fontSize: 10, color: C.muted, letterSpacing: '3px', textTransform: 'uppercase' as const, fontWeight: 500, margin: '0 0 12px' }}>Step 5 of 5</p>
+            <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: 28, color: C.dark, margin: '0 0 8px', fontWeight: 400 }}>
+              Set a password.
+            </h2>
+            <p style={{ fontSize: 14, color: C.muted, fontWeight: 300, margin: '0 0 28px', lineHeight: '22px' }}>
+              You'll use this to sign in from other devices. At least 8 characters.
+            </p>
+            <label style={{
+              display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+              fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+            }}>Password</label>
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                autoComplete="new-password"
+                style={{
+                  width: '100%', boxSizing: 'border-box' as const,
+                  padding: '12px 52px 12px 16px', borderRadius: 10,
+                  border: `1px solid ${C.border}`, background: C.ivory,
+                  fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
+                }}
+              />
+              <button
+                onClick={() => setShowPassword(v => !v)}
+                style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  padding: '6px 10px', borderRadius: 8,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: C.muted, fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                }}
+                type="button"
+              >{showPassword ? 'Hide' : 'Show'}</button>
+            </div>
+            <label style={{
+              display: 'block', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif',
+              fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: 6,
+            }}>Confirm password</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={passwordConfirm} onChange={e => setPasswordConfirm(e.target.value)}
+              placeholder="Type it again"
+              autoComplete="new-password"
+              style={{
+                width: '100%', boxSizing: 'border-box' as const,
+                padding: '12px 16px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.ivory,
+                fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
+                outline: 'none', marginBottom: 14,
+              }}
+            />
+            <ErrorBanner msg={error} />
+            <GoldButton fullWidth
+              label={loading ? 'Setting up…' : 'Complete'}
+              onTap={handleCompleteOnboarding}
+            />
           </div>
         )}
       </div>
@@ -8686,7 +9320,10 @@ export default function CoupleApp() {
   }
 
   if (!session) {
-    return <OnboardingFlow prefillCode={prefillCode} onComplete={s => setSession(s)} />;
+    if (prefillCode) {
+      return <OnboardingFlow prefillCode={prefillCode} onComplete={s => setSession(s)} />;
+    }
+    return <EntryScreen onSessionRestore={s => setSession(s)} />;
   }
 
   return (
