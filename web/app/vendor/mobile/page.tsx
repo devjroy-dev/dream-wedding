@@ -113,6 +113,55 @@ function fmtINR(n: number): string {
   return String(n);
 }
 
+// ── Mobile keyboard fix ──────────────────────────────────────────────────
+function scrollIntoViewOnFocus(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+  const target = e.target;
+  if (!target) return;
+  setTimeout(() => {
+    try { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch {}
+  }, 300);
+}
+
+// ── Reusable SearchBar (pinned at top of list tools) ─────────────────────
+function SearchBar({ value, onChange, placeholder }: {
+  value: string; onChange: (v: string) => void; placeholder: string;
+}) {
+  return (
+    <div style={{
+      position: 'sticky' as const, top: 0, zIndex: 5,
+      background: 'rgba(250,246,240,0.92)', backdropFilter: 'blur(8px)' as const,
+      WebkitBackdropFilter: 'blur(8px)' as const,
+      padding: '8px 14px', borderBottom: '1px solid rgba(232,224,213,0.6)',
+    }}>
+      <div style={{
+        display: 'flex' as const, alignItems: 'center' as const, gap: 8,
+        background: '#FFFFFF', border: '1px solid #E8E0D5', borderRadius: 10,
+        padding: '8px 12px',
+      }}>
+        <Search size={14} color="#8C7B6E" />
+        <input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onFocus={scrollIntoViewOnFocus}
+          placeholder={placeholder}
+          style={{
+            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            fontSize: 13, fontFamily: 'DM Sans, sans-serif', color: '#2C2420',
+          }}
+        />
+        {value && (
+          <button onClick={() => onChange('')} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+            display: 'flex' as const, alignItems: 'center' as const,
+          }}>
+            <X size={12} color="#8C7B6E" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function VendorMobilePage() {
@@ -730,67 +779,47 @@ function Header({ session, tier, mode, onModeChange, onOpenProfile }: {
   mode: Mode; onModeChange: (m: Mode) => void;
   onOpenProfile: () => void;
 }) {
-  const tierLabel = tier === 'prestige' ? 'PRESTIGE' : tier === 'signature' ? 'SIGNATURE' : 'ESSENTIAL';
   const name = session.vendorName || 'Vendor';
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || 'V';
-
-  // Tier-coloured avatar ring
-  const avatarBg = tier === 'prestige' ? C.dark : tier === 'signature' ? C.goldSoft : C.pearl;
-  const avatarBorder = tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldBorder : C.border;
-  const avatarText = tier === 'prestige' ? C.gold : tier === 'signature' ? C.goldDeep : C.muted;
+  const initial = (name[0] || 'V').toUpperCase();
 
   return (
     <div style={{
-      padding: 'calc(env(safe-area-inset-top) + 16px) 20px 12px',
+      padding: 'calc(env(safe-area-inset-top) + 12px) 16px 10px',
       background: C.cream,
-      borderBottom: `1px solid ${C.border}`,
+      borderBottom: '1px solid rgba(201,168,76,0.18)',
       position: 'sticky',
       top: 0,
       zIndex: 10,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-        <button
-          onClick={onOpenProfile}
-          aria-label="Open profile"
-          style={{
-            width: '42px', height: '42px', borderRadius: '50%',
-            background: avatarBg, border: `1.5px solid ${avatarBorder}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', flexShrink: 0,
-            fontFamily: "'Playfair Display', serif",
-            fontSize: '15px', fontWeight: 500, color: avatarText,
-            letterSpacing: '0.5px', padding: 0,
-          }}
-        >{initials}</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '2px', color: C.gold, textTransform: 'uppercase' }}>
-            THE DREAM WEDDING
-          </div>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: C.dark, marginTop: '1px', fontFamily: 'Playfair Display, serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {name}
-          </div>
-        </div>
-        <div style={{
-          padding: '4px 10px',
-          borderRadius: '50px',
-          background: tier === 'prestige' ? C.goldMist : C.goldSoft,
-          border: `1px solid ${tier === 'prestige' ? C.gold : C.goldBorder}`,
-          flexShrink: 0,
-        }}>
-          <span style={{
-            fontFamily: 'DM Sans, sans-serif',
-            fontSize: '9px', fontWeight: 600, letterSpacing: '1.8px',
-            color: tier === 'prestige' ? C.goldDeep : C.gold,
-          }}>
-            {tierLabel}
-          </span>
-        </div>
-      </div>
+      {/* Left — TDW wordmark */}
+      <span style={{
+        fontFamily: "'Playfair Display', serif",
+        fontSize: 16, color: C.gold,
+        fontWeight: 500, letterSpacing: '2px',
+        flexShrink: 0,
+      }}>TDW</span>
 
-      {/* Mode toggle row — centered below the identity row */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-        <ModeToggle mode={mode} onChange={onModeChange} />
-      </div>
+      {/* Center — ModeToggle */}
+      <ModeToggle mode={mode} onChange={onModeChange} />
+
+      {/* Right — Profile circle (single initial, dark + gold border) */}
+      <button
+        onClick={onOpenProfile}
+        aria-label="Open profile"
+        style={{
+          width: 32, height: 32, borderRadius: 16,
+          background: C.dark, border: `1px solid ${C.gold}`,
+          cursor: 'pointer', flexShrink: 0,
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 14, fontWeight: 500, color: C.gold,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 0,
+        }}
+      >{initial}</button>
     </div>
   );
 }
@@ -1072,15 +1101,16 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
             {[
               { num: todayBookings.length, label: 'Today',     highlight: todayBookings.length > 0 },
               { num: thisWeekCount,        label: 'This Wk',   highlight: thisWeekCount > 0 },
-              { num: totalOwed > 0 ? '\u20B9' + fmtINR(totalOwed) : '0', label: 'Pending', highlight: false, warn: totalOwed > 0 },
+              { num: totalOwed > 0 ? '\u20B9' + fmtINR(totalOwed) : 0, label: 'Pending', highlight: false, warn: totalOwed > 0 },
               { num: leads.length,         label: 'Enquiries', highlight: leads.length > 0 },
             ].map((stat: any, i: number, arr: any[]) => (
               <div key={i} style={{ textAlign: 'center', position: 'relative' }}>
                 <div style={{
                   fontFamily: "'Playfair Display', serif",
-                  fontSize: typeof stat.num === 'string' ? '22px' : '32px', fontWeight: 400,
+                  fontSize: '26px', fontWeight: 400,
                   color: stat.warn ? C.red : (stat.highlight ? C.gold : C.dark),
                   letterSpacing: '-0.5px', lineHeight: 1,
+                  fontVariantNumeric: 'tabular-nums' as const,
                 }}>{stat.num}</div>
                 <div style={{
                   fontFamily: 'DM Sans, sans-serif',
@@ -1111,7 +1141,7 @@ function DashboardTab({ session, tier, bookings, invoices, clients, leads, payme
           { icon: Users,         label: 'Add Client',  onClick: () => onAddClient && onAddClient() },
           { icon: Calendar,      label: 'Block Date',  onClick: () => onOpenBlockDate && onOpenBlockDate() },
           { icon: FileText,      label: 'Invoice',     onClick: () => onOpenInvoice && onOpenInvoice() },
-          { icon: TrendingDown,  label: 'Expense',     onClick: () => { onJumpToTab('Power'); if (typeof window !== 'undefined') localStorage.setItem('tdw_pwa_open_sub', 'expenses'); } },
+          { icon: TrendingDown,  label: 'Expense',     onClick: () => { onJumpToTab('Power'); if (typeof window !== 'undefined') { localStorage.setItem('tdw_pwa_open_sub', 'expenses'); localStorage.setItem('tdw_pwa_open_create', '1'); } } },
           { icon: MessageCircle, label: 'Broadcast',   onClick: () => { onJumpToTab('Power'); if (typeof window !== 'undefined') localStorage.setItem('tdw_pwa_open_sub', 'whatsapp'); } },
         ];
         return (
@@ -1953,8 +1983,8 @@ function CalendarTab({ session, bookings, blockedDates, events, onRefresh, onAdd
 
       {showBlock && (
         <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <input type="date" value={blockDate} onChange={e => setBlockDate(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} />
-          <input type="text" placeholder="Reason" value={blockReason} onChange={e => setBlockReason(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} />
+          <input type="date" value={blockDate} onChange={e => setBlockDate(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} onFocus={scrollIntoViewOnFocus} />
+          <input type="text" placeholder="Reason" value={blockReason} onChange={e => setBlockReason(e.target.value)} style={{ background: C.cream, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '14px', color: C.dark, fontFamily: 'inherit' }} onFocus={scrollIntoViewOnFocus} />
           <button onClick={handleBlock} style={{ background: C.gold, color: C.ivory, border: 'none', borderRadius: '10px', padding: '12px', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}>
             Block Date
           </button>
@@ -2301,6 +2331,11 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
   const [invoicesLocal, setInvoicesLocal] = useState<any[]>(invoices || []);
   useEffect(() => { setInvoicesLocal(invoices || []); }, [invoices]);
 
+  // Search state (per-tool, resets when sub changes)
+  const [search, setSearch] = useState('');
+  useEffect(() => { setSearch(''); }, [sub]);
+  const matches = (s: string | null | undefined) => !search || (s || '').toLowerCase().includes(search.toLowerCase());
+
   const handleInvoiceUpdate = (updated: any) => {
     setInvoicesLocal(prev => prev.map((i: any) => i.id === updated.id ? { ...i, ...updated } : i));
   };
@@ -2310,6 +2345,7 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
 
   const renderContent = () => {
     if (sub === 'clients') {
+      const filteredClients = clients.filter((c: any) => matches(c.name) || matches(c.phone) || matches(c.email) || matches(c.event_type));
       return clients.length === 0 ? (
         <div style={{ background: C.card, borderRadius: '14px', border: `1px solid ${C.border}`, padding: '32px 20px', textAlign: 'center' }}>
           <Users size={28} color={C.light} />
@@ -2322,8 +2358,14 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {clients.map((c: any) => (
+        <>
+          <SearchBar value={search} onChange={setSearch} placeholder="Search clients by name, phone, email…" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+            {filteredClients.length === 0 ? (
+              <div style={{ background: C.card, borderRadius: '12px', border: `1px solid ${C.border}`, padding: '20px', textAlign: 'center' as const, fontSize: '13px', color: C.muted }}>
+                No clients match "{search}"
+              </div>
+            ) : filteredClients.map((c: any) => (
             <a
               key={c.id}
               href={`/vendor/mobile/clients/${c.id}`}
@@ -2345,7 +2387,8 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
               <ChevronRight size={16} color={C.light} />
             </a>
           ))}
-        </div>
+          </div>
+        </>
       );
     }
 
@@ -2411,8 +2454,12 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {invoicesLocal.slice(0, 20).map((inv: any) => {
+            <>
+              <SearchBar value={search} onChange={setSearch} placeholder="Search invoices by number, client, status…" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                {invoicesLocal
+                  .filter((inv: any) => matches(inv.client_name) || matches(inv.invoice_number) || matches(inv.status) || matches(String(inv.amount)))
+                  .slice(0, 20).map((inv: any) => {
                 const waMsg = `Hi ${inv.client_name || 'there'}, sharing your invoice from ${vendorName || 'our studio'} — ${inv.invoice_number || 'Invoice'} for ₹${fmtINR(parseInt(inv.amount) || 0)}${inv.status === 'paid' ? ' (paid)' : ''}. Please let me know if you have any questions.`;
                 const waUrl = inv.client_phone
                   ? `https://wa.me/91${(inv.client_phone || '').replace(/\D/g, '')}?text=${encodeURIComponent(waMsg)}`
@@ -2459,7 +2506,8 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
                   </button>
                 );
               })}
-            </div>
+              </div>
+            </>
           )}
         </>
       );
@@ -2486,13 +2534,20 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
 
     if (sub === 'events') {
       const today = new Date(); today.setHours(0,0,0,0);
+      const matchEvent = (e: any) => matches(e.title) || matches(e.notes) || matches(e.event_type) || matches(e.linked_client_name);
       const upcoming = (events || [])
         .filter((e: any) => e.event_date && new Date(e.event_date) >= today)
+        .filter(matchEvent)
         .sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
       const past = (events || [])
         .filter((e: any) => e.event_date && new Date(e.event_date) < today)
+        .filter(matchEvent)
         .sort((a: any, b: any) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
       return (
+        <>
+          {(events || []).length > 0 && (
+            <SearchBar value={search} onChange={setSearch} placeholder="Search events by title, type, client…" />
+          )}
         <div style={{ padding: '16px 0' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <div style={{ flex: 1 }}>
@@ -2571,6 +2626,7 @@ function ToolDetailView({ session, tier, sub, clients, invoices, bookings, leads
             </>
           )}
         </div>
+        </>
       );
     }
 
@@ -2762,7 +2818,19 @@ function InvoiceActionSheet({ invoice, vendorName, onClose, onUpdated, onDeleted
     } catch { setError('Network error.'); } finally { setWorking(false); }
   };
 
-  const waMsg = `Hi ${invoice.client_name || 'there'}, sharing your invoice from ${vendorName || 'our studio'} — ${invoice.invoice_number || 'Invoice'} for ₹${fmtINR(amt)}${isPaid ? ' (paid)' : ''}.`;
+  const waMsg = [
+    `*Invoice from ${vendorName || 'our studio'}*`,
+    invoice.invoice_number ? `Invoice no: ${invoice.invoice_number}` : '',
+    `Issued: ${invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}`,
+    invoice.client_name ? `Bill to: ${invoice.client_name}` : '',
+    '',
+    invoice.description ? `_${invoice.description}_` : '',
+    invoice.description ? '' : '',
+    `Amount: ₹${(amt).toLocaleString('en-IN')}`,
+    isPaid ? `Status: ✓ PAID${invoice.paid_date ? ' on ' + new Date(invoice.paid_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}` : `Status: Pending`,
+    '',
+    isPaid ? 'Thank you for your payment.' : 'Please clear at your convenience. Reply here for any questions.',
+  ].filter(Boolean).join('\n');
   const waUrl = invoice.client_phone
     ? `https://wa.me/91${(invoice.client_phone || '').replace(/\D/g, '')}?text=${encodeURIComponent(waMsg)}`
     : `https://wa.me/?text=${encodeURIComponent(waMsg)}`;
@@ -2793,30 +2861,66 @@ function InvoiceActionSheet({ invoice, vendorName, onClose, onUpdated, onDeleted
         onClose={onClose}
       />
 
+      {/* INVOICE PREVIEW CARD — full document style */}
       <div style={{
-        background: C.pearl, border: `1px solid ${C.border}`,
-        borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+        background: '#FFFFFF', border: `1px solid ${C.gold}`,
+        borderRadius: 12, padding: '18px 18px 16px', marginBottom: 14,
+        boxShadow: '0 2px 12px rgba(201,168,76,0.08)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: C.dark }}>
-            ₹{fmtINR(amt)}
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: `1px solid ${C.borderSoft}` }}>
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' as const, color: C.goldDeep, marginBottom: 4 }}>Invoice</div>
+            <div style={{ fontSize: 14, fontFamily: 'Playfair Display, serif', color: C.dark }}>{vendorName || '—'}</div>
+          </div>
+          <div style={{ textAlign: 'right' as const }}>
+            <div style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{invoice.invoice_number || '—'}</div>
+            <div style={{ fontSize: 10, color: C.light, marginTop: 2 }}>
+              {invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Bill to */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase' as const, color: C.muted, marginBottom: 3 }}>Bill to</div>
+          <div style={{ fontSize: 13, color: C.dark, fontWeight: 500 }}>{invoice.client_name || 'Client'}</div>
+          {invoice.client_phone && (
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>+91 {invoice.client_phone}</div>
+          )}
+        </div>
+
+        {/* Description */}
+        {invoice.description && (
+          <div style={{
+            background: C.pearl, borderRadius: 8, padding: '10px 12px',
+            fontSize: 12, color: C.dark, marginBottom: 12, lineHeight: 1.5,
+            fontStyle: 'italic' as const,
+          }}>{invoice.description}</div>
+        )}
+
+        {/* Total + Status */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase' as const, color: C.muted, marginBottom: 2 }}>Amount due</div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: C.dark, lineHeight: 1 }}>
+              ₹{amt.toLocaleString('en-IN')}
+            </div>
           </div>
           <span style={{
             fontSize: 9, fontWeight: 600, letterSpacing: '0.8px',
             textTransform: 'uppercase' as const,
-            padding: '3px 10px', borderRadius: 50,
+            padding: '4px 12px', borderRadius: 50,
             background: isPaid ? `${C.green}15` : C.goldSoft,
             color: isPaid ? C.green : C.goldDeep,
             border: `1px solid ${isPaid ? `${C.green}40` : C.goldBorder}`,
           }}>{invoice.status || 'unpaid'}</span>
         </div>
-        {invoice.description && (
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{invoice.description}</div>
+        {isPaid && invoice.paid_date && (
+          <div style={{ fontSize: 10, color: C.green, marginTop: 6, textAlign: 'right' as const }}>
+            ✓ Paid on {new Date(invoice.paid_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </div>
         )}
-        <div style={{ fontSize: 11, color: C.light, marginTop: 6 }}>
-          Issued: {invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-          {invoice.paid_date ? ` · Paid: ${new Date(invoice.paid_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
-        </div>
       </div>
 
       {error && (
@@ -2997,8 +3101,7 @@ function TdsPromptSheet({ invoice, onClose, onConfirm, onSkip }: {
                 fontSize: 15, color: C.dark, outline: 'none',
                 fontFamily: "'Playfair Display', serif",
               }}
-              autoFocus
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <span style={{ color: C.muted, fontSize: 13 }}>%</span>
           </div>
         </div>
@@ -3024,7 +3127,7 @@ function TdsPromptSheet({ invoice, onClose, onConfirm, onSkip }: {
             fontSize: 16, color: C.dark, outline: 'none',
             fontFamily: "'Playfair Display', serif",
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <div style={{
@@ -4548,7 +4651,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 12,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel required>Phone</FieldLabel>
       <input
@@ -4562,7 +4665,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 12,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel>Role</FieldLabel>
       <input
@@ -4575,7 +4678,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 12,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel>Rate</FieldLabel>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -4595,7 +4698,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
               fontSize: 15, color: C.dark, outline: 'none',
               fontFamily: "'Playfair Display', serif",
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
         <select
           value={rateUnit}
@@ -4606,7 +4709,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
             fontSize: 12, color: C.dark,
             fontFamily: 'DM Sans, sans-serif', outline: 'none',
           }}
-        >
+         onFocus={scrollIntoViewOnFocus}>
           <option value="per_event">per event</option>
           <option value="per_day">per day</option>
         </select>
@@ -4623,7 +4726,7 @@ function AddTeamMemberSheet({ vendorId, initial, onClose, onSaved }: {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 12,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -5266,7 +5369,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: 12, appearance: 'none' as const,
         }}
-      >
+       onFocus={scrollIntoViewOnFocus}>
         <option value="">Select someone…</option>
         {activeMembers.map((m: any) => (
           <option key={m.id} value={m.id}>{m.name}{m.role ? ` · ${m.role}` : ''}</option>
@@ -5290,7 +5393,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
             fontSize: 17, color: C.dark, outline: 'none',
             fontFamily: "'Playfair Display', serif",
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <FieldLabel>What for</FieldLabel>
@@ -5305,7 +5408,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 12,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel>Notes</FieldLabel>
       <input
@@ -5319,7 +5422,7 @@ function TeamPaymentSheet({ vendorId, members, onClose, onSaved }: any) {
           fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif',
           outline: 'none', marginBottom: 16,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       {error && (
         <div style={{ background: C.redSoft, border: `1px solid ${C.redBorder}`, borderRadius: 8, padding: '10px 12px', fontSize: 11, color: C.red, marginBottom: 12 }}>{error}</div>
@@ -5457,7 +5560,7 @@ function TeamBroadcastPanel({ session, members, vendorName, onBack }: any) {
             fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif',
             outline: 'none', resize: 'vertical' as const, lineHeight: 1.55,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       {/* Recipients */}
@@ -5824,7 +5927,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
           fontSize: 14, fontFamily: 'inherit', marginBottom: 14,
           outline: 'none',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel required>Phone</FieldLabel>
       <div style={{ position: 'relative', marginBottom: 14 }}>
@@ -5842,7 +5945,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
             border: `1px solid ${C.border}`, background: C.pearl,
             fontSize: 14, fontFamily: 'inherit', outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <FieldLabel>Role</FieldLabel>
@@ -5856,7 +5959,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
           fontSize: 14, fontFamily: 'inherit', marginBottom: 14,
           outline: 'none',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel>Notes</FieldLabel>
       <textarea
@@ -5870,7 +5973,7 @@ function AssistantSheet({ session, initial, onClose, onSaved }: {
           fontSize: 14, fontFamily: 'inherit', marginBottom: 14,
           outline: 'none', resize: 'vertical' as const,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       {!isEdit && (
         <label style={{
@@ -6292,7 +6395,7 @@ function PaiSheet({ userType, userId, status, onClose, onSaved }: {
                 fontSize: 14, fontFamily: 'inherit',
                 outline: 'none', resize: 'none' as const,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <button
               onClick={startVoice}
               disabled={listening}
@@ -6525,7 +6628,7 @@ function PaiRequestSheet({ userType, userId, hasPending, onClose, onSubmitted }:
               fontSize: 14, fontFamily: 'inherit',
               outline: 'none', resize: 'none' as const, marginBottom: 14,
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
 
           <button onClick={submit} disabled={submitting} style={{
             width: '100%', padding: 14, borderRadius: 10,
@@ -6981,7 +7084,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
                 color: C.dark, outline: 'none', resize: 'none', marginBottom: 12,
                 boxSizing: 'border-box' as const,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <button onClick={submitAccessRequest} style={{
               width: '100%', padding: '14px', borderRadius: 10, background: C.dark,
               border: 'none', cursor: 'pointer', color: C.gold,
@@ -7072,8 +7175,8 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
         <>
           <label style={labelStyle}>Capacity (guests)</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input placeholder="Min" value={cd.capacity_min || ''} onChange={e => updateCD('capacity_min', e.target.value)} style={inputStyle} type="number" />
-            <input placeholder="Max" value={cd.capacity_max || ''} onChange={e => updateCD('capacity_max', e.target.value)} style={inputStyle} type="number" />
+            <input placeholder="Min" value={cd.capacity_min || ''} onChange={e => updateCD('capacity_min', e.target.value)} style={inputStyle} type="number" onFocus={scrollIntoViewOnFocus} />
+            <input placeholder="Max" value={cd.capacity_max || ''} onChange={e => updateCD('capacity_max', e.target.value)} style={inputStyle} type="number" onFocus={scrollIntoViewOnFocus} />
           </div>
           <label style={labelStyle}>Setting</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
@@ -7095,7 +7198,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
       return (
         <>
           <label style={labelStyle}>Equipment</label>
-          <input placeholder="e.g. Sony A1, Leica Q2" value={cd.equipment || ''} onChange={e => updateCD('equipment', e.target.value)} style={inputStyle} />
+          <input placeholder="e.g. Sony A1, Leica Q2" value={cd.equipment || ''} onChange={e => updateCD('equipment', e.target.value)} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           <label style={labelStyle}>Team on wedding day</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
             {['1 shooter', '2 shooters', '3+ shooters'].map(opt => (
@@ -7103,7 +7206,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             ))}
           </div>
           <label style={labelStyle}>Delivery time</label>
-          <input placeholder="e.g. 6-8 weeks" value={cd.delivery_time || ''} onChange={e => updateCD('delivery_time', e.target.value)} style={inputStyle} />
+          <input placeholder="e.g. 6-8 weeks" value={cd.delivery_time || ''} onChange={e => updateCD('delivery_time', e.target.value)} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           <label style={labelStyle}>Add-ons available</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
             {['Drone', 'Same-day edit', 'Pre-wedding shoot', 'Cinematic video', 'Raw files included'].map(opt => {
@@ -7118,7 +7221,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
       return (
         <>
           <label style={labelStyle}>Products used</label>
-          <input placeholder="e.g. MAC, Huda, Bobbi Brown" value={cd.products || ''} onChange={e => updateCD('products', e.target.value)} style={inputStyle} />
+          <input placeholder="e.g. MAC, Huda, Bobbi Brown" value={cd.products || ''} onChange={e => updateCD('products', e.target.value)} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           <label style={labelStyle}>Services offered</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
             {['Trial session', 'Hair styling', 'Airbrush', 'HD makeup', 'Family makeup', 'Draping', 'Groom styling'].map(opt => {
@@ -7127,7 +7230,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             })}
           </div>
           <label style={labelStyle}>Travel radius included (km)</label>
-          <input placeholder="e.g. 50" value={cd.travel_km || ''} onChange={e => updateCD('travel_km', e.target.value)} style={inputStyle} type="number" />
+          <input placeholder="e.g. 50" value={cd.travel_km || ''} onChange={e => updateCD('travel_km', e.target.value)} style={inputStyle} type="number" onFocus={scrollIntoViewOnFocus} />
         </>
       );
     }
@@ -7160,7 +7263,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
       return (
         <>
           <label style={labelStyle}>Genres / Styles</label>
-          <input placeholder="e.g. Bollywood, Hip-hop, Classical" value={cd.genres || ''} onChange={e => updateCD('genres', e.target.value)} style={inputStyle} />
+          <input placeholder="e.g. Bollywood, Hip-hop, Classical" value={cd.genres || ''} onChange={e => updateCD('genres', e.target.value)} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           <label style={labelStyle}>Equipment</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
             {['Provided', 'Client provides', 'Both options'].map(opt => (
@@ -7188,7 +7291,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             })}
           </div>
           <label style={labelStyle}>Minimum event budget (Rs)</label>
-          <input placeholder="e.g. 2500000" value={cd.min_event_budget || ''} onChange={e => updateCD('min_event_budget', e.target.value)} style={inputStyle} type="number" />
+          <input placeholder="e.g. 2500000" value={cd.min_event_budget || ''} onChange={e => updateCD('min_event_budget', e.target.value)} style={inputStyle} type="number" onFocus={scrollIntoViewOnFocus} />
         </>
       );
     }
@@ -7357,7 +7460,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
         {expandedPhase === 'essentials' && (
           <div style={phaseBody}>
             <label style={labelStyle}>Owner name</label>
-            <input value={ownerName} onChange={e => setOwnerName(e.target.value)} onBlur={() => saveFields({ owner_name: ownerName })} placeholder="Your full name" style={inputStyle} />
+            <input value={ownerName} onChange={e => setOwnerName(e.target.value)} onBlur={() => saveFields({ owner_name: ownerName })} placeholder="Your full name" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
 
             <label style={labelStyle}>Serves cities (select up to 10 — or mark flexible)</label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 8 }}>
@@ -7406,7 +7509,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             </div>
 
             <label style={labelStyle}>Starting price (Rs)</label>
-            <input value={startingPrice} onChange={e => setStartingPrice(e.target.value)} onBlur={() => saveFields({ starting_price: startingPrice ? parseInt(startingPrice) : null })} placeholder="e.g. 150000" type="number" style={inputStyle} />
+            <input value={startingPrice} onChange={e => setStartingPrice(e.target.value)} onBlur={() => saveFields({ starting_price: startingPrice ? parseInt(startingPrice) : null })} placeholder="e.g. 150000" type="number" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           </div>
         )}
       </div>
@@ -7424,7 +7527,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
         {expandedPhase === 'profile' && (
           <div style={phaseBody}>
             <label style={labelStyle}>About you / your business (150-500 chars)</label>
-            <textarea value={about} onChange={e => setAbout(e.target.value)} onBlur={() => saveFields({ about })} placeholder="Tell couples what makes your work special..." rows={5} style={{ ...inputStyle, resize: 'none' as const, fontFamily: 'DM Sans, sans-serif' }} maxLength={500} />
+            <textarea value={about} onChange={e => setAbout(e.target.value)} onBlur={() => saveFields({ about })} placeholder="Tell couples what makes your work special..." rows={5} style={{ ...inputStyle, resize: 'none' as const, fontFamily: 'DM Sans, sans-serif' }} maxLength={500} onFocus={scrollIntoViewOnFocus} />
             <p style={{ margin: '4px 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', textAlign: 'right' as const }}>{about.length}/500</p>
 
             <label style={labelStyle}>Vibe tags (pick 3-5)</label>
@@ -7705,7 +7808,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
                         onMouseUp={e => saveLockPrefs({ lock_date_amount: parseInt((e.target as HTMLInputElement).value) })}
                         onTouchEnd={e => saveLockPrefs({ lock_date_amount: parseInt((e.target as HTMLInputElement).value) })}
                         style={{ width: '100%', accentColor: C.gold }}
-                      />
+                      onFocus={scrollIntoViewOnFocus} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                         <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Rs {(minAmt / 100).toLocaleString('en-IN')}</span>
                         <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Rs {(maxAmt / 100).toLocaleString('en-IN')}</span>
@@ -7769,13 +7872,13 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             </div>
 
             <label style={labelStyle}>Package name</label>
-            <input value={editingPackage.name} onChange={e => setEditingPackage({ ...editingPackage, name: e.target.value })} placeholder='e.g. "Signature Wedding"' style={inputStyle} />
+            <input value={editingPackage.name} onChange={e => setEditingPackage({ ...editingPackage, name: e.target.value })} placeholder='e.g. "Signature Wedding"' style={inputStyle} onFocus={scrollIntoViewOnFocus} />
 
             <label style={labelStyle}>Price (Rs)</label>
-            <input value={editingPackage.price || ''} onChange={e => setEditingPackage({ ...editingPackage, price: e.target.value })} placeholder="e.g. 450000" type="number" style={inputStyle} />
+            <input value={editingPackage.price || ''} onChange={e => setEditingPackage({ ...editingPackage, price: e.target.value })} placeholder="e.g. 450000" type="number" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
 
             <label style={labelStyle}>Duration</label>
-            <input value={editingPackage.duration || ''} onChange={e => setEditingPackage({ ...editingPackage, duration: e.target.value })} placeholder="e.g. 8-10 hours" style={inputStyle} />
+            <input value={editingPackage.duration || ''} onChange={e => setEditingPackage({ ...editingPackage, duration: e.target.value })} placeholder="e.g. 8-10 hours" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
 
             <label style={labelStyle}>Ideal for</label>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -7791,7 +7894,7 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
                   const next = [...editingPackage.deliverables];
                   next[i] = e.target.value;
                   setEditingPackage({ ...editingPackage, deliverables: next });
-                }} placeholder="e.g. 500 edited images" style={inputStyle} />
+                }} placeholder="e.g. 500 edited images" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
                 {editingPackage.deliverables.length > 1 && (
                   <button onClick={() => {
                     const next = editingPackage.deliverables.filter((_: any, idx: number) => idx !== i);
@@ -7949,6 +8052,55 @@ function AddClientModal(p: AddClientModalProps) {
           </button>
         </div>
 
+        {/* Quick import row — phonebook (Android) + WhatsApp (DreamAi gated) */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+          <button onClick={() => {
+            const supported = typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window;
+            if (!supported) {
+              alert('Phonebook import is launching soon. Currently supported only on Android Chrome — we are bringing it to iOS too.');
+              return;
+            }
+            (async () => {
+              try {
+                // @ts-ignore — Contact Picker API
+                const contacts = await (navigator as any).contacts.select(['name', 'tel'], { multiple: false });
+                if (!contacts || contacts.length === 0) return;
+                const c = contacts[0];
+                const name = (c.name?.[0] || '').trim();
+                const phone = (c.tel?.[0] || '').replace(/\D/g, '').slice(-10);
+                if (name) p.setName(name);
+                if (phone) p.setPhone(phone);
+              } catch {}
+            })();
+          }} style={{
+            flex: 1, background: C.cream, border: `1px solid ${C.goldBorder}`,
+            borderRadius: '10px', padding: '10px 12px',
+            fontSize: '11px', color: C.goldDeep, fontWeight: 500,
+            fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6,
+          }}>
+            <Phone size={12} />
+            <span>From phonebook</span>
+          </button>
+          <button onClick={() => {
+            const hasDreamAi = (p as any)?.session?.hasDreamAi || false;
+            if (hasDreamAi) {
+              alert('WhatsApp client import: coming in the next build. For now, copy the contact details from WhatsApp into the form below.');
+            } else {
+              alert('WhatsApp client import is included with DreamAi. Unlock from the DreamAi floating button.');
+            }
+          }} style={{
+            flex: 1, background: C.cream, border: `1px solid ${C.goldBorder}`,
+            borderRadius: '10px', padding: '10px 12px',
+            fontSize: '11px', color: C.goldDeep, fontWeight: 500,
+            fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6,
+          }}>
+            <MessageCircle size={12} />
+            <span>From WhatsApp</span>
+          </button>
+        </div>
+
         {/* Name */}
         <div>
           <label style={labelStyle}>CLIENT NAME *</label>
@@ -7957,8 +8109,7 @@ function AddClientModal(p: AddClientModalProps) {
             placeholder="e.g. Priya Sharma"
             value={p.name}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setName(e.target.value)}
-            autoFocus
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         {/* Phone + Email row */}
@@ -7970,7 +8121,7 @@ function AddClientModal(p: AddClientModalProps) {
               placeholder="9876543210"
               value={p.phone}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-            />
+            onFocus={scrollIntoViewOnFocus} />
           </div>
           <div style={{ flex: 1 }}>
             <label style={labelStyle}>EMAIL</label>
@@ -7979,7 +8130,7 @@ function AddClientModal(p: AddClientModalProps) {
               placeholder="Optional"
               value={p.email}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setEmail(e.target.value)}
-            />
+            onFocus={scrollIntoViewOnFocus} />
           </div>
         </div>
 
@@ -8014,7 +8165,7 @@ function AddClientModal(p: AddClientModalProps) {
             type="date" style={input}
             value={p.eventDate}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setEventDate(e.target.value)}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         <div>
@@ -8024,7 +8175,7 @@ function AddClientModal(p: AddClientModalProps) {
             placeholder="e.g. The Leela Palace, Delhi"
             value={p.venue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setVenue(e.target.value)}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         <div>
@@ -8034,7 +8185,7 @@ function AddClientModal(p: AddClientModalProps) {
             placeholder="e.g. 500000"
             value={p.budget}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => p.setBudget(e.target.value.replace(/\D/g, ''))}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         {p.error && (
@@ -9108,7 +9259,7 @@ function QuickInvoiceSheet({
               fontFamily: 'DM Sans, sans-serif', outline: 'none',
               marginBottom: 14,
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </>
       )}
 
@@ -9133,7 +9284,7 @@ function QuickInvoiceSheet({
             fontSize: 18, fontFamily: "'Playfair Display', serif",
             color: C.dark, fontWeight: 400, outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <FieldLabel required>Description</FieldLabel>
@@ -9150,7 +9301,7 @@ function QuickInvoiceSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: 14,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       {/* GST toggle */}
       <div style={{
@@ -9345,7 +9496,7 @@ function QuickBlockDateSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '14px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel required>Reason / Title</FieldLabel>
       <input
@@ -9361,7 +9512,7 @@ function QuickBlockDateSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '14px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <button
         onClick={() => setLinkClient(v => !v)}
@@ -9389,7 +9540,7 @@ function QuickBlockDateSheet({
               borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '10px', boxSizing: 'border-box',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
           <FieldLabel>Client phone</FieldLabel>
           <input
             type="tel" value={clientPhone} onChange={e => setClientPhone(e.target.value)}
@@ -9399,7 +9550,7 @@ function QuickBlockDateSheet({
               borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
           <div style={{ fontSize: '10px', color: C.light, marginTop: '6px' }}>
             If phone is provided, a new client will be added to your CRM.
           </div>
@@ -9729,7 +9880,7 @@ function QuickReminderSheet({
               borderRadius: '12px', padding: '12px 14px', fontSize: '13px', color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '12px', boxSizing: 'border-box',
             }}
-          >
+           onFocus={scrollIntoViewOnFocus}>
             <option value="">Pick a client…</option>
             {clients.filter((c: any) => c.phone).map((c: any) => (
               <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>
@@ -9748,7 +9899,7 @@ function QuickReminderSheet({
               fontFamily: 'DM Sans, sans-serif', outline: 'none', marginBottom: '14px',
               boxSizing: 'border-box', resize: 'vertical',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
 
           <button
             onClick={sendCustom}
@@ -9994,14 +10145,13 @@ function QuickTodoSheet({
       <input
         type="text" value={title} onChange={e => setTitle(e.target.value)}
         placeholder="e.g. Confirm Saturday's venue"
-        autoFocus
         style={{
           width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
           borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '14px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       {/* Client autocomplete */}
       <FieldLabel>Client</FieldLabel>
@@ -10123,7 +10273,7 @@ function QuickTodoSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '14px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <FieldLabel>Priority</FieldLabel>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
@@ -10270,14 +10420,13 @@ function QuickEventSheet({
       <input
         type="text" value={title} onChange={e => setTitle(e.target.value)}
         placeholder="e.g. Pooja's outfit trial"
-        autoFocus
         style={{
           width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
           borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '12px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
         <div style={{ flex: 1 }}>
@@ -10289,7 +10438,7 @@ function QuickEventSheet({
               borderRadius: '12px', padding: '13px 14px', fontSize: '13px', color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
         <div style={{ flex: 1 }}>
           <FieldLabel>Time</FieldLabel>
@@ -10300,7 +10449,7 @@ function QuickEventSheet({
               borderRadius: '12px', padding: '13px 14px', fontSize: '13px', color: C.dark,
               fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
       </div>
 
@@ -10313,7 +10462,7 @@ function QuickEventSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '12px', boxSizing: 'border-box',
         }}
-      >
+       onFocus={scrollIntoViewOnFocus}>
         <option value="generic">General</option>
         <option value="booking">Booking / Wedding day</option>
         <option value="trial">Outfit / Dress trial</option>
@@ -10330,7 +10479,7 @@ function QuickEventSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '12px', boxSizing: 'border-box',
         }}
-      >
+       onFocus={scrollIntoViewOnFocus}>
         <option value="">— No client —</option>
         {clients.map((c: any) => (
           <option key={c.id} value={c.id}>{c.name}</option>
@@ -10348,7 +10497,7 @@ function QuickEventSheet({
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '14px', boxSizing: 'border-box', resize: 'vertical',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       {error && (
         <div style={{
@@ -10699,17 +10848,6 @@ function PaymentSchedulesPanel({ session, paymentSchedules, clients, onSavePayme
         </div>
       )}
 
-      {/* Footer hint */}
-      <div style={{
-        marginTop: '16px', padding: '12px 14px',
-        background: C.pearl, borderRadius: '10px',
-        fontSize: '11px', color: C.muted, lineHeight: 1.55,
-        textAlign: 'center',
-      }}>
-        Need more than 3 instalments? Use the
-        <a href="/vendor/mobile/profile/edit" target="_blank" rel="noreferrer" style={{ color: C.goldDeep, textDecoration: 'underline', marginLeft: '4px' }}>business portal →</a>
-      </div>
-
       {/* Create modal */}
       {showCreate && (
         <PaymentScheduleCreator
@@ -10727,14 +10865,27 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
   const [clientId, setClientId] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
-  const [advance, setAdvance] = useState({ amount: '', due_date: '' });
-  const [preEvent, setPreEvent] = useState({ amount: '', due_date: '' });
-  const [final, setFinal] = useState({ amount: '', due_date: '' });
+  const [milestones, setMilestones] = useState<{ label: string; amount: string; due_date: string }[]>([
+    { label: 'Advance',   amount: '', due_date: '' },
+    { label: 'Pre-Event', amount: '', due_date: '' },
+    { label: 'Final',     amount: '', due_date: '' },
+  ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const totalEntered = (parseInt(advance.amount) || 0) + (parseInt(preEvent.amount) || 0) + (parseInt(final.amount) || 0);
-  const canSave = !!clientName && (parseInt(advance.amount) > 0 || parseInt(preEvent.amount) > 0 || parseInt(final.amount) > 0) && !submitting;
+  const totalEntered = milestones.reduce((s, m) => s + (parseInt(m.amount) || 0), 0);
+  const validCount = milestones.filter(m => parseInt(m.amount) > 0).length;
+  const canSave = !!clientName && validCount > 0 && !submitting;
+
+  const updateMilestone = (idx: number, patch: Partial<{ label: string; amount: string; due_date: string }>) => {
+    setMilestones(prev => prev.map((m, i) => i === idx ? { ...m, ...patch } : m));
+  };
+  const addMilestone = () => {
+    setMilestones(prev => [...prev, { label: `Milestone ${prev.length + 1}`, amount: '', due_date: '' }]);
+  };
+  const removeMilestone = (idx: number) => {
+    setMilestones(prev => prev.filter((_, i) => i !== idx));
+  };
 
   const handleClientPick = (id: string) => {
     setClientId(id);
@@ -10748,10 +10899,9 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
   const handleSave = async () => {
     if (!canSave) return;
     setError(''); setSubmitting(true);
-    const instalments: any[] = [];
-    if (parseInt(advance.amount) > 0)   instalments.push({ label: 'Advance',   amount: parseInt(advance.amount),   due_date: advance.due_date || null,   paid: false });
-    if (parseInt(preEvent.amount) > 0)  instalments.push({ label: 'Pre-Event', amount: parseInt(preEvent.amount),  due_date: preEvent.due_date || null,  paid: false });
-    if (parseInt(final.amount) > 0)     instalments.push({ label: 'Final',     amount: parseInt(final.amount),     due_date: final.due_date || null,     paid: false });
+    const instalments = milestones
+      .filter(m => parseInt(m.amount) > 0)
+      .map(m => ({ label: m.label || 'Milestone', amount: parseInt(m.amount), due_date: m.due_date || null, paid: false }));
     try {
       const r = await fetch(API + '/api/payment-schedules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -10771,48 +10921,9 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
     } finally { setSubmitting(false); }
   };
 
-  const stage = (label: string, val: any, set: any, hint: string) => (
-    <div style={{
-      background: C.pearl, border: `1px solid ${C.border}`,
-      borderRadius: '12px', padding: '14px', marginBottom: '10px',
-    }}>
-      <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, letterSpacing: '1px', marginBottom: '4px', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: '10px', color: C.light, marginBottom: '10px' }}>{hint}</div>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <div style={{ flex: 1 }}>
-          <FieldLabel>Amount (₹)</FieldLabel>
-          <input
-            type="number" inputMode="numeric"
-            value={val.amount} onChange={e => set({ ...val, amount: e.target.value })}
-            placeholder="0"
-            style={{
-              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
-              borderRadius: '10px', padding: '11px 12px',
-              fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <FieldLabel>Due date</FieldLabel>
-          <input
-            type="date" value={val.due_date}
-            onChange={e => set({ ...val, due_date: e.target.value })}
-            style={{
-              width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
-              borderRadius: '10px', padding: '11px 12px',
-              fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <SheetOverlay onClose={onClose}>
-      <SheetHeader eyebrow="Payment Schedule" title="Stage 3 payments" onClose={onClose} />
+      <SheetHeader eyebrow="Payment Schedule" title="Stage your payments" onClose={onClose} />
 
       <FieldLabel>Client</FieldLabel>
       {clients.length > 0 ? (
@@ -10821,7 +10932,7 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
           borderRadius: '12px', padding: '13px 14px', fontSize: '14px', color: C.dark,
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '8px', boxSizing: 'border-box',
-        }}>
+        }} onFocus={scrollIntoViewOnFocus}>
           <option value="">— Pick existing client —</option>
           {clients.map((c: any) => (
             <option key={c.id} value={c.id}>{c.name}{c.phone ? ' · ' + c.phone : ''}</option>
@@ -10837,7 +10948,7 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '8px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
       <input
         type="tel" inputMode="tel" value={clientPhone}
         onChange={e => setClientPhone(e.target.value)}
@@ -10848,11 +10959,75 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
           fontFamily: 'DM Sans, sans-serif', outline: 'none',
           marginBottom: '18px', boxSizing: 'border-box',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
-      {stage('Advance', advance, setAdvance, 'Booking confirmation deposit')}
-      {stage('Pre-Event', preEvent, setPreEvent, 'Due 7-30 days before event')}
-      {stage('Final', final, setFinal, 'Balance after the event')}
+      {milestones.map((m, idx) => (
+        <div key={idx} style={{
+          background: C.pearl, border: `1px solid ${C.border}`,
+          borderRadius: '12px', padding: '14px', marginBottom: '10px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <input
+              type="text" value={m.label} onChange={e => updateMilestone(idx, { label: e.target.value })}
+              placeholder="Milestone label"
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                fontSize: '11px', fontFamily: 'DM Sans, sans-serif', fontWeight: 600,
+                color: C.muted, letterSpacing: '1px', textTransform: 'uppercase' as const,
+              }}
+            onFocus={scrollIntoViewOnFocus} />
+            {milestones.length > 1 && (
+              <button onClick={() => removeMilestone(idx)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
+                display: 'flex' as const, alignItems: 'center' as const,
+              }} title="Remove milestone">
+                <Trash2 size={12} color={C.muted} />
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ flex: 1 }}>
+              <FieldLabel>Amount (₹)</FieldLabel>
+              <input
+                type="number" inputMode="numeric"
+                value={m.amount} onChange={e => updateMilestone(idx, { amount: e.target.value })}
+                placeholder="0"
+                style={{
+                  width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+                  borderRadius: '10px', padding: '11px 12px',
+                  fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                  outline: 'none', boxSizing: 'border-box',
+                }}
+              onFocus={scrollIntoViewOnFocus} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <FieldLabel>Due date</FieldLabel>
+              <input
+                type="date" value={m.due_date}
+                onChange={e => updateMilestone(idx, { due_date: e.target.value })}
+                style={{
+                  width: '100%', background: C.ivory, border: `1px solid ${C.border}`,
+                  borderRadius: '10px', padding: '11px 12px',
+                  fontSize: '14px', color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                  outline: 'none', boxSizing: 'border-box',
+                }}
+              onFocus={scrollIntoViewOnFocus} />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <button onClick={addMilestone} style={{
+        width: '100%', background: 'transparent', border: `1px dashed ${C.goldBorder}`,
+        borderRadius: '10px', padding: '12px',
+        fontSize: '12px', color: C.goldDeep, fontWeight: 500,
+        fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+        marginBottom: '14px',
+        display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6,
+      }}>
+        <Plus size={12} />
+        <span>Add milestone</span>
+      </button>
 
       <div style={{
         background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
@@ -10860,7 +11035,7 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
         fontSize: '12px', color: C.goldDeep, fontWeight: 600,
         marginBottom: '14px', display: 'flex', justifyContent: 'space-between',
       }}>
-        <span>Total</span>
+        <span>Total · {validCount} milestone{validCount === 1 ? '' : 's'}</span>
         <span>₹{totalEntered.toLocaleString('en-IN')}</span>
       </div>
 
@@ -10877,13 +11052,6 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
           textTransform: 'uppercase', cursor: canSave ? 'pointer' : 'not-allowed',
           fontFamily: 'DM Sans, sans-serif',
         }}>{submitting ? 'Creating…' : 'Create Schedule'}</button>
-
-      <div style={{
-        marginTop: '12px',
-        fontSize: '10px', color: C.light, textAlign: 'center', lineHeight: 1.5,
-      }}>
-        More instalments? Use the business portal →
-      </div>
     </SheetOverlay>
   );
 }
@@ -10894,13 +11062,16 @@ function PaymentScheduleCreator({ session, clients, onClose, onSaved }: any) {
 
 function TodoPanel({ todos, onOpenTodo, onToggleTodo, onDeleteTodo }: any) {
   const [filter, setFilter] = useState<'all' | 'pending' | 'done'>('pending');
+  const [search, setSearch] = useState('');
+  const matches = (s: string | null | undefined) => !search || (s || '').toLowerCase().includes(search.toLowerCase());
 
   const today = new Date(); today.setHours(0,0,0,0);
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
 
   const visible = (todos || []).filter((t: any) => {
-    if (filter === 'pending') return !t.done;
-    if (filter === 'done') return t.done;
+    if (filter === 'pending' && t.done) return false;
+    if (filter === 'done' && !t.done) return false;
+    if (search && !matches(t.title) && !matches(t.notes) && !matches(t.linked_client_name)) return false;
     return true;
   });
 
@@ -10971,6 +11142,11 @@ function TodoPanel({ todos, onOpenTodo, onToggleTodo, onDeleteTodo }: any) {
 
   return (
     <div style={{ padding: '16px 0' }}>
+      {todos && todos.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <SearchBar value={search} onChange={setSearch} placeholder="Search to-do by title, notes, client…" />
+        </div>
+      )}
       {/* Filter pills + Add button */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', alignItems: 'center' }}>
         {(['pending', 'all', 'done'] as const).map(f => (
@@ -11032,6 +11208,8 @@ function ExpensesPanel({ session, tier, clients }: any) {
   const [showAddSheet, setShowAddSheet] = useState(false);
   const [showProfitInfo, setShowProfitInfo] = useState(false);
   const [filter, setFilter] = useState<'month' | 'ytd' | 'all'>('month');
+  const [search, setSearch] = useState('');
+  const matches = (s: string | null | undefined) => !search || (s || '').toLowerCase().includes(search.toLowerCase());
 
   useEffect(() => {
     if (!session?.vendorId) { setLoading(false); return; }
@@ -11043,6 +11221,15 @@ function ExpensesPanel({ session, tier, clients }: any) {
       if (inv.success) setInvoices(inv.data || []);
     }).finally(() => setLoading(false));
   }, [session?.vendorId]);
+
+  // Auto-open create modal when arriving from Quick Action
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('tdw_pwa_open_create') === '1') {
+      localStorage.removeItem('tdw_pwa_open_create');
+      setShowAddSheet(true);
+    }
+  }, []);
 
   // ── Computed ──────────────────────────────────────────────────────────
   const now = new Date();
@@ -11059,9 +11246,14 @@ function ExpensesPanel({ session, tier, clients }: any) {
 
   const filteredExpenses = expenses.filter(e => {
     const d = parseExpenseDate(e);
-    if (!d) return filter === 'all';
-    if (filter === 'month') return d >= monthStart;
-    if (filter === 'ytd')   return d >= fyStart;
+    let dateOk = filter === 'all';
+    if (d) {
+      if (filter === 'month') dateOk = d >= monthStart;
+      else if (filter === 'ytd') dateOk = d >= fyStart;
+      else dateOk = true;
+    }
+    if (!dateOk) return false;
+    if (search && !matches(e.description) && !matches(e.category) && !matches(e.vendor_name) && !matches(String(e.amount))) return false;
     return true;
   });
 
@@ -11348,6 +11540,11 @@ function ExpensesPanel({ session, tier, clients }: any) {
       )}
 
       {/* ── Expense list ── */}
+      {expenses.length > 0 && (
+        <div style={{ marginBottom: '8px' }}>
+          <SearchBar value={search} onChange={setSearch} placeholder="Search expenses by description, category, vendor…" />
+        </div>
+      )}
       {filteredExpenses.length === 0 ? (
         <Empty
           icon={<TrendingDown size={28} color={C.light} />}
@@ -11575,8 +11772,7 @@ function AddExpenseSheet({ vendorId, clients, onClose, onSaved }: {
                 fontSize: '18px', fontFamily: "'Playfair Display', serif",
                 color: C.dark, outline: 'none',
               }}
-              autoFocus
-            />
+            onFocus={scrollIntoViewOnFocus} />
           </div>
         </label>
 
@@ -11596,7 +11792,7 @@ function AddExpenseSheet({ vendorId, clients, onClose, onSaved }: {
               fontFamily: 'DM Sans, sans-serif',
               outline: 'none', boxSizing: 'border-box',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </label>
 
         {/* Category chips */}
@@ -12446,13 +12642,13 @@ function TeamMemberSheet({ title, initial, onClose, onSave, onDelete }: {
           type="text" value={name} onChange={(e) => setName(e.target.value)}
           placeholder="Full name"
           style={{ width: '100%', background: C.pearl, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '13px 14px', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', color: C.dark, outline: 'none', boxSizing: 'border-box', marginBottom: '14px' }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <FormLabel>Role</FormLabel>
         <select
           value={role} onChange={(e) => setRole(e.target.value)}
           style={{ width: '100%', background: C.pearl, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '13px 14px', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', color: C.dark, outline: 'none', boxSizing: 'border-box', marginBottom: '14px', appearance: 'none' }}
-        >
+         onFocus={scrollIntoViewOnFocus}>
           {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
 
@@ -12461,7 +12657,7 @@ function TeamMemberSheet({ title, initial, onClose, onSave, onDelete }: {
           type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
           placeholder="+91 98765 43210"
           style={{ width: '100%', background: C.pearl, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '13px 14px', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', color: C.dark, outline: 'none', boxSizing: 'border-box', marginBottom: '14px' }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <FormLabel>Email</FormLabel>
         <input
@@ -12469,7 +12665,7 @@ function TeamMemberSheet({ title, initial, onClose, onSave, onDelete }: {
           placeholder="name@example.com"
           autoCapitalize="none"
           style={{ width: '100%', background: C.pearl, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '13px 14px', fontFamily: 'DM Sans, sans-serif', fontSize: '14px', color: C.dark, outline: 'none', boxSizing: 'border-box', marginBottom: '14px' }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
           <input
@@ -12535,6 +12731,7 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
   const [sentIds, setSentIds] = useState<string[]>([]);
   const [step, setStep] = useState<'compose' | 'send'>('compose');
   const [history, setHistory] = useState<any[]>([]);
+  const [recipientSearch, setRecipientSearch] = useState('');
 
   useEffect(() => {
     if (!session?.vendorId) return;
@@ -12555,7 +12752,7 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
   };
 
   const recipients = clients.filter((c: any) => selectedIds.includes(c.id) && c.phone);
-  const canProceed = message.trim().length > 10 && recipients.length > 0;
+  const canProceed = message.trim().length >= 1 && recipients.length > 0;
 
   const startSending = () => {
     if (!canProceed) return;
@@ -12684,7 +12881,7 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
           resize: 'vertical', outline: 'none', boxSizing: 'border-box',
           marginBottom: '8px',
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
       <div style={{ fontSize: '10px', color: C.muted, marginBottom: '14px' }}>
         Tip: {'{{name}}'} becomes each client's name automatically.
       </div>
@@ -12705,8 +12902,14 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
       {clients.length === 0 ? (
         <Empty icon={<Users size={28} color={C.light} />} title="No clients" sub="Add clients first to send broadcasts." />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px', maxHeight: '320px', overflowY: 'auto' }}>
-          {clients.map((c: any) => {
+        <>
+          <div style={{ marginBottom: '8px' }}>
+            <SearchBar value={recipientSearch} onChange={setRecipientSearch} placeholder="Search clients by name, phone…" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px', maxHeight: '320px', overflowY: 'auto' }}>
+            {clients
+              .filter((c: any) => !recipientSearch || (c.name || '').toLowerCase().includes(recipientSearch.toLowerCase()) || (c.phone || '').includes(recipientSearch))
+              .map((c: any) => {
             const selected = selectedIds.includes(c.id);
             const hasPhone = !!c.phone;
             return (
@@ -12742,7 +12945,8 @@ function BroadcastPanel({ session, tier, clients }: { session: VendorSession; ti
               </button>
             );
           })}
-        </div>
+          </div>
+        </>
       )}
 
       {/* Send button */}
@@ -12975,7 +13179,7 @@ function TeamChatPanel({ session, tier }: { session: VendorSession; tier: Tier }
             resize: 'none', outline: 'none', boxSizing: 'border-box',
             maxHeight: '100px',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
         <button
           onClick={sendMessage}
           disabled={!composerText.trim() || sending}
@@ -13341,7 +13545,7 @@ function DiscoveryRouter({ session }: { session: VendorSession }) {
                   fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
                   outline: 'none', resize: 'none' as const, marginBottom: 10,
                   boxSizing: 'border-box' as const,
-                }} />
+                }} onFocus={scrollIntoViewOnFocus} />
               <button onClick={async () => {
                 try {
                   await fetch(`${API}/api/vendor-discover/request`, {
@@ -13593,18 +13797,18 @@ function DiscoveryOnboardingWall({ session, modeState, onDone }: {
       {needsPhone && (
         <Field label="Phone">
           <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210"
-            style={inputStyle} />
+            style={inputStyle} onFocus={scrollIntoViewOnFocus} />
         </Field>
       )}
       {needsEmail && (
         <Field label="Email">
           <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"
-            style={inputStyle} />
+            style={inputStyle} onFocus={scrollIntoViewOnFocus} />
         </Field>
       )}
       {needsCategory && (
         <Field label="Category">
-          <select value={category} onChange={e => setCategory(e.target.value)} style={inputStyle}>
+          <select value={category} onChange={e => setCategory(e.target.value)} style={inputStyle} onFocus={scrollIntoViewOnFocus}>
             <option value="">Choose</option>
             {['photographers','venues','mua','designers','choreographers','dj','event-managers','bridal-wellness'].map(c => (
               <option key={c} value={c}>{c.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
@@ -13615,19 +13819,19 @@ function DiscoveryOnboardingWall({ session, modeState, onDone }: {
       {needsCity && (
         <Field label="City">
           <input value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Mumbai"
-            style={inputStyle} />
+            style={inputStyle} onFocus={scrollIntoViewOnFocus} />
         </Field>
       )}
       {needsIG && (
         <Field label="Instagram handle">
           <input value={instagram} onChange={e => setInstagram(e.target.value)} placeholder="@yourhandle"
-            style={inputStyle} />
+            style={inputStyle} onFocus={scrollIntoViewOnFocus} />
         </Field>
       )}
       {needsPrice && (
         <Field label="Starting price (Rs)">
           <input type="number" value={startingPrice} onChange={e => setStartingPrice(e.target.value)} placeholder="e.g. 50000"
-            style={inputStyle} />
+            style={inputStyle} onFocus={scrollIntoViewOnFocus} />
         </Field>
       )}
       {needsRT && (
@@ -14080,7 +14284,7 @@ function DiscoveryLeads({ session }: { session: VendorSession }) {
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
               outline: 'none',
-            }} />
+            }} onFocus={scrollIntoViewOnFocus} />
           <button onClick={sendMessage} disabled={!input.trim() || sending} style={{
             width: 40, height: 40, borderRadius: 20, background: C.dark,
             border: 'none', cursor: 'pointer',
@@ -14393,17 +14597,17 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
 
           <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Album (optional)</p>
           <input value={editingImage.album_title || ''} onChange={e => setEditingImage({ ...editingImage, album_title: e.target.value })}
-            placeholder="e.g. Mumbai Wedding 2024" style={inputStyle} />
+            placeholder="e.g. Mumbai Wedding 2024" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
           <div style={{ display: 'flex' as const, gap: 8, marginTop: 8 }}>
             <input value={editingImage.album_city || ''} onChange={e => setEditingImage({ ...editingImage, album_city: e.target.value })}
-              placeholder="City" style={{ ...inputStyle, flex: 1 }} />
+              placeholder="City" style={{ ...inputStyle, flex: 1 }} onFocus={scrollIntoViewOnFocus} />
             <input type="date" value={editingImage.album_date || ''} onChange={e => setEditingImage({ ...editingImage, album_date: e.target.value })}
-              style={{ ...inputStyle, flex: 1 }} />
+              style={{ ...inputStyle, flex: 1 }} onFocus={scrollIntoViewOnFocus} />
           </div>
 
           <p style={{ margin: '16px 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Caption (optional)</p>
           <input value={editingImage.caption || ''} onChange={e => setEditingImage({ ...editingImage, caption: e.target.value })}
-            placeholder="A short note for couples" style={inputStyle} />
+            placeholder="A short note for couples" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
 
           <button onClick={save} style={{
             width: '100%', padding: '14px', borderRadius: 10,
@@ -14811,7 +15015,7 @@ function PowerOffers({ session, onClose }: { session: VendorSession; onClose: ()
           <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
             <p style={{ margin: '0 0 12px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>New offer</p>
             <Field label="Title">
-              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. 15% off until Dec 31" style={inputStyle} />
+              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. 15% off until Dec 31" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
             </Field>
             <Field label="Type">
               <div style={{ display: 'flex' as const, gap: 6 }}>
@@ -14828,14 +15032,14 @@ function PowerOffers({ session, onClose }: { session: VendorSession; onClose: ()
             </Field>
             {form.discount_type !== 'freebie' && (
               <Field label={form.discount_type === 'percent' ? 'Percent off' : 'Amount (Rs)'}>
-                <input type="number" value={form.discount_value} onChange={e => setForm({ ...form, discount_value: e.target.value })} style={inputStyle} />
+                <input type="number" value={form.discount_value} onChange={e => setForm({ ...form, discount_value: e.target.value })} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
               </Field>
             )}
             <Field label={form.discount_type === 'freebie' ? 'Freebie description' : 'Description (optional)'}>
-              <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={form.discount_type === 'freebie' ? 'e.g. Free highlight reel with Premium' : 'Optional'} style={inputStyle} />
+              <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={form.discount_type === 'freebie' ? 'e.g. Free highlight reel with Premium' : 'Optional'} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
             </Field>
             <Field label="Ends on (optional)">
-              <input type="date" value={form.ends_at} onChange={e => setForm({ ...form, ends_at: e.target.value })} style={inputStyle} />
+              <input type="date" value={form.ends_at} onChange={e => setForm({ ...form, ends_at: e.target.value })} style={inputStyle} onFocus={scrollIntoViewOnFocus} />
             </Field>
             <div style={{ display: 'flex' as const, gap: 8, marginTop: 12 }}>
               <button onClick={() => setCreating(false)} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer' }}>Cancel</button>
@@ -14942,7 +15146,7 @@ function PowerFeatured({ session, onClose }: { session: VendorSession; onClose: 
             </p>
             <textarea value={pitch} onChange={e => setPitch(e.target.value)} rows={4}
               placeholder="e.g. I've shot 30+ weddings this year. My signature style is warm, unposed, cinematic."
-              style={{ ...inputStyle, resize: 'none' as const }} />
+              style={{ ...inputStyle, resize: 'none' as const }} onFocus={scrollIntoViewOnFocus} />
             <div style={{ display: 'flex' as const, gap: 8, marginTop: 12 }}>
               <button onClick={() => { setApplying(null); setPitch(''); }} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer' }}>Cancel</button>
               <button onClick={submitApp} disabled={!pitch.trim()} style={{ flex: 2, padding: 12, borderRadius: 10, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', opacity: pitch.trim() ? 1 : 0.5 }}>Submit</button>
@@ -15055,9 +15259,9 @@ function PowerBoosts({ session, onClose }: { session: VendorSession; onClose: ()
 
         {creating && (
           <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-            <Field label="Date"><input type="date" value={form.boost_date} onChange={e => setForm({ ...form, boost_date: e.target.value })} style={inputStyle} /></Field>
-            <Field label="Special rate (Rs, optional)"><input type="number" value={form.rate_override} onChange={e => setForm({ ...form, rate_override: e.target.value })} placeholder="Leave blank to show current rate" style={inputStyle} /></Field>
-            <Field label="Message (optional)"><input value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="e.g. Last slot in Q4" style={inputStyle} /></Field>
+            <Field label="Date"><input type="date" value={form.boost_date} onChange={e => setForm({ ...form, boost_date: e.target.value })} style={inputStyle} onFocus={scrollIntoViewOnFocus} /></Field>
+            <Field label="Special rate (Rs, optional)"><input type="number" value={form.rate_override} onChange={e => setForm({ ...form, rate_override: e.target.value })} placeholder="Leave blank to show current rate" style={inputStyle} onFocus={scrollIntoViewOnFocus} /></Field>
+            <Field label="Message (optional)"><input value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="e.g. Last slot in Q4" style={inputStyle} onFocus={scrollIntoViewOnFocus} /></Field>
             <div style={{ display: 'flex' as const, gap: 8, marginTop: 10 }}>
               <button onClick={() => setCreating(false)} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer' }}>Cancel</button>
               <button onClick={create} disabled={!form.boost_date} style={{ flex: 2, padding: 12, borderRadius: 10, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', opacity: form.boost_date ? 1 : 0.5 }}>Boost</button>

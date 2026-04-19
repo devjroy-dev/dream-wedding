@@ -406,6 +406,15 @@ function fmtINRFull(n: number): string {
   return '₹' + Math.round(n).toLocaleString('en-IN');
 }
 
+// ── Mobile keyboard fix ──
+function scrollIntoViewOnFocus(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+  const target = e.target;
+  if (!target) return;
+  setTimeout(() => {
+    try { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch {}
+  }, 300);
+}
+
 // Compute committed (actual + shadow) per event
 function eventCommitted(expenses: Expense[], event: string): number {
   return expenses
@@ -1036,7 +1045,7 @@ function InputField({ label, value, onChange, type = 'text', placeholder = '', r
             background: C.ivory, fontFamily: 'DM Sans, sans-serif',
             fontSize: 15, color: C.dark, outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
         {isPw && (
           <button onClick={() => setShowPw(p => !p)} style={{
             position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
@@ -1651,22 +1660,31 @@ function TopBar({ mode, onSwitch, session, onProfileTap }: {
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 40,
-      background: C.cream, borderBottom: `1px solid ${C.border}`,
-      padding: 'max(12px, env(safe-area-inset-top)) 20px 10px',
+      background: C.cream, borderBottom: '1px solid rgba(201,168,76,0.18)',
+      padding: 'calc(env(safe-area-inset-top) + 12px) 16px 10px',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      maxWidth: 480, margin: '0 auto',
+      maxWidth: 480, margin: '0 auto', gap: 12,
     }}>
+      {/* Left — TDW wordmark */}
       <span style={{
-        fontFamily: 'Playfair Display, serif', fontSize: 15,
-        color: C.gold, fontWeight: 400, letterSpacing: '1px',
+        fontFamily: "'Playfair Display', serif",
+        fontSize: 16, color: C.gold,
+        fontWeight: 500, letterSpacing: '2px',
+        flexShrink: 0,
       }}>TDW</span>
+
+      {/* Center — ModeToggle */}
       <ModeToggle mode={mode} onSwitch={onSwitch} />
-      <button onClick={onProfileTap} style={{
+
+      {/* Right — Profile circle */}
+      <button onClick={onProfileTap} aria-label="Open profile" style={{
         width: 32, height: 32, borderRadius: 16,
-        background: C.dark, border: 'none', cursor: 'pointer',
-        color: C.gold, fontSize: 13, fontWeight: 500,
-        fontFamily: 'DM Sans, sans-serif',
+        background: C.dark, border: `1px solid ${C.gold}`,
+        cursor: 'pointer', flexShrink: 0,
+        fontFamily: "'Playfair Display', serif",
+        fontSize: 14, fontWeight: 500, color: C.gold,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 0,
       }}>{initial}</button>
     </div>
   );
@@ -2521,7 +2539,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 color: C.dark, outline: 'none', resize: 'none', marginBottom: 12,
                 boxSizing: 'border-box' as const,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <button onClick={submitAccessRequest} style={{
               width: '100%', padding: '14px', borderRadius: 10, background: C.dark,
               border: 'none', cursor: 'pointer', color: C.gold,
@@ -3078,7 +3096,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
               outline: 'none',
-            }} />
+            }} onFocus={scrollIntoViewOnFocus} />
           <button onClick={sendThreadMessage} disabled={!threadInput.trim() || threadSending} style={{
             width: 40, height: 40, borderRadius: 20, background: C.dark,
             border: 'none', cursor: 'pointer',
@@ -3693,13 +3711,13 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
               <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Min</label>
               <input type="range" min={0} max={5000000} step={50000} value={layoverBudgetMin}
                 onChange={e => setLayoverBudgetMin(Math.min(parseInt(e.target.value), layoverBudgetMax - 50000))}
-                style={{ width: '100%', accentColor: C.gold }} />
+                style={{ width: '100%', accentColor: C.gold }} onFocus={scrollIntoViewOnFocus} />
             </div>
             <div>
               <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Max</label>
               <input type="range" min={0} max={5000000} step={50000} value={layoverBudgetMax}
                 onChange={e => setLayoverBudgetMax(Math.max(parseInt(e.target.value), layoverBudgetMin + 50000))}
-                style={{ width: '100%', accentColor: C.gold }} />
+                style={{ width: '100%', accentColor: C.gold }} onFocus={scrollIntoViewOnFocus} />
             </div>
           </div>
 
@@ -3734,7 +3752,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none',
               boxSizing: 'border-box' as const,
-            }} />
+            }} onFocus={scrollIntoViewOnFocus} />
           </div>
 
           </div>{/* end scrollable body */}
@@ -3963,13 +3981,13 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Min</label>
                 <input type="range" min={0} max={5000000} step={50000} value={feedBudgetMin}
                   onChange={e => setFeedBudgetMin(Math.min(parseInt(e.target.value), feedBudgetMax - 50000))}
-                  style={{ width: '100%', accentColor: C.gold }} />
+                  style={{ width: '100%', accentColor: C.gold }} onFocus={scrollIntoViewOnFocus} />
               </div>
               <div>
                 <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Max</label>
                 <input type="range" min={0} max={5000000} step={50000} value={feedBudgetMax}
                   onChange={e => setFeedBudgetMax(Math.max(parseInt(e.target.value), feedBudgetMin + 50000))}
-                  style={{ width: '100%', accentColor: C.gold }} />
+                  style={{ width: '100%', accentColor: C.gold }} onFocus={scrollIntoViewOnFocus} />
               </div>
             </div>
 
@@ -3981,7 +3999,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 border: `1px solid ${C.border}`, background: C.ivory,
                 fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none',
                 boxSizing: 'border-box' as const,
-              }} />
+              }} onFocus={scrollIntoViewOnFocus} />
             </div>
 
             </div>{/* end scrollable body */}
@@ -4400,7 +4418,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 outline: 'none', resize: 'none' as const, marginBottom: 14,
                 boxSizing: 'border-box' as const,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setShowEnquireSheet(false)} style={{
                 flex: 1, padding: '12px', borderRadius: 10, background: C.ivory,
@@ -4440,15 +4458,15 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
 
             <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Event date</label>
             <input type="date" value={editingEvent.event_date || ''} onChange={e => setEditingEvent({ ...editingEvent, event_date: e.target.value })}
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} onFocus={scrollIntoViewOnFocus} />
 
             <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>City</label>
             <input value={editingEvent.event_city || ''} onChange={e => setEditingEvent({ ...editingEvent, event_city: e.target.value })} placeholder="e.g. Udaipur"
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} onFocus={scrollIntoViewOnFocus} />
 
             <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Total budget for this event (Rs)</label>
             <input type="number" value={editingEvent.budget_total ? editingEvent.budget_total / 100 : ''} onChange={e => setEditingEvent({ ...editingEvent, budget_total: e.target.value ? parseInt(e.target.value) * 100 : null })} placeholder="e.g. 500000"
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} onFocus={scrollIntoViewOnFocus} />
 
             <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Guest count</label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 12 }}>
@@ -5404,7 +5422,7 @@ function TaskEditor({
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
             outline: 'none', marginBottom: 14, resize: 'vertical' as const,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Event */}
         <label style={{
@@ -5459,7 +5477,7 @@ function TaskEditor({
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
             outline: 'none', marginBottom: 18,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -6223,7 +6241,7 @@ function ExpenseEditor({
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, outline: 'none',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         {/* Shadow amount */}
@@ -6246,7 +6264,7 @@ function ExpenseEditor({
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.dark, outline: 'none',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         {/* Description */}
@@ -6265,7 +6283,7 @@ function ExpenseEditor({
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
             outline: 'none', marginBottom: 14,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Vendor */}
         <label style={{
@@ -6283,7 +6301,7 @@ function ExpenseEditor({
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
             outline: 'none', marginBottom: 14,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Event chips */}
         <label style={{
@@ -6430,7 +6448,7 @@ function ExpenseEditor({
             fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
             outline: 'none', marginBottom: 18, resize: 'vertical' as const,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -6539,7 +6557,7 @@ function ShagunEditor({ mode, events, entry, onClose, onSave, onDelete }: {
               border: `1px solid ${C.border}`, background: C.ivory,
               fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         <InputField label="Gift description" value={giftDescription} onChange={setGiftDescription} placeholder="e.g. Silver diya set" />
@@ -6607,7 +6625,7 @@ function ShagunEditor({ mode, events, entry, onClose, onSave, onDelete }: {
             fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
             outline: 'none', marginBottom: 18, resize: 'vertical' as const,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {mode === 'edit' && onDelete && (
@@ -6721,7 +6739,7 @@ function BudgetEditor({ budget, events, expenses, onClose, onSave }: {
               fontFamily: 'Playfair Display, serif', fontSize: 22, color: C.dark,
               outline: 'none', fontWeight: 600,
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
         </div>
 
         {/* Per-event envelopes */}
@@ -6754,7 +6772,7 @@ function BudgetEditor({ budget, events, expenses, onClose, onSave }: {
                     fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
                     outline: 'none', textAlign: 'right' as const,
                   }}
-                />
+                onFocus={scrollIntoViewOnFocus} />
               </div>
             </div>
           ))}
@@ -7652,7 +7670,7 @@ function GuestEditor({ mode, events, guest, onClose, onSave, onDelete }: {
             fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
             outline: 'none', marginBottom: 18, resize: 'vertical' as const,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {mode === 'edit' && onDelete && (
@@ -8762,7 +8780,7 @@ function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, o
                     fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
                     outline: 'none', marginBottom: 18, resize: 'vertical' as const,
                   }}
-                />
+                onFocus={scrollIntoViewOnFocus} />
                 <button
                   onClick={saveUpload} disabled={!imageUrl}
                   style={{
@@ -8796,7 +8814,7 @@ function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, o
                       border: `1px solid ${C.border}`, background: C.ivory,
                       fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.dark, outline: 'none',
                     }}
-                  />
+                  onFocus={scrollIntoViewOnFocus} />
                   <button
                     onClick={handleFetchPreview} disabled={!sourceUrl.trim() || fetching}
                     style={{
@@ -8864,7 +8882,7 @@ function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, o
                     fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
                     outline: 'none', marginBottom: 18, resize: 'vertical' as const,
                   }}
-                />
+                onFocus={scrollIntoViewOnFocus} />
                 <button
                   onClick={saveLink} disabled={!sourceUrl.trim()}
                   style={{
@@ -8891,7 +8909,6 @@ function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, o
                   value={note} onChange={e => setNote(e.target.value)}
                   placeholder="e.g. Marigold strings over the mandap…"
                   rows={5}
-                  autoFocus
                   style={{
                     width: '100%', boxSizing: 'border-box' as const,
                     padding: '12px 14px', borderRadius: 10,
@@ -8899,7 +8916,7 @@ function PinEditor({ mode, isSuggestion, events, defaultEvent, onFetchPreview, o
                     fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: C.dark,
                     outline: 'none', marginBottom: 18, resize: 'vertical' as const, lineHeight: '20px',
                   }}
-                />
+                onFocus={scrollIntoViewOnFocus} />
                 <button
                   onClick={saveNote} disabled={!note.trim()}
                   style={{
@@ -9767,7 +9784,7 @@ function VendorEditor({ mode, session, events, vendor, onClose, onSave, onDelete
                   border: `1px solid ${C.border}`, background: C.ivory,
                   fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
                 }}
-              />
+              onFocus={scrollIntoViewOnFocus} />
             </div>
 
             <label style={{
@@ -9784,7 +9801,7 @@ function VendorEditor({ mode, session, events, vendor, onClose, onSave, onDelete
                 fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
                 outline: 'none', marginBottom: 14,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
           </>
         )}
 
@@ -9869,7 +9886,7 @@ function VendorEditor({ mode, session, events, vendor, onClose, onSave, onDelete
             fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
             outline: 'none', marginBottom: 18, resize: 'vertical' as const,
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {mode === 'edit' && onDelete && (
@@ -10802,7 +10819,7 @@ function TemplateEditor({ template, newContext, onClose, onSave, onDelete }: {
             fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
             outline: 'none', marginBottom: 10, resize: 'vertical' as const, lineHeight: '18px',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
 
         {/* Variable chips */}
         <label style={{
@@ -11137,7 +11154,7 @@ function FeedbackSheet({ session, onSubmit, onClose, activeTab }: {
                 fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
                 outline: 'none', marginBottom: 14, resize: 'vertical' as const, lineHeight: '18px',
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
 
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <div style={{ flex: 1 }}>
@@ -11660,7 +11677,7 @@ function LoginForm({ onSuccess, onForgotPassword, onRequestInvite }: {
             border: `1px solid ${C.border}`, background: C.ivory,
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <label style={{
@@ -11679,7 +11696,7 @@ function LoginForm({ onSuccess, onForgotPassword, onRequestInvite }: {
             border: `1px solid ${C.border}`, background: C.ivory,
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
         <button
           onClick={() => setShowPassword(v => !v)}
           style={{
@@ -11851,7 +11868,7 @@ function ForgotPasswordFlow({ onDone, onBack }: {
                 border: `1px solid ${C.border}`, background: C.ivory,
                 fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
           </div>
           <ErrorBanner msg={error} />
           <div style={{ display: 'flex', gap: 10 }}>
@@ -11906,7 +11923,7 @@ function ForgotPasswordFlow({ onDone, onBack }: {
                 border: `1px solid ${C.border}`, background: C.ivory,
                 fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <button
               onClick={() => setShowPassword(v => !v)}
               style={{
@@ -11933,7 +11950,7 @@ function ForgotPasswordFlow({ onDone, onBack }: {
               fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
               outline: 'none', marginBottom: 14,
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
           <ErrorBanner msg={error} />
           <GoldButton fullWidth label={loading ? 'Saving…' : 'Reset password'} onTap={handleResetPassword} />
         </>
@@ -12037,7 +12054,7 @@ function AccessWaitlistForm({ onBack }: { onBack: () => void }) {
             border: `1px solid ${C.border}`, background: C.ivory,
             fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
           }}
-        />
+        onFocus={scrollIntoViewOnFocus} />
       </div>
 
       <label style={{
@@ -12055,7 +12072,7 @@ function AccessWaitlistForm({ onBack }: { onBack: () => void }) {
           fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
           outline: 'none', marginBottom: 14,
         }}
-      />
+      onFocus={scrollIntoViewOnFocus} />
 
       <InputField
         label="How did you hear about us?"
@@ -12262,7 +12279,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
                   border: `1px solid ${C.border}`, background: C.ivory,
                   fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none',
                 }}
-              />
+              onFocus={scrollIntoViewOnFocus} />
               <button onClick={addCustomEvent} style={{
                 padding: '10px 14px', borderRadius: 10,
                 background: C.ivory, border: `1px solid ${C.border}`,
@@ -12335,7 +12352,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
                       border: `1px solid ${C.border}`, background: C.ivory,
                       fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
                     }}
-                  />
+                  onFocus={scrollIntoViewOnFocus} />
                 </div>
                 <ErrorBanner msg={error} />
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -12387,7 +12404,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
                   border: `1px solid ${C.border}`, background: C.ivory,
                   fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark, outline: 'none',
                 }}
-              />
+              onFocus={scrollIntoViewOnFocus} />
               <button
                 onClick={() => setShowPassword(v => !v)}
                 style={{
@@ -12415,7 +12432,7 @@ function OnboardingFlow({ prefillCode, onComplete }: {
                 fontFamily: 'DM Sans, sans-serif', fontSize: 15, color: C.dark,
                 outline: 'none', marginBottom: 14,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <ErrorBanner msg={error} />
             <GoldButton fullWidth
               label={loading ? 'Setting up…' : 'Complete'}
@@ -13170,7 +13187,7 @@ function CouplePaiSheet({ userId, status, onClose, onSaved }: {
                 fontSize: 14, fontFamily: 'inherit',
                 outline: 'none', resize: 'none' as const,
               }}
-            />
+            onFocus={scrollIntoViewOnFocus} />
             <button
               onClick={startVoice}
               disabled={listening}
@@ -13365,7 +13382,7 @@ function CouplePaiRequestSheet({ userId, hasPending, onClose, onSubmitted }: {
               fontSize: 14, fontFamily: 'inherit',
               outline: 'none', resize: 'none' as const, marginBottom: 14,
             }}
-          />
+          onFocus={scrollIntoViewOnFocus} />
 
           <button onClick={submit} disabled={submitting} style={{
             width: '100%', padding: 14, borderRadius: 10,

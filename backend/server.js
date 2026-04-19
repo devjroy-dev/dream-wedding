@@ -4645,8 +4645,15 @@ app.get('/api/ds/team/:vendorId', async (req, res) => {
 
 app.post('/api/ds/team', async (req, res) => {
   try {
-    const { vendor_id, name, email, phone, role, status, permissions } = req.body;
-    const { data, error } = await supabase.from('vendor_team_members').insert([{ vendor_id, name, email, phone, role: role || 'staff', status: status || 'active', permissions: permissions || {} }]).select().single();
+    const { vendor_id, name, email, phone, role, status, permissions, rate, rate_unit } = req.body;
+    const { data, error } = await supabase.from('vendor_team_members').insert([{
+      vendor_id, name, email, phone,
+      role: role || 'staff',
+      status: status || 'active',
+      permissions: permissions || {},
+      rate: rate ? parseInt(rate) : null,
+      rate_unit: rate_unit || 'per_event',
+    }]).select().single();
     if (error) throw error;
 
     // Auto-create login credentials for team member
