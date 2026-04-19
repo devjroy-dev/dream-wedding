@@ -18,31 +18,78 @@ const TIER_INFO: Record<string, { label: string; rec: string; color: string }> =
   prestige: { label: 'Prestige', rec: 'Invite Only', color: '#2C2420' },
 };
 
-const TABS = [
-  { id: 'dashboard', label: '📊 Dashboard' },
-  { id: 'codes', label: '🔑 Access Codes' },
-  { id: 'vendors', label: '🏢 Vendors' },
-  { id: 'users', label: '👥 Users' },
-  { id: 'featured', label: '⭐ Featured' },
-  { id: 'messages', label: '💬 Messages' },
-  { id: 'flagged', label: '🚩 Flagged' },
-  { id: 'notifications', label: '📣 Broadcast' },
-  { id: 'settings', label: '⚙️ Settings' },
-  { id: 'waitlist', label: '📋 Waitlist' },
-  { id: 'profile-tracking', label: '📈 Profile Completion' },
-  { id: 'founding', label: '💎 Founding Vendors' },
-  { id: 'tdw-ai', label: '✨ Dream Ai Access' },
-  { id: 'hot-dates', label: '🔥 Hot Dates' },
-  { id: 'pai', label: '🤖 PAi Beta' },
-  { id: 'discover', label: '🧭 Discover Beta' },
+// Grouped sidebar navigation
+const NAV_GROUPS: { group: string; items: { id: string; label: string; badge?: string }[] }[] = [
+  {
+    group: 'OVERVIEW',
+    items: [
+      { id: 'dashboard',        label: 'Home' },
+    ],
+  },
+  {
+    group: 'VENDORS',
+    items: [
+      { id: 'vendors',          label: 'All Vendors' },
+      { id: 'flagged',          label: 'Flagged',          badge: 'red' },
+      { id: 'founding',         label: 'Founding Vendors' },
+      { id: 'codes',            label: 'Access Codes' },
+    ],
+  },
+  {
+    group: 'COUPLES',
+    items: [
+      { id: 'users',            label: 'All Couples' },
+      { id: 'waitlist',         label: 'Waitlist' },
+    ],
+  },
+  {
+    group: 'DISCOVERY',
+    items: [
+      { id: 'discover',         label: 'Access' },
+      { id: 'settings',         label: 'Featured Boards' },
+      { id: 'featured',         label: 'Featured Photos' },
+      { id: 'hot-dates',        label: 'Hot Dates' },
+      { id: 'profile-tracking', label: 'Profile Completion' },
+    ],
+  },
+  {
+    group: 'PRODUCTS',
+    items: [
+      { id: 'tdw-ai',           label: 'DreamAi Access' },
+      { id: 'pai',              label: 'PAi Access' },
+    ],
+  },
+  {
+    group: 'COMMS',
+    items: [
+      { id: 'notifications',    label: 'Broadcast' },
+      { id: 'messages',         label: 'Messages' },
+    ],
+  },
 ];
+
+// Flattened for backward-compat
+const TABS = NAV_GROUPS.flatMap(g => g.items);
 
 const s: any = {
   page: { minHeight: '100vh', background: '#F5F0E8', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  shell: { display: 'flex', minHeight: '100vh' },
+  sidebar: { width: 220, background: '#2C2420', padding: '18px 0 24px', color: '#C9A84C', position: 'sticky' as const, top: 0, height: '100vh', overflowY: 'auto' as const, flexShrink: 0 },
+  sidebarGroup: { fontSize: 9, color: '#8C7B6E', letterSpacing: 2, textTransform: 'uppercase' as const, fontWeight: 500, padding: '14px 20px 6px' },
+  sidebarItem: (a: boolean) => ({
+    display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const,
+    padding: '9px 20px', fontSize: 13, cursor: 'pointer' as const, border: 'none',
+    background: a ? 'rgba(201,168,76,0.12)' : 'transparent',
+    color: a ? '#F5F0E8' : '#B8A89B',
+    borderLeft: a ? '2px solid #C9A84C' : '2px solid transparent',
+    width: '100%', textAlign: 'left' as const, fontWeight: a ? 500 : 400, letterSpacing: '0.2px',
+  }),
+  sidebarBrand: { padding: '0 20px 20px', borderBottom: '1px solid rgba(201,168,76,0.15)', marginBottom: 8 },
+  main: { flex: 1, minWidth: 0, display: 'flex' as const, flexDirection: 'column' as const },
   header: { background: '#2C2420', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   tabBar: { background: '#fff', borderBottom: '1px solid #E8E0D5', padding: '0 12px', display: 'flex', gap: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
   tab: (a: boolean) => ({ padding: '12px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap', color: a ? '#2C2420' : '#8C7B6E', borderBottom: a ? '2px solid #C9A84C' : '2px solid transparent', fontWeight: a ? 500 : 400, flexShrink: 0 }),
-  content: { padding: '16px 12px', maxWidth: 1300, margin: '0 auto' },
+  content: { padding: '16px 20px', maxWidth: 1400, margin: '0 auto', width: '100%' as const, boxSizing: 'border-box' as const },
   card: { background: '#fff', borderRadius: 12, border: '1px solid #E8E0D5', overflow: 'hidden', marginBottom: 16 },
   cardPad: { background: '#fff', borderRadius: 12, border: '1px solid #E8E0D5', padding: '16px 14px', marginBottom: 16 },
   th: { padding: '8px 10px', textAlign: 'left', fontSize: 10, color: '#8C7B6E', letterSpacing: 1, textTransform: 'uppercase', fontWeight: 500, background: '#FAFAFA', whiteSpace: 'nowrap' },
@@ -768,30 +815,78 @@ export default function AdminPage() {
             .admin-flex-col { flex-direction: column !important; }
             .admin-table-wrap { overflow-x: auto !important; display: block !important; }
             .admin-hide-mobile { display: none !important; }
+            .admin-shell { flex-direction: column !important; }
+            .admin-sidebar { display: none !important; }
+            .admin-mobile-tabbar { display: flex !important; }
+          }
+          @media (min-width: 768px) {
+            .admin-mobile-tabbar { display: none !important; }
+            .admin-mobile-header { display: none !important; }
           }
         `}</style>
-      <div style={s.header}>
-        <div>
-          <div style={{ fontSize: 10, color: '#C9A84C', letterSpacing: 4, textTransform: 'uppercase' }}>The Dream Wedding</div>
-          <div style={{ fontSize: 20, color: '#F5F0E8', fontWeight: 300 }}>Admin Panel</div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#8C7B6E' }}>{loading ? '⟳ Loading...' : `${vendors.length} vendors`}</span>
-          <button onClick={loadAll} style={{ ...s.btnSm('transparent', '#8C7B6E', '#8C7B6E') }}>↻ Refresh</button>
-          <button onClick={() => { setAuthed(false); setPassword(''); }} style={{ ...s.btnSm('transparent', '#E57373', '#E57373') }}>Sign Out</button>
-        </div>
-      </div>
 
-      <div style={s.tabBar}>
-        {TABS.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={s.tab(activeTab === tab.id)}>
-            {tab.label}
-            {tab.id === 'flagged' && flaggedVendors.length > 0 && (
-              <span style={{ marginLeft: 5, background: '#E57373', color: '#fff', fontSize: 9, padding: '1px 5px', borderRadius: 50 }}>{flaggedVendors.length}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      <div style={s.shell} className="admin-shell">
+
+        {/* ─── SIDEBAR (desktop) ─── */}
+        <aside style={s.sidebar} className="admin-sidebar">
+          <div style={s.sidebarBrand}>
+            <div style={{ fontSize: 9, color: '#C9A84C', letterSpacing: 3, textTransform: 'uppercase' as const, marginBottom: 4 }}>The Dream Wedding</div>
+            <div style={{ fontSize: 15, color: '#F5F0E8', fontWeight: 400, fontFamily: 'Playfair Display, serif' }}>Admin</div>
+          </div>
+
+          {NAV_GROUPS.map(group => (
+            <div key={group.group}>
+              <div style={s.sidebarGroup}>{group.group}</div>
+              {group.items.map(item => {
+                const active = activeTab === item.id;
+                const showBadge = item.id === 'flagged' && flaggedVendors.length > 0;
+                return (
+                  <button key={item.id} onClick={() => setActiveTab(item.id)} style={s.sidebarItem(active)}>
+                    <span>{item.label}</span>
+                    {showBadge && (
+                      <span style={{ background: '#E57373', color: '#fff', fontSize: 9, padding: '2px 7px', borderRadius: 50, fontWeight: 500 }}>
+                        {flaggedVendors.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+
+          <div style={{ padding: '20px', marginTop: 24, borderTop: '1px solid rgba(201,168,76,0.15)' }}>
+            <div style={{ fontSize: 10, color: '#8C7B6E', marginBottom: 8 }}>{loading ? '⟳ Loading...' : `${vendors.length} vendors`}</div>
+            <button onClick={loadAll} style={{ ...s.btnSm('transparent', '#8C7B6E', '#8C7B6E'), fontSize: 10, width: '100%', marginBottom: 6 }}>↻ Refresh</button>
+            <button onClick={() => { setAuthed(false); setPassword(''); }} style={{ ...s.btnSm('transparent', '#E57373', '#E57373'), fontSize: 10, width: '100%' }}>Sign Out</button>
+          </div>
+        </aside>
+
+        {/* ─── MAIN ─── */}
+        <main style={s.main}>
+
+          {/* Mobile-only header */}
+          <div style={s.header} className="admin-mobile-header">
+            <div>
+              <div style={{ fontSize: 9, color: '#C9A84C', letterSpacing: 3, textTransform: 'uppercase' }}>The Dream Wedding</div>
+              <div style={{ fontSize: 17, color: '#F5F0E8', fontWeight: 300 }}>Admin</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={loadAll} style={{ ...s.btnSm('transparent', '#8C7B6E', '#8C7B6E'), fontSize: 11 }}>↻</button>
+              <button onClick={() => { setAuthed(false); setPassword(''); }} style={{ ...s.btnSm('transparent', '#E57373', '#E57373'), fontSize: 11 }}>Exit</button>
+            </div>
+          </div>
+
+          {/* Mobile-only flat tab bar */}
+          <div style={s.tabBar} className="admin-mobile-tabbar">
+            {NAV_GROUPS.flatMap(g => g.items).map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={s.tab(activeTab === tab.id)}>
+                {tab.label}
+                {tab.id === 'flagged' && flaggedVendors.length > 0 && (
+                  <span style={{ marginLeft: 5, background: '#E57373', color: '#fff', fontSize: 9, padding: '1px 5px', borderRadius: 50 }}>{flaggedVendors.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
 
       <div style={s.content}>
 
@@ -2793,6 +2888,8 @@ export default function AdminPage() {
           </>
         )}
 
+      </div>
+      </main>
       </div>
     </div>
   );
