@@ -34,6 +34,7 @@ const TABS = [
   { id: 'tdw-ai', label: '✨ Dream Ai Access' },
   { id: 'hot-dates', label: '🔥 Hot Dates' },
   { id: 'pai', label: '🤖 PAi Beta' },
+  { id: 'discover', label: '🧭 Discover Beta' },
 ];
 
 const s: any = {
@@ -220,6 +221,63 @@ export default function AdminPage() {
     } catch {}
   };
   useEffect(() => { if (activeTab === 'pai') loadPai(); }, [activeTab]);
+
+  // ── Discover Beta (access control) ────────────────────────
+  const [discRequests, setDiscRequests] = useState<any[]>([]);
+  const [discGranted, setDiscGranted] = useState<any[]>([]);
+  const [discLoading, setDiscLoading] = useState(false);
+  const [discView, setDiscView] = useState<'requests' | 'granted'>('requests');
+  const [discGrantDays, setDiscGrantDays] = useState('30');
+
+  const loadDiscover = async () => {
+    setDiscLoading(true);
+    try {
+      const [reqRes, statsRes] = await Promise.all([
+        fetch(`${API}/api/discover/admin/requests`).then(r => r.json()),
+        fetch(`${API}/api/discover/admin/stats`).then(r => r.json()),
+      ]);
+      if (reqRes.success) setDiscRequests(reqRes.data || []);
+      if (statsRes.success) setDiscGranted(statsRes.granted_couples || []);
+    } catch {}
+    setDiscLoading(false);
+  };
+
+  const discGrant = async (userId: string) => {
+    try {
+      const r = await fetch(`${API}/api/discover/admin/grant`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, days: parseInt(discGrantDays) || 30 }),
+      });
+      const d = await r.json();
+      if (d.success) loadDiscover();
+    } catch {}
+  };
+
+  const discRevoke = async (userId: string) => {
+    if (!confirm('Revoke Discover access for this couple?')) return;
+    try {
+      const r = await fetch(`${API}/api/discover/admin/revoke`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const d = await r.json();
+      if (d.success) loadDiscover();
+    } catch {}
+  };
+
+  const discDeny = async (requestId: string) => {
+    if (!confirm('Deny this request?')) return;
+    try {
+      const r = await fetch(`${API}/api/discover/admin/deny`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      const d = await r.json();
+      if (d.success) loadDiscover();
+    } catch {}
+  };
+
+  useEffect(() => { if (activeTab === 'discover') loadDiscover(); }, [activeTab]);
 
   const [isMobile, setIsMobile] = useState(false);
 
@@ -1956,6 +2014,180 @@ export default function AdminPage() {
                               Showing latest 100 of {paiEvents.length} events.
                             </div>
                           )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'discover' && (
+          <>
+            <div style={s.cardPad}>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>🧭 Discover Beta Management</div>
+              <div style={{ fontSize: 12, color: '#8C7B6E', marginBottom: 16, lineHeight: 1.5 }}>
+                Discover is invite-only while vendor catalogue grows. Grant 30-day windows to couples who request early access.
+                <br />Target: 50+ vendors live before global rollout.
+              </div>
+
+              {/* Sub-tab nav */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid #E8E0D5', paddingBottom: 0 }}>
+                {(['requests', 'granted'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setDiscView(v)}
+                    style={{
+                      padding: '8px 14px', border: 'none', background: 'transparent',
+                      cursor: 'pointer', fontSize: 12,
+                      color: discView === v ? '#2C2420' : '#8C7B6E',
+                      borderBottom: discView === v ? '2px solid #C9A84C' : '2px solid transparent',
+                      fontWeight: discView === v ? 500 : 400, marginBottom: -1,
+                    }}
+                  >
+                    {v === 'requests' ? `Pending Requests (${discRequests.filter(r => r.status === 'pending').length})`
+                      : `Active Grants (${discGranted.length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Default days config */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '10px 14px', background: '#FAF6F0', borderRadius: 8 }}>
+                <label style={{ fontSize: 11, color: '#8C7B6E', fontWeight: 500, letterSpacing: 0.5 }}>GRANT FOR</label>
+                <input
+                  type="number" min="1" max="365"
+                  value={discGrantDays}
+                  onChange={e => setDiscGrantDays(e.target.value)}
+                  style={{ width: 60, padding: '6px 10px', borderRadius: 6, border: '1px solid #E8E0D5', fontSize: 13 }}
+                />
+                <span style={{ fontSize: 11, color: '#8C7B6E' }}>days</span>
+                <span style={{ fontSize: 10, color: '#B8ADA4', marginLeft: 'auto' }}>Default: 30 days • Max: 365 days</span>
+              </div>
+
+              {discLoading ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>Loading…</div>
+              ) : (
+                <>
+                  {discView === 'requests' && (
+                    <>
+                      {discRequests.length === 0 ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                          No access requests yet.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr>
+                                <th style={s.th}>Requested</th>
+                                <th style={s.th}>Couple</th>
+                                <th style={s.th}>Reason</th>
+                                <th style={s.th}>Status</th>
+                                <th style={s.th}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {discRequests.map(r => (
+                                <tr key={r.id}>
+                                  <td style={s.td}>{new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</td>
+                                  <td style={s.td}>
+                                    <strong>{r.user_name || 'Unknown'}</strong>
+                                    {r.user_phone && <div style={{ fontSize: 10, color: '#8C7B6E' }}>{r.user_phone}</div>}
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={{ fontSize: 11, color: '#8C7B6E', maxWidth: 280, display: 'inline-block' }}>
+                                      {r.reason || <span style={{ color: '#B8ADA4' }}>—</span>}
+                                    </span>
+                                  </td>
+                                  <td style={s.td}>
+                                    <span style={s.pill(
+                                      r.status === 'pending' ? '#FFF3DB' : r.status === 'granted' ? '#D4EDDA' : '#F8D7DA',
+                                      r.status === 'pending' ? '#B8963A' : r.status === 'granted' ? '#155724' : '#721C24'
+                                    )}>{r.status}</span>
+                                  </td>
+                                  <td style={s.td}>
+                                    {r.status === 'pending' ? (
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        <button
+                                          onClick={() => discGrant(r.user_id)}
+                                          style={s.btnSm('#2C2420', '#C9A84C', '#2C2420')}
+                                        >Grant</button>
+                                        <button
+                                          onClick={() => discDeny(r.id)}
+                                          style={s.btnSm('transparent', '#C65757', '#F5D5D5')}
+                                        >Deny</button>
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: 10, color: '#B8ADA4' }}>
+                                        {r.reviewed_at ? new Date(r.reviewed_at).toLocaleDateString('en-IN') : ''}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {discView === 'granted' && (
+                    <>
+                      {discGranted.length === 0 ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>
+                          No couples have Discover access yet.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr>
+                                <th style={s.th}>Name</th>
+                                <th style={s.th}>Phone</th>
+                                <th style={s.th}>Granted</th>
+                                <th style={s.th}>Expires</th>
+                                <th style={s.th}>Status</th>
+                                <th style={s.th}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {discGranted.map(u => {
+                                const expired = u.discover_expires_at && new Date(u.discover_expires_at) < new Date();
+                                return (
+                                  <tr key={u.id} style={{ background: expired ? '#FFF8E8' : 'transparent' }}>
+                                    <td style={s.td}><strong>{u.name || 'Unknown'}</strong></td>
+                                    <td style={s.td}><span style={{ fontSize: 11 }}>{u.phone || '—'}</span></td>
+                                    <td style={s.td}>
+                                      <span style={{ fontSize: 11 }}>
+                                        {u.discover_granted_at ? new Date(u.discover_granted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                                      </span>
+                                    </td>
+                                    <td style={s.td}>
+                                      <span style={{ fontSize: 11 }}>
+                                        {u.discover_expires_at ? new Date(u.discover_expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                                      </span>
+                                    </td>
+                                    <td style={s.td}>
+                                      {expired ? (
+                                        <span style={s.pill('#F8D7DA', '#721C24')}>expired</span>
+                                      ) : (
+                                        <span style={s.pill('#D4EDDA', '#155724')}>active</span>
+                                      )}
+                                    </td>
+                                    <td style={s.td}>
+                                      <button
+                                        onClick={() => discRevoke(u.id)}
+                                        style={s.btnSm('transparent', '#C65757', '#F5D5D5')}
+                                      >Revoke</button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
                     </>

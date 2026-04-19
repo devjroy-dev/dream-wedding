@@ -7608,3 +7608,146 @@ app.get('/api/waitlist', async (req, res) => {
   }
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DISCOVER BETA — access control (mirrors PAi pattern)
+// Table: discover_access_requests (create in Supabase)
+// Columns on users table: discover_enabled (bool), discover_granted_at, discover_expires_at, discover_access_requested_at
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Status endpoint — couple PWA calls on Discover mount
+app.get('/api/discover/status', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, discover_enabled, discover_expires_at')
+      .eq('id', user_id)
+      .maybeSingle();
+    if (error || !data) return res.json({ success: true, enabled: false, reason: 'not_found' });
+    if (!data.discover_enabled) {
+      const { data: pending } = await supabase
+        .from('discover_access_requests')
+        .select('id, status, created_at')
+        .eq('user_id', user_id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return res.json({ success: true, enabled: false, reason: 'not_granted', pending_request: pending || null });
+    }
+    if (data.discover_expires_at && new Date(data.discover_expires_at) < new Date()) {
+      return res.json({ success: true, enabled: false, reason: 'expired' });
+    }
+    res.json({ success: true, enabled: true, expires_at: data.discover_expires_at || null });
+  } catch (error) {
+    console.error('discover status error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Request access
+app.post('/api/discover/request-access', async (req, res) => {
+  try {
+    const { user_id, reason } = req.body || {};
+    if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
+    const { data: existing } = await supabase
+      .from('discover_access_requests')
+      .select('id').eq('user_id', user_id).eq('status', 'pending').maybeSingle();
+    if (existing) return res.json({ success: true, already_pending: true, data: existing });
+    const { data: u } = await supabase.from('users').select('name, phone').eq('id', user_id).maybeSingle();
+    const { data, error } = await supabase
+      .from('discover_access_requests').insert([{
+        user_id, user_name: u?.name || null, user_phone: u?.phone || null,
+        reason: reason || null,
+      }]).select().single();
+    if (error) throw error;
+    await supabase.from('users').update({
+      discover_access_requested_at: new Date().toISOString(),
+    }).eq('id', user_id);
+    logActivity('discover_access_requested', `Couple ${u?.name || user_id} requested Discover beta`);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('discover request-access error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: list requests
+app.get('/api/discover/admin/requests', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('discover_access_requests')
+      .select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: grant access
+app.post('/api/discover/admin/grant', async (req, res) => {
+  try {
+    const { user_id, days } = req.body || {};
+    if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
+    const dayCount = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+    const now = new Date();
+    const expires = new Date(now.getTime() + dayCount * 24 * 60 * 60 * 1000);
+    const { error } = await supabase.from('users').update({
+      discover_enabled: true,
+      discover_granted_at: now.toISOString(),
+      discover_expires_at: expires.toISOString(),
+    }).eq('id', user_id);
+    if (error) throw error;
+    await supabase.from('discover_access_requests').update({
+      status: 'granted', reviewed_at: now.toISOString(), reviewed_by: 'admin',
+    }).eq('user_id', user_id).eq('status', 'pending');
+    logActivity('discover_access_granted', `Couple ${user_id} granted Discover for ${dayCount} days`);
+    res.json({ success: true, expires_at: expires.toISOString(), days: dayCount });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: revoke
+app.post('/api/discover/admin/revoke', async (req, res) => {
+  try {
+    const { user_id } = req.body || {};
+    if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
+    const { error } = await supabase.from('users').update({ discover_enabled: false }).eq('id', user_id);
+    if (error) throw error;
+    logActivity('discover_access_revoked', `Couple ${user_id} Discover access revoked`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: deny request
+app.post('/api/discover/admin/deny', async (req, res) => {
+  try {
+    const { request_id } = req.body || {};
+    if (!request_id) return res.status(400).json({ success: false, error: 'request_id required' });
+    const { error } = await supabase.from('discover_access_requests').update({
+      status: 'denied', reviewed_at: new Date().toISOString(), reviewed_by: 'admin',
+    }).eq('id', request_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Admin: stats (granted couples list)
+app.get('/api/discover/admin/stats', async (req, res) => {
+  try {
+    const { data: granted } = await supabase.from('users')
+      .select('id, name, phone, discover_granted_at, discover_expires_at')
+      .eq('discover_enabled', true);
+    res.json({ success: true, granted_couples: granted || [] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
