@@ -5478,6 +5478,90 @@ app.delete('/api/featured-boards/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════
+// TRENDING — algorithmic top vendors (enquiries last 7 days) + admin pin
+// ══════════════════════════════════════════════════════════════
+
+app.get('/api/vendors/trending', async (req, res) => {
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+
+    const { data: pinned } = await supabase.from('vendors')
+      .select('*')
+      .eq('trending_pinned', true)
+      .eq('vendor_discover_enabled', true)
+      .eq('discover_listed', true)
+      .order('trending_pinned_at', { ascending: false });
+
+    const pinnedIds = new Set((pinned || []).map(v => v.id));
+
+    const { data: recentEnquiries } = await supabase.from('vendor_enquiries')
+      .select('vendor_id')
+      .gte('created_at', sevenDaysAgo);
+
+    const counts = {};
+    for (const row of (recentEnquiries || [])) {
+      if (!row.vendor_id) continue;
+      counts[row.vendor_id] = (counts[row.vendor_id] || 0) + 1;
+    }
+
+    const sortedIds = Object.entries(counts)
+      .filter(([id]) => !pinnedIds.has(id))
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => id);
+
+    const need = Math.max(0, 6 - (pinned || []).length);
+    let algo = [];
+    if (need > 0 && sortedIds.length > 0) {
+      const { data } = await supabase.from('vendors')
+        .select('*')
+        .in('id', sortedIds.slice(0, need))
+        .eq('vendor_discover_enabled', true)
+        .eq('discover_listed', true);
+      if (data) {
+        const lookup = Object.fromEntries(data.map(v => [v.id, v]));
+        algo = sortedIds.slice(0, need).map(id => lookup[id]).filter(Boolean);
+      }
+    }
+
+    const trending = [...(pinned || []), ...algo].slice(0, 6).map(v => ({
+      ...v,
+      trending_reason: pinnedIds.has(v.id) ? 'pinned' : 'enquiries',
+      enquiry_count_7d: counts[v.id] || 0,
+    }));
+
+    res.json({ success: true, data: trending });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Admin: toggle trending_pinned
+app.post('/api/admin/trending/pin', async (req, res) => {
+  try {
+    const { vendor_id, pinned } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
+    const { error } = await supabase.from('vendors').update({
+      trending_pinned: !!pinned,
+      trending_pinned_at: pinned ? new Date().toISOString() : null,
+    }).eq('id', vendor_id);
+    if (error) throw error;
+    logActivity('trending_' + (pinned ? 'pinned' : 'unpinned'), 'Vendor ' + vendor_id);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Vendor: toggle flex_leads_enabled (accept leads 15% below range)
+app.post('/api/vendor-discover/flex-leads', async (req, res) => {
+  try {
+    const { vendor_id, enabled } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
+    const { error } = await supabase.from('vendors').update({
+      flex_leads_enabled: !!enabled,
+    }).eq('id', vendor_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
 
 // Admin: delete user
 app.delete('/api/admin/users/:id', async (req, res) => {
@@ -9072,6 +9156,9 @@ app.get('/api/user/:id', async (req, res) => {
 // Part D: Sync vendor_images -> vendors.featured_photos + portfolio_images
 // Keeps the couple-facing Feed reading from the canonical Image Hub
 // ══════════════════════════════════════════════════════════════════════════════
+// Tier caps for total visible images (hero + carousel combined)
+const TIER_IMAGE_CAPS = { essential: 5, signature: 10, prestige: 20 };
+
 async function syncVendorImagesToVendorColumns(vendor_id) {
   if (!vendor_id) return;
   try {
@@ -9083,15 +9170,32 @@ async function syncVendorImagesToVendorColumns(vendor_id) {
 
     if (!imgs) return;
 
-    const featured = imgs
-      .filter(i => Array.isArray(i.tags) && i.tags.includes('featured'))
-      .map(i => i.url)
-      .slice(0, 10);
+    // NEW (preferred): hero + carousel tags
+    const heroImg = imgs.find(i => Array.isArray(i.tags) && i.tags.includes('hero'));
+    const carouselImgs = imgs
+      .filter(i => Array.isArray(i.tags) && i.tags.includes('carousel'))
+      .map(i => i.url);
 
-    const portfolio = imgs
+    // LEGACY fallback: featured + portfolio tags (keep working for existing data)
+    const legacyFeatured = imgs
+      .filter(i => Array.isArray(i.tags) && i.tags.includes('featured'))
+      .map(i => i.url);
+    const legacyPortfolio = imgs
       .filter(i => Array.isArray(i.tags) && i.tags.includes('portfolio'))
-      .map(i => i.url)
-      .slice(0, 30);
+      .map(i => i.url);
+
+    // featured_photos: hero first (if set), then carousel images; fall back to legacy
+    const featured = heroImg || carouselImgs.length > 0
+      ? [
+          ...(heroImg ? [heroImg.url] : []),
+          ...carouselImgs.slice(0, 2),
+        ].filter(Boolean)
+      : legacyFeatured.slice(0, 10);
+
+    // portfolio_images: full carousel, or fall back to legacy portfolio
+    const portfolio = carouselImgs.length > 0
+      ? carouselImgs.slice(0, 30)
+      : legacyPortfolio.slice(0, 30);
 
     await supabase.from('vendors').update({
       featured_photos: featured,
@@ -9107,6 +9211,63 @@ app.post('/api/vendor-images/sync/:vendor_id', async (req, res) => {
   try {
     await syncVendorImagesToVendorColumns(req.params.vendor_id);
     res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Set hero image (single-select: clears hero tag from all other images)
+app.post('/api/vendor-images/set-hero', async (req, res) => {
+  try {
+    const { vendor_id, image_id } = req.body || {};
+    if (!vendor_id || !image_id) return res.status(400).json({ success: false, error: 'vendor_id + image_id required' });
+    // Fetch all vendor images
+    const { data: imgs } = await supabase.from('vendor_images').select('id, tags').eq('vendor_id', vendor_id);
+    if (!imgs) return res.status(404).json({ success: false, error: 'no images' });
+    // Remove hero from all; add hero to target
+    for (const img of imgs) {
+      const tags = Array.isArray(img.tags) ? img.tags.filter(t => t !== 'hero') : [];
+      if (img.id === image_id) tags.push('hero');
+      await supabase.from('vendor_images').update({ tags }).eq('id', img.id);
+    }
+    await syncVendorImagesToVendorColumns(vendor_id);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Toggle carousel tag on an image (tier-capped)
+app.post('/api/vendor-images/toggle-carousel', async (req, res) => {
+  try {
+    const { vendor_id, image_id } = req.body || {};
+    if (!vendor_id || !image_id) return res.status(400).json({ success: false, error: 'vendor_id + image_id required' });
+    // Get vendor tier
+    const { data: vendor } = await supabase.from('vendors').select('tier').eq('id', vendor_id).maybeSingle();
+    const tier = (vendor?.tier || 'essential').toLowerCase();
+    const cap = TIER_IMAGE_CAPS[tier] || TIER_IMAGE_CAPS.essential;
+    // Fetch target + count of carousel + hero
+    const { data: imgs } = await supabase.from('vendor_images').select('id, tags').eq('vendor_id', vendor_id);
+    if (!imgs) return res.status(404).json({ success: false, error: 'no images' });
+    const target = imgs.find(i => i.id === image_id);
+    if (!target) return res.status(404).json({ success: false, error: 'image not found' });
+    const targetTags = Array.isArray(target.tags) ? target.tags : [];
+    const hasCarousel = targetTags.includes('carousel');
+    if (hasCarousel) {
+      // remove carousel
+      const newTags = targetTags.filter(t => t !== 'carousel');
+      await supabase.from('vendor_images').update({ tags: newTags }).eq('id', image_id);
+      await syncVendorImagesToVendorColumns(vendor_id);
+      return res.json({ success: true, added: false });
+    } else {
+      // adding — enforce tier cap (hero + carousel total must be ≤ cap)
+      const heroCount = imgs.filter(i => Array.isArray(i.tags) && i.tags.includes('hero')).length;
+      const carouselCount = imgs.filter(i => Array.isArray(i.tags) && i.tags.includes('carousel')).length;
+      const total = heroCount + carouselCount;
+      if (total >= cap) {
+        return res.status(400).json({ success: false, error: 'tier_cap', cap, tier, message: `Your ${tier} tier allows ${cap} images total. Upgrade or remove one from carousel.` });
+      }
+      const newTags = [...targetTags, 'carousel'];
+      await supabase.from('vendor_images').update({ tags: newTags }).eq('id', image_id);
+      await syncVendorImagesToVendorColumns(vendor_id);
+      return res.json({ success: true, added: true });
+    }
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 

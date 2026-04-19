@@ -13662,7 +13662,7 @@ function DiscoveryBottomNav({ active, onTab }: { active: DiscoveryTab; onTab: (t
     { id: 'dash',   label: 'Dash',      Icon: Grid },
     { id: 'leads',  label: 'Leads',     Icon: Mail },
     { id: 'images', label: 'Image Hub', Icon: ImageIcon },
-    { id: 'power',  label: 'Power',     Icon: Zap },
+    { id: 'power',  label: 'Studio',    Icon: Zap },
   ];
   return (
     <div style={{
@@ -13933,183 +13933,240 @@ function DiscoveryDash({ session, modeState, onReload, onGoTab }: {
   session: VendorSession; modeState: ModeState; onReload: () => void; onGoTab: (t: DiscoveryTab) => void;
 }) {
   const [activity, setActivity] = useState<any[]>([]);
-  const [totals, setTotals] = useState<any>({ impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+  const [totals, setTotals] = useState<any>({ impressions: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+  const [prevTotals, setPrevTotals] = useState<any>({ impressions: 0, saves: 0, enquiries: 0, lock_interests: 0 });
   const [unreadLeads, setUnreadLeads] = useState(0);
+  const [imageCount, setImageCount] = useState(0);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const [actRes, anRes, enqRes] = await Promise.all([
-          fetch(`${API}/api/vendor-activity/${session.vendorId}?limit=8`).then(r => r.json()),
+        const [actRes, anRes, an14Res, enqRes, imgRes] = await Promise.all([
+          fetch(`${API}/api/vendor-activity/${session.vendorId}?limit=6`).then(r => r.json()),
           fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=7`).then(r => r.json()),
+          fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=14`).then(r => r.json()),
           fetch(`${API}/api/enquiries/vendor/${session.vendorId}`).then(r => r.json()),
+          fetch(`${API}/api/vendor-images/${session.vendorId}`).then(r => r.json()).catch(() => ({ data: [] })),
         ]);
         if (!mounted) return;
         if (actRes.success) setActivity(actRes.data || []);
         if (anRes.success) setTotals(anRes.totals || {});
+        if (an14Res.success) {
+          const t14 = an14Res.totals || {};
+          const t7 = anRes.totals || {};
+          setPrevTotals({
+            impressions: Math.max(0, (t14.impressions || 0) - (t7.impressions || 0)),
+            saves: Math.max(0, (t14.saves || 0) - (t7.saves || 0)),
+            enquiries: Math.max(0, (t14.enquiries || 0) - (t7.enquiries || 0)),
+            lock_interests: Math.max(0, (t14.lock_interests || 0) - (t7.lock_interests || 0)),
+          });
+        }
         if (enqRes.success) {
           const unread = (enqRes.data || []).filter((e: any) => (e.vendor_unread_count || 0) > 0).length;
           setUnreadLeads(unread);
         }
+        if (imgRes?.data) setImageCount(imgRes.data.length);
       } catch {}
     })();
     return () => { mounted = false; };
   }, [session.vendorId]);
 
   const pct = modeState.completion_pct || 0;
-  const listingStatus = modeState.discover_listed ? 'Live' : (pct >= 70 ? 'Under review' : 'Not listed');
-  const listingColor = modeState.discover_listed ? '#4CAF50' : (pct >= 70 ? '#E6B800' : C.muted);
-
-  // Trial pill
   const daysLeft = modeState.days_left;
   const isExempt = modeState.trial_status === 'exempt';
-  const trialUrgent = daysLeft !== null && daysLeft <= 2 && !isExempt;
-  const trialLabel = isExempt
-    ? 'No trial deadline · Prestige tier'
-    : daysLeft === null ? 'Trial not started'
-    : daysLeft === 0 ? 'Last day to complete'
-    : daysLeft === 1 ? '1 day left to complete'
-    : `${daysLeft} days left to complete`;
+  const listingStatus = modeState.discover_listed ? 'Live' : (pct >= 70 ? 'Under review' : 'Not listed');
 
-  // Circle progress
-  const ringSize = 120, ringStroke = 10;
-  const radius = (ringSize - ringStroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - pct / 100);
+  const weekLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long' }).toUpperCase();
+
+  // ── Stat ribbon helper ──
+  const delta = (cur: number, prev: number): { text: string; color: string } => {
+    if (prev === 0 && cur === 0) return { text: '— flat', color: C.muted };
+    if (prev === 0) return { text: `↑ ${cur} new`, color: '#4CAF50' };
+    const pctDelta = Math.round(((cur - prev) / prev) * 100);
+    if (pctDelta === 0) return { text: '— flat', color: C.muted };
+    if (pctDelta > 0) return { text: `↑ ${pctDelta}%`, color: '#4CAF50' };
+    return { text: `↓ ${Math.abs(pctDelta)}%`, color: '#C65757' };
+  };
+
+  const impDelta = delta(totals.impressions || 0, prevTotals.impressions || 0);
+  const savDelta = delta(totals.saves || 0, prevTotals.saves || 0);
+  const enqDelta = delta(totals.enquiries || 0, prevTotals.enquiries || 0);
+  const lkDelta  = delta(totals.lock_interests || 0, prevTotals.lock_interests || 0);
+
+  // ── Next Move computation ──
+  let nextMove: { label: string; body: string; cta: string; onTap: () => void } | null = null;
+  if (unreadLeads > 0) {
+    nextMove = {
+      label: 'Unanswered enquiry',
+      body: `You have ${unreadLeads} unread ${unreadLeads === 1 ? 'lead' : 'leads'}. Vendors who reply within 4 hours convert 3× more.`,
+      cta: 'Reply in Leads',
+      onTap: () => onGoTab('leads'),
+    };
+  } else if (imageCount < 12) {
+    nextMove = {
+      label: 'Add more photos',
+      body: `Add ${12 - imageCount} more photos to reach 12. Vendors with 12+ get 4× more enquiries.`,
+      cta: 'Open Image Hub',
+      onTap: () => onGoTab('images'),
+    };
+  } else if (pct < 70) {
+    nextMove = {
+      label: 'Complete your profile',
+      body: `You're at ${pct}% complete. Finish 2–3 more fields to go live on Discover.`,
+      cta: 'Finish Profile',
+      onTap: () => onGoTab('power'),
+    };
+  } else if (!modeState.discover_listed) {
+    nextMove = {
+      label: 'Submit for review',
+      body: `Your profile is ready. Submit for review and we'll have you live within 24–48 hours.`,
+      cta: 'Submit',
+      onTap: () => onGoTab('power'),
+    };
+  } else {
+    nextMove = {
+      label: 'You\'re performing beautifully',
+      body: `Keep replying within 4 hours. The algorithm favours vendors who show up.`,
+      cta: 'View Insights',
+      onTap: () => onGoTab('power'),
+    };
+  }
 
   return (
-    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
-      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-        Discovery Dash
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '8px 20px 100px' }}>
+
+      {/* ─── 1. Editorial hero ─── */}
+      <p style={{ margin: '0 0 4px', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Discovery · Week of {weekLabel}
       </p>
-      <h2 style={{ margin: '0 0 18px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+      <h2 style={{ margin: '0 0 22px', fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px', letterSpacing: '-0.2px' }}>
         {session.vendorName}
       </h2>
 
-      {/* Trial countdown pill */}
-      <div style={{
-        padding: '10px 14px',
-        background: trialUrgent ? '#FFF0F0' : C.goldSoft,
-        border: `1px solid ${trialUrgent ? '#F0A8A8' : C.goldBorder}`,
-        borderRadius: 10, marginBottom: 16,
-        display: 'flex' as const, alignItems: 'center' as const, gap: 8,
-      }}>
-        <Clock size={14} color={trialUrgent ? '#C65757' : C.gold} />
-        <span style={{ fontSize: 12, color: trialUrgent ? '#B24646' : C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{trialLabel}</span>
-      </div>
-
-      {/* Completion ring */}
+      {/* ─── 2. Stat ribbon ─── */}
       <div style={{
         background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 16,
-        padding: '20px', marginBottom: 14,
-        display: 'flex' as const, alignItems: 'center' as const, gap: 18,
-      }}>
-        <div style={{ position: 'relative' as const, width: ringSize, height: ringSize, flexShrink: 0 }}>
-          <svg width={ringSize} height={ringSize} style={{ transform: 'rotate(-90deg)' }}>
-            <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke={C.border} strokeWidth={ringStroke} />
-            <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke={C.gold} strokeWidth={ringStroke}
-              strokeDasharray={circumference} strokeDashoffset={dashOffset}
-              strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
-          </svg>
-          <div style={{
-            position: 'absolute' as const, inset: 0,
-            display: 'flex' as const, flexDirection: 'column' as const,
-            alignItems: 'center' as const, justifyContent: 'center' as const,
-          }}>
-            <span style={{ fontSize: 28, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, lineHeight: 1 }}>
-              {pct}%
-            </span>
-            <span style={{ fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 2 }}>
-              Complete
-            </span>
-          </div>
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ margin: '0 0 4px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Listing status</p>
-          <p style={{ margin: '0 0 10px', fontSize: 15, color: listingColor, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{listingStatus}</p>
-          <button onClick={() => onGoTab('power')} style={{
-            padding: '8px 14px', borderRadius: 8,
-            background: C.dark, border: 'none', cursor: 'pointer',
-            color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
-          }}>Complete profile</button>
-        </div>
-      </div>
-
-      {/* Next action CTA — single biggest impact thing */}
-      {(() => {
-        const pct = modeState.completion_pct;
-        let next: { label: string; cta: string; onTap: () => void } | null = null;
-        if (pct < 100) {
-          next = { label: 'Complete your profile', cta: `Reach 100% · currently at ${pct}%`, onTap: () => onGoTab('power') };
-        } else if (unreadLeads > 0) {
-          next = { label: `${unreadLeads} unread ${unreadLeads === 1 ? 'enquiry' : 'enquiries'}`, cta: 'Reply now to keep couples engaged', onTap: () => onGoTab('leads') };
-        } else if (!modeState.discover_listed && pct >= 70) {
-          next = { label: "You're ready to go live", cta: 'Submit for admin review', onTap: () => onGoTab('power') };
-        }
-
-        if (!next) return null;
-        return (
-          <button onClick={next.onTap} style={{
-            display: 'block' as const, width: '100%',
-            padding: '14px 16px', borderRadius: 14,
-            background: C.dark, border: 'none' as const, cursor: 'pointer',
-            textAlign: 'left' as const, marginBottom: 14,
-          }}>
-            <p style={{ margin: '0 0 4px', fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>
-              Next step
-            </p>
-            <p style={{ margin: '0 0 2px', fontSize: 15, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{next.label}</p>
-            <p style={{ margin: 0, fontSize: 12, color: 'rgba(201,168,76,0.7)', fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{next.cta} →</p>
-          </button>
-        );
-      })()}
-
-      {/* Analytics snapshot — last 7 days */}
-      <p style={{ margin: '18px 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Last 7 days</p>
-      <div style={{
-        display: 'grid' as const, gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))',
-        gap: 8, marginBottom: 4,
+        padding: '18px 14px', marginBottom: 18,
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8,
       }}>
         {[
-          { label: 'Views', value: totals.profile_views || 0 },
-          { label: 'Saves', value: totals.saves || 0 },
-          { label: 'Enquiries', value: totals.enquiries || 0 },
-          { label: 'Lock taps', value: totals.lock_interests || 0 },
-        ].map(m => (
-          <div key={m.label} style={{
-            background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10,
-            padding: '10px 8px', textAlign: 'center' as const,
+          { num: totals.impressions || 0, label: 'Impressions', d: impDelta },
+          { num: totals.saves || 0,       label: 'Saves',       d: savDelta },
+          { num: totals.enquiries || 0,   label: 'Enquiries',   d: enqDelta },
+          { num: totals.lock_interests || 0, label: 'Lock dates', d: lkDelta },
+        ].map((s, i) => (
+          <div key={i} style={{
+            textAlign: 'center' as const,
+            borderRight: i < 3 ? `1px solid ${C.border}` : 'none',
+            padding: '0 4px',
           }}>
-            <p style={{ margin: '0 0 2px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{m.value}</p>
-            <p style={{ margin: 0, fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>{m.label}</p>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: C.dark, fontWeight: 500, lineHeight: 1, fontVariantNumeric: 'tabular-nums' as const }}>
+              {s.num}
+            </div>
+            <div style={{ fontSize: 8, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 6 }}>
+              {s.label}
+            </div>
+            <div style={{ fontSize: 9, color: s.d.color, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, marginTop: 3 }}>
+              {s.d.text}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Activity feed */}
-      <p style={{ margin: '18px 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Recent activity</p>
-      <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden' as const }}>
-        {activity.length === 0 ? (
-          <p style={{ margin: 0, padding: '18px 16px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const }}>
-            Nothing yet. Couples' activity shows up here as it happens.
+      {/* ─── 3. Your Next Move ─── */}
+      {nextMove && (
+        <div style={{
+          background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 16,
+          padding: '18px 18px', marginBottom: 22,
+        }}>
+          <p style={{ margin: '0 0 8px', fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2.5px', textTransform: 'uppercase' as const }}>
+            Your Next Move
           </p>
-        ) : activity.map((a, i) => (
-          <div key={a.id} style={{
-            padding: '12px 16px',
-            borderBottom: i === activity.length - 1 ? 'none' : `1px solid ${C.border}`,
-            display: 'flex' as const, justifyContent: 'space-between' as const, gap: 10,
+          <h3 style={{ margin: '0 0 8px', fontSize: 17, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, lineHeight: '22px' }}>
+            {nextMove.label}
+          </h3>
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '19px' }}>
+            {nextMove.body}
+          </p>
+          <button onClick={nextMove.onTap} style={{
+            padding: '10px 18px', borderRadius: 30, background: C.dark,
+            border: 'none', color: C.gold, fontSize: 11,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+            letterSpacing: '1.5px', textTransform: 'uppercase' as const,
+            display: 'inline-flex' as const, alignItems: 'center' as const, gap: 6,
           }}>
-            <span style={{ fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, flex: 1 }}>{a.event_label || a.event_type}</span>
-            <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>
-              {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-            </span>
+            {nextMove.cta}
+            <ChevronRight size={12} color={C.gold} />
+          </button>
+        </div>
+      )}
+
+      {/* ─── 4. This Week ledger ─── */}
+      {activity.length > 0 && (
+        <div style={{ marginBottom: 22 }}>
+          <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            This Week
+          </p>
+          <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14 }}>
+            {activity.map((a: any, i: number) => {
+              const ts = new Date(a.created_at);
+              const hoursAgo = Math.floor((Date.now() - ts.getTime()) / 3600000);
+              const daysAgo = Math.floor(hoursAgo / 24);
+              const timeStr = hoursAgo < 1 ? 'now' : hoursAgo < 24 ? `${hoursAgo}h` : daysAgo === 1 ? '1d' : `${daysAgo}d`;
+              return (
+                <div key={i} style={{
+                  padding: '14px 16px',
+                  borderBottom: i === activity.length - 1 ? 'none' : `1px solid ${C.border}`,
+                  display: 'flex' as const, alignItems: 'baseline' as const, gap: 12,
+                }}>
+                  <span style={{ flex: 1, fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, lineHeight: '18px' }}>
+                    {a.event_label || a.event_type}
+                  </span>
+                  <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', flexShrink: 0, letterSpacing: '0.5px' }}>
+                    {timeStr}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        ))}
+        </div>
+      )}
+
+      {/* ─── 5. Quiet footer strip ─── */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14,
+        padding: '16px 0 0', borderTop: `1px solid ${C.border}`,
+      }}>
+        <div style={{ textAlign: 'center' as const }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: pct >= 70 ? C.dark : C.gold, fontWeight: 500, fontVariantNumeric: 'tabular-nums' as const }}>
+            {pct}%
+          </div>
+          <div style={{ fontSize: 8, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 4 }}>
+            Profile
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' as const, borderLeft: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}` }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: modeState.discover_listed ? '#4CAF50' : (pct >= 70 ? C.gold : '#C65757'), fontWeight: 500 }}>
+            {listingStatus}
+          </div>
+          <div style={{ fontSize: 8, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 4 }}>
+            Status
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' as const }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: isExempt ? C.dark : (daysLeft !== null && daysLeft <= 2 ? '#C65757' : C.dark), fontWeight: 500, fontVariantNumeric: 'tabular-nums' as const }}>
+            {isExempt ? '∞' : (daysLeft === null ? '—' : daysLeft)}
+          </div>
+          <div style={{ fontSize: 8, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 4 }}>
+            {isExempt ? 'Prestige' : 'Trial left'}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DiscoveryLeads / DiscoveryImageHub / DiscoveryPower — Placeholders for Parts B-E
@@ -14603,6 +14660,64 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
 
           <img src={editingImage.url} style={{ width: '100%', borderRadius: 12, marginBottom: 16 }} />
 
+          {/* ── Discover placement controls ── */}
+          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>
+            Discover placement
+          </p>
+          <div style={{ display: 'flex' as const, gap: 8, marginBottom: 8 }}>
+            <button onClick={async () => {
+              try {
+                const res = await fetch(`${API}/api/vendor-images/set-hero`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ vendor_id: session.vendorId, image_id: editingImage.id }),
+                });
+                const d = await res.json();
+                if (d.success) {
+                  await loadImages();
+                  setEditingImage({ ...editingImage, tags: [...(tags.filter((t: string) => t !== 'hero')), 'hero'] });
+                  alert('Set as Hero image — this is what couples will see first on Discover.');
+                }
+              } catch {}
+            }} disabled={tags.includes('hero')} style={{
+              flex: 1, padding: '11px 14px', borderRadius: 10,
+              background: tags.includes('hero') ? C.gold : C.ivory,
+              color: tags.includes('hero') ? C.dark : C.dark,
+              border: `1px solid ${tags.includes('hero') ? C.gold : C.border}`,
+              fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+              cursor: tags.includes('hero') ? 'default' as const : 'pointer' as const,
+              display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6,
+            }}>
+              {tags.includes('hero') ? '★ Hero' : '☆ Set as Hero'}
+            </button>
+            <button onClick={async () => {
+              try {
+                const res = await fetch(`${API}/api/vendor-images/toggle-carousel`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ vendor_id: session.vendorId, image_id: editingImage.id }),
+                });
+                const d = await res.json();
+                if (d.success) {
+                  await loadImages();
+                  const newTags = d.added ? [...tags, 'carousel'] : tags.filter((t: string) => t !== 'carousel');
+                  setEditingImage({ ...editingImage, tags: newTags });
+                } else if (d.error === 'tier_cap') {
+                  alert(d.message || `Tier cap reached. Upgrade to add more.`);
+                }
+              } catch {}
+            }} style={{
+              flex: 1, padding: '11px 14px', borderRadius: 10,
+              background: tags.includes('carousel') ? C.dark : C.ivory,
+              color: tags.includes('carousel') ? C.gold : C.dark,
+              border: `1px solid ${tags.includes('carousel') ? C.dark : C.border}`,
+              fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+            }}>
+              {tags.includes('carousel') ? '✓ In Carousel' : '+ Add to Carousel'}
+            </button>
+          </div>
+          <p style={{ margin: '0 0 16px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '14px' }}>
+            Hero shows on Discover cards. Carousel shows when couples tap your profile.
+          </p>
+
           <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Tags</p>
           <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
             {['featured', 'portfolio', 'profile_pic'].map(t => {
@@ -14657,6 +14772,18 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
           <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
             Upload once, tag for where it shows.
           </p>
+          {(() => {
+            const tier = (session.tier || 'essential').toLowerCase();
+            const cap = tier === 'prestige' ? 20 : tier === 'signature' ? 10 : 5;
+            const hasHero = images.some(i => Array.isArray(i.tags) && i.tags.includes('hero'));
+            const carouselCount = images.filter(i => Array.isArray(i.tags) && i.tags.includes('carousel')).length;
+            const usedVisible = (hasHero ? 1 : 0) + carouselCount;
+            return (
+              <p style={{ margin: '6px 0 0', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px', textTransform: 'uppercase' as const }}>
+                Hero {hasHero ? '✓' : '—'} · Carousel {carouselCount}/{cap - 1} · {tier}
+              </p>
+            );
+          })()}
         </div>
         {images.length > 0 && (
           <button onClick={() => { setSelectMode(!selectMode); setSelected(new Set()); }} style={{
@@ -14750,7 +14877,13 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
               }}>
                 {/* Tag indicators */}
                 <div style={{ position: 'absolute' as const, top: 4, left: 4, display: 'flex' as const, gap: 3, flexDirection: 'column' as const }}>
-                  {tags.includes('featured') && (
+                  {tags.includes('hero') && (
+                    <div style={{ background: C.gold, borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 600, letterSpacing: '0.5px' }}>★ HERO</div>
+                  )}
+                  {tags.includes('carousel') && !tags.includes('hero') && (
+                    <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' }}>CAROUSEL</div>
+                  )}
+                  {tags.includes('featured') && !tags.includes('hero') && !tags.includes('carousel') && (
                     <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' }}>FEATURED</div>
                   )}
                   {tags.includes('profile_pic') && (
@@ -14854,30 +14987,44 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
 }
 
 function DiscoveryPower({ session, modeState, onReload }: { session: VendorSession; modeState: ModeState; onReload: () => void }) {
-  const [activeSection, setActiveSection] = useState<'none' | 'profile' | 'offers' | 'featured' | 'boost' | 'insights'>('none');
+  const [activeSection, setActiveSection] = useState<'none' | 'profile' | 'offers' | 'featured' | 'boost' | 'insights' | 'flex'>('none');
 
   // Counts for card subtitles
   const [offersCount, setOffersCount] = useState(0);
   const [featuredCount, setFeaturedCount] = useState(0);
   const [boostsCount, setBoostsCount] = useState(0);
   const [analyticsTotal, setAnalyticsTotal] = useState<any>({ impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+  const [flexEnabled, setFlexEnabled] = useState(false);
 
   const loadCounts = async () => {
     try {
-      const [oRes, fRes, bRes, anRes] = await Promise.all([
+      const [oRes, fRes, bRes, anRes, vRes] = await Promise.all([
         fetch(`${API}/api/vendor-offers/${session.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/vendor-featured/${session.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/vendor-boosts/${session.vendorId}`).then(r => r.json()),
         fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=30`).then(r => r.json()),
+        fetch(`${API}/api/vendors/${session.vendorId}`).then(r => r.json()).catch(() => ({ data: null })),
       ]);
       if (oRes.success) setOffersCount((oRes.data || []).filter((x: any) => x.is_active).length);
       if (fRes.success) setFeaturedCount((fRes.data || []).filter((x: any) => x.status === 'approved' || x.status === 'pending').length);
       if (bRes.success) setBoostsCount((bRes.data || []).filter((x: any) => x.is_active).length);
       if (anRes.success) setAnalyticsTotal(anRes.totals || {});
+      if (vRes?.data) setFlexEnabled(!!vRes.data.flex_leads_enabled);
     } catch {}
   };
 
   useEffect(() => { loadCounts(); /* eslint-disable-next-line */ }, [session.vendorId]);
+
+  const toggleFlex = async () => {
+    const next = !flexEnabled;
+    setFlexEnabled(next); // optimistic
+    try {
+      await fetch(`${API}/api/vendor-discover/flex-leads`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor_id: session.vendorId, enabled: next }),
+      });
+    } catch { setFlexEnabled(!next); }
+  };
 
   // Sections render
   if (activeSection === 'profile') return <PowerEditProfile session={session} onClose={() => { setActiveSection('none'); onReload(); loadCounts(); }} />;
@@ -14886,50 +15033,98 @@ function DiscoveryPower({ session, modeState, onReload }: { session: VendorSessi
   if (activeSection === 'boost')   return <PowerBoosts session={session} onClose={() => { setActiveSection('none'); loadCounts(); }} />;
   if (activeSection === 'insights') return <PowerInsights session={session} onClose={() => setActiveSection('none')} />;
 
-  const sections: { id: 'profile' | 'offers' | 'featured' | 'boost' | 'insights'; title: string; subtitle: string; Icon: any; accent?: boolean }[] = [
-    { id: 'profile',  title: 'Edit Profile',           subtitle: `${modeState.completion_pct}% complete`,      Icon: Edit2, accent: modeState.completion_pct < 100 },
-    { id: 'offers',   title: 'Offers',                 subtitle: offersCount > 0 ? `${offersCount} active` : 'Create a limited-time offer', Icon: Percent },
-    { id: 'featured', title: 'Featured placements',    subtitle: featuredCount > 0 ? `${featuredCount} submitted` : 'Apply for Spotlight, Look Book, more', Icon: Award },
-    { id: 'boost',    title: 'Boost unbooked dates',   subtitle: boostsCount > 0 ? `${boostsCount} boosted dates` : 'Highlight your open dates', Icon: TrendingDown },
-    { id: 'insights', title: 'Insights',               subtitle: `${analyticsTotal.profile_views || 0} views in 30 days`, Icon: BarChart2 },
+  // 6 cards in a 2-col grid
+  const cards: { id: 'boost' | 'offers' | 'featured' | 'flex' | 'insights' | 'profile'; title: string; body: string; meta: string; Icon: any; isToggle?: boolean }[] = [
+    { id: 'boost',    title: 'Boost',         body: 'Promote your open dates.',             meta: boostsCount > 0 ? `${boostsCount} boosted` : 'Tap to boost',          Icon: TrendingDown },
+    { id: 'offers',   title: 'Offers',        body: 'Create a limited-time discount.',      meta: offersCount > 0 ? `${offersCount} active` : 'No offers yet',         Icon: Percent },
+    { id: 'featured', title: 'Featured',      body: 'Apply to editorial boards.',           meta: featuredCount > 0 ? `${featuredCount} submitted` : 'Apply now',       Icon: Award },
+    { id: 'flex',     title: 'Flex Leads',    body: 'Accept leads 15% below your range.',   meta: flexEnabled ? 'ON' : 'OFF',                                           Icon: Zap, isToggle: true },
+    { id: 'insights', title: 'Insights',      body: 'Track your 30-day performance.',       meta: `${analyticsTotal.profile_views || 0} views`,                         Icon: BarChart2 },
+    { id: 'profile',  title: 'Edit Profile',  body: 'Complete your vendor details.',        meta: `${modeState.completion_pct}% complete`,                              Icon: Edit2 },
   ];
 
   return (
-    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
-      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-        Power
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '8px 20px 100px' }}>
+
+      {/* Editorial header */}
+      <p style={{ margin: '0 0 4px', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Studio
       </p>
-      <h2 style={{ margin: '0 0 6px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
-        Your storefront controls.
+      <h2 style={{ margin: '0 0 6px', fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+        Make your profile work harder.
       </h2>
-      <p style={{ margin: '0 0 20px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-        Edit profile, run offers, apply for featured spots — all in one place.
+      <p style={{ margin: '0 0 22px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+        Boost dates, run offers, apply for editorial placement — all in one place.
       </p>
 
-      {sections.map(s => (
-        <button key={s.id} onClick={() => setActiveSection(s.id)} style={{
-          display: 'flex' as const, width: '100%', alignItems: 'center' as const, gap: 14,
-          padding: '16px 18px', borderRadius: 14,
-          background: s.accent ? C.dark : C.ivory,
-          border: `1px solid ${s.accent ? C.dark : C.border}`,
-          cursor: 'pointer' as const, marginBottom: 10, textAlign: 'left' as const,
+      {/* 2-col grid of 6 cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 24 }}>
+        {cards.map(c => (
+          <button
+            key={c.id}
+            onClick={() => {
+              if (c.isToggle) { toggleFlex(); return; }
+              setActiveSection(c.id as any);
+            }}
+            style={{
+              display: 'flex' as const, flexDirection: 'column' as const,
+              padding: '16px 14px', borderRadius: 14,
+              background: C.ivory, border: `1px solid ${C.border}`,
+              cursor: 'pointer' as const, textAlign: 'left' as const,
+              minHeight: 130,
+            }}
+          >
+            <div style={{
+              width: 32, height: 32, borderRadius: 10,
+              background: c.id === 'flex' && flexEnabled ? C.gold : C.goldSoft,
+              border: `1px solid ${c.id === 'flex' && flexEnabled ? C.gold : C.goldBorder}`,
+              display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+              marginBottom: 12,
+            }}>
+              <c.Icon size={15} color={c.id === 'flex' && flexEnabled ? C.dark : C.gold} />
+            </div>
+            <p style={{ margin: '0 0 4px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, letterSpacing: '0.2px' }}>
+              {c.title}
+            </p>
+            <p style={{ margin: '0 0 auto', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '15px' }}>
+              {c.body}
+            </p>
+            <p style={{
+              margin: '10px 0 0', fontSize: 9,
+              color: c.id === 'flex' && flexEnabled ? '#4CAF50' : C.gold,
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
+              textTransform: 'uppercase' as const,
+            }}>
+              {c.meta}
+            </p>
+          </button>
+        ))}
+      </div>
+
+      {/* Collab Hub teaser card — full width, coming soon */}
+      <div style={{
+        padding: '18px 18px', borderRadius: 14,
+        background: `linear-gradient(135deg, ${C.goldSoft} 0%, ${C.ivory} 100%)`,
+        border: `1px dashed ${C.goldBorder}`,
+        marginBottom: 24, position: 'relative' as const, overflow: 'hidden' as const,
+      }}>
+        <div style={{
+          position: 'absolute' as const, top: 12, right: 14,
+          fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          letterSpacing: '1.8px', textTransform: 'uppercase' as const,
         }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 12,
-            background: s.accent ? C.gold : C.goldSoft,
-            border: `1px solid ${s.accent ? C.gold : C.goldBorder}`,
-            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
-            flexShrink: 0,
-          }}>
-            <s.Icon size={18} color={s.accent ? C.dark : C.gold} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: '0 0 2px', fontSize: 14, fontFamily: 'Playfair Display, serif', fontWeight: 500, color: s.accent ? C.gold : C.dark }}>{s.title}</p>
-            <p style={{ margin: 0, fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, color: s.accent ? 'rgba(201,168,76,0.7)' : C.muted }}>{s.subtitle}</p>
-          </div>
-          <ChevronRight size={16} color={s.accent ? C.gold : C.muted} />
-        </button>
-      ))}
+          Coming Soon
+        </div>
+        <p style={{ margin: '0 0 6px', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2.5px', textTransform: 'uppercase' as const }}>
+          Collab Hub
+        </p>
+        <h3 style={{ margin: '0 0 6px', fontSize: 16, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, letterSpacing: '-0.1px' }}>
+          Collaborate with other vendors.
+        </h3>
+        <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '17px' }}>
+          Post a brief — "Looking for an MUA in Jaipur, Rs. 40K" — and get matched with the right people. A marketplace built by vendors, for vendors.
+        </p>
+      </div>
     </div>
   );
 }

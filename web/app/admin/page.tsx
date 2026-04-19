@@ -1609,7 +1609,7 @@ export default function AdminPage() {
                 <div style={{ border: '1px solid #E8E0D5', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <select value={boardType} onChange={(e: any) => setBoardType(e.target.value)} style={{ ...s.input }}>
                     <option value="spotlight">Spotlight</option>
-                    <option value="get_inspired">Get Inspired</option>
+                    <option value="get_inspired">The Style File</option>
                     <option value="look_book">Look Book</option>
                     <option value="special_offers">Special Offers</option>
                   </select>
@@ -1636,7 +1636,7 @@ export default function AdminPage() {
                 if (typeItems.length === 0) return null;
                 return (
                   <div key={type} style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: '#C9A84C', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>{type.replace('_', ' ')} ({typeItems.length})</div>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#C9A84C', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>{type === 'get_inspired' ? 'The Style File' : type.replace('_', ' ')} ({typeItems.length})</div>
                     {typeItems.map((item: any) => (
                       <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #F5F0E8' }}>
                         {item.image_url && <img src={item.image_url} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />}
@@ -2454,6 +2454,7 @@ export default function AdminPage() {
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Listed?</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Expires</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Couture</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Trending</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Actions</th>
                                 </tr>
                               </thead>
@@ -2485,6 +2486,26 @@ export default function AdminPage() {
                                         cursor: 'pointer', fontWeight: 500, letterSpacing: 0.5,
                                       }}>
                                         {v.couture_eligible ? '✓ COUTURE' : 'Mark Couture'}
+                                      </button>
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 11 }}>
+                                      <button onClick={async () => {
+                                        const next = !v.trending_pinned;
+                                        try {
+                                          await fetch(`${API}/api/admin/trending/pin`, {
+                                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ vendor_id: v.id, pinned: next }),
+                                          });
+                                          loadVendorDiscover();
+                                        } catch {}
+                                      }} style={{
+                                        padding: '4px 10px', fontSize: 10, borderRadius: 4,
+                                        background: v.trending_pinned ? '#C9A84C' : 'transparent',
+                                        color: v.trending_pinned ? '#2C2420' : '#8C7B6E',
+                                        border: `1px solid ${v.trending_pinned ? '#C9A84C' : '#E8E0D5'}`,
+                                        cursor: 'pointer', fontWeight: 500, letterSpacing: 0.5,
+                                      }}>
+                                        {v.trending_pinned ? '★ PINNED' : 'Pin Trending'}
                                       </button>
                                     </td>
                                     <td style={{ padding: '12px', textAlign: 'right' }}>

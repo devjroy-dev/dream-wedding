@@ -1778,6 +1778,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
 
   // ── Featured boards ──
   const [boardItems, setBoardItems] = useState<any[]>([]);
+  const [trendingVendors, setTrendingVendors] = useState<any[]>([]);
 
   // ── Build 2+3: extended state ──
   // Lock Date sheet
@@ -2034,6 +2035,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   useEffect(() => {
     if (accessStatus !== 'granted') return;
     loadBoards();
+    loadTrending();
   }, [accessStatus]);
 
   // Load Muse on access + when entering Muse tab
@@ -2099,6 +2101,14 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
       const res = await fetch(`${API}/api/featured-boards`);
       const d = await res.json();
       if (d.success) setBoardItems(d.data || []);
+    } catch {}
+  };
+
+  const loadTrending = async () => {
+    try {
+      const res = await fetch(`${API}/api/vendors/trending`);
+      const d = await res.json();
+      if (d.success) setTrendingVendors(d.data || []);
     } catch {}
   };
 
@@ -2583,78 +2593,193 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ══════════════════════════════════════════════════════════════
   if (layer === 'dash') {
     const editorPicks = boardItems.filter(b => b.board_type === 'spotlight' || b.board_type === 'look_book');
+    const styleFile = boardItems.filter(b => b.board_type === 'get_inspired');
     const offers = boardItems.filter(b => b.board_type === 'special_offers');
     const savedVendorsList = vendors.filter(v => savedIds.has(v.id)).slice(0, 10);
 
-    return (<>
-      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
+    // ── Headliner: pick the highest-quality unsaved vendor ──
+    const headlinerCandidates = vendors
+      .filter(v => !savedIds.has(v.id) && (v.featured_photos?.length > 0 || v.portfolio_images?.length > 0));
+    const headliner = headlinerCandidates
+      .sort((a, b) => {
+        const scoreA = (a.couture_eligible ? 100 : 0) + (a.is_verified ? 50 : 0) + Math.min(a.featured_photos?.length || 0, 8);
+        const scoreB = (b.couture_eligible ? 100 : 0) + (b.is_verified ? 50 : 0) + Math.min(b.featured_photos?.length || 0, 8);
+        return scoreB - scoreA;
+      })[0];
+    const headlinerImg = headliner ? (headliner.featured_photos?.[0] || headliner.portfolio_images?.[0]) : null;
 
-        {/* Hero / greeting */}
-        <div style={{ padding: 'calc(max(24px, env(safe-area-inset-top)) + 56px) 20px 12px' }}>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-            Discover
+    const weekLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long' }).toUpperCase();
+    const personalGreeting = session?.weddingDate
+      ? `Curated picks for your wedding day.`
+      : `Find the people behind your perfect day.`;
+
+    return (<>
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+
+        {/* ─────────────  1. HERO (editorial header) ───────────── */}
+        <div style={{ padding: 'calc(max(28px, env(safe-area-inset-top)) + 56px) 20px 20px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Discover · Week of {weekLabel}
           </p>
-          <h2 style={{ margin: 0, fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
-            Find the people behind your perfect day.
+          <h2 style={{ margin: 0, fontSize: 26, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '32px', letterSpacing: '-0.3px' }}>
+            {personalGreeting}
           </h2>
         </div>
 
-        {/* Start browsing CTA */}
-        <div style={{ padding: '8px 20px 20px' }}>
-          <button onClick={openMultiLayover} style={{
-            width: '100%', padding: '16px 20px', borderRadius: 14,
-            background: C.dark, border: 'none', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            color: C.gold, fontSize: 14, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
-          }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Compass size={16} color={C.gold} />
-              Start browsing
-            </span>
-            <ChevronRight size={16} color={C.gold} />
-          </button>
-        </div>
-
-        {/* Categories */}
-        <div style={{ padding: '0 20px 24px' }}>
-          <p style={{ margin: '0 0 12px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-            Browse by category
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-            {CATEGORIES.map(cat => {
-              const sticky = readFromSticky(cat.id);
-              const hasSticky = sticky && (sticky.budget_max < 5000000 || sticky.budget_min > 0 || sticky.city || sticky.date);
-              return (
-                <button key={cat.id} onClick={() => openCategoryLayover(cat.id)} style={{
-                  padding: '16px 14px', borderRadius: 12,
-                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
-                  textAlign: 'left' as const, position: 'relative' as const,
+        {/* ─────────────  2. HEADLINER (single hero vendor card) ───────────── */}
+        {headliner && headlinerImg && (
+          <div style={{ padding: '0 20px 28px' }}>
+            <div onClick={() => { setLayer('feed'); setTimeout(() => openProfile(headliner), 100); }} style={{
+              position: 'relative' as const, borderRadius: 16, overflow: 'hidden' as const,
+              cursor: 'pointer', aspectRatio: '4/5',
+              background: `url(${cdnUrl(headlinerImg, 'portrait')}) center/cover`,
+              boxShadow: '0 4px 24px rgba(44,36,32,0.12)',
+            }}>
+              {/* Dark gradient overlay for text legibility */}
+              <div style={{
+                position: 'absolute' as const, inset: 0,
+                background: 'linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.55) 75%, rgba(0,0,0,0.85) 100%)',
+              }} />
+              {/* Couture badge top-left */}
+              {headliner.couture_eligible && (
+                <div style={{
+                  position: 'absolute' as const, top: 14, left: 14,
+                  background: 'rgba(44,36,32,0.85)', borderRadius: 6,
+                  padding: '4px 10px', fontSize: 9, color: C.gold,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
+                  backdropFilter: 'blur(8px)' as const, WebkitBackdropFilter: 'blur(8px)' as const,
+                }}>COUTURE</div>
+              )}
+              {/* Bottom content */}
+              <div style={{
+                position: 'absolute' as const, bottom: 18, left: 18, right: 18,
+                color: '#fff',
+              }}>
+                <p style={{ margin: '0 0 6px', fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2.5px', textTransform: 'uppercase' as const }}>
+                  This week's headliner
+                </p>
+                <h3 style={{ margin: '0 0 4px', fontSize: 22, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '26px' }}>
+                  {headliner.name}
+                </h3>
+                <p style={{ margin: '0 0 14px', fontSize: 12, opacity: 0.85, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                  {(headliner.category || '').replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} · {headliner.city}
+                </p>
+                <div style={{
+                  display: 'inline-flex' as const, alignItems: 'center' as const, gap: 8,
+                  background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' as const,
+                  WebkitBackdropFilter: 'blur(8px)' as const,
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: 30, padding: '7px 16px',
+                  fontSize: 11, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                  letterSpacing: '1.5px', textTransform: 'uppercase' as const,
                 }}>
-                  <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-                    {cat.label}
-                  </p>
-                  {hasSticky && (
-                    <p style={{ margin: 0, fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400 }}>
-                      ● Saved filters
-                    </p>
-                  )}
-                  {!hasSticky && (
-                    <p style={{ margin: 0, fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-                      Tap to browse
-                    </p>
-                  )}
-                </button>
-              );
-            })}
+                  View Profile
+                  <ChevronRight size={12} color="#fff" />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Editor's Picks */}
+        {/* ─────────────  3. TRENDING THIS WEEK (algorithmic + admin-pinned) ───────────── */}
+        {trendingVendors.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, padding: '0 20px', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+                Trending this week
+              </p>
+              <p style={{ margin: 0, fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, letterSpacing: '1px', fontStyle: 'italic' as const }}>
+                Couples loved these
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
+              {trendingVendors.map((tv: any, idx: number) => (
+                <div key={tv.id} onClick={() => { setLayer('feed'); setTimeout(() => openProfile(tv), 100); }} style={{
+                  minWidth: 180, maxWidth: 180, borderRadius: 14, overflow: 'hidden',
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  flexShrink: 0, position: 'relative' as const,
+                }}>
+                  <div style={{
+                    position: 'absolute' as const, top: 10, left: 10, zIndex: 2,
+                    background: 'rgba(44,36,32,0.9)', backdropFilter: 'blur(8px)' as const, WebkitBackdropFilter: 'blur(8px)' as const,
+                    borderRadius: 20, padding: '3px 9px',
+                    fontSize: 9, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 500,
+                    fontVariantNumeric: 'tabular-nums' as const,
+                  }}>#{idx + 1}</div>
+                  <div style={{
+                    width: '100%', aspectRatio: '3/4',
+                    background: `url(${cdnUrl(getHeroImage(tv), 'portrait')}) center/cover`,
+                  }} />
+                  <div style={{ padding: '10px 12px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 13, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {tv.name}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {(tv.category || '').replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────  4. THE STYLE FILE (MUAs, Jewellers, Designers) ───────────── */}
+        {styleFile.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, padding: '0 20px', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+                The Style File
+              </p>
+              <p style={{ margin: 0, fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, letterSpacing: '1px', fontStyle: 'italic' as const }}>
+                MUAs · Jewellers · Designers
+              </p>
+            </div>
+            <div style={{ padding: '0 20px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              {styleFile.slice(0, 4).map(item => (
+                <div key={item.id} onClick={() => {
+                  if (item.vendor_id) {
+                    const v = vendors.find(vv => vv.id === item.vendor_id);
+                    if (v) { setLayer('feed'); setTimeout(() => openProfile(v), 100); }
+                  }
+                }} style={{
+                  position: 'relative' as const, borderRadius: 12, overflow: 'hidden' as const,
+                  cursor: 'pointer', aspectRatio: '4/5',
+                  background: item.image_url ? `url(${cdnUrl(item.image_url, 'portrait')}) center/cover` : C.goldSoft,
+                }}>
+                  <div style={{
+                    position: 'absolute' as const, inset: 0,
+                    background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.7) 100%)',
+                  }} />
+                  <div style={{
+                    position: 'absolute' as const, bottom: 12, left: 12, right: 12, color: '#fff',
+                  }}>
+                    <p style={{ margin: 0, fontSize: 13, fontFamily: 'Playfair Display, serif', fontWeight: 500, lineHeight: '17px' }}>
+                      {item.title}
+                    </p>
+                    {item.subtitle && (
+                      <p style={{ margin: '2px 0 0', fontSize: 10, opacity: 0.85, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                        {item.subtitle}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────  4. EDITOR'S PICKS (horizontal scroll, larger cards) ───────────── */}
         {editorPicks.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-              Editor's picks
-            </p>
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, padding: '0 20px', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+                Editor's picks
+              </p>
+              <p style={{ margin: 0, fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, letterSpacing: '1px', fontStyle: 'italic' as const }}>
+                Vetted by TDW
+              </p>
+            </div>
             <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
               {editorPicks.map(item => (
                 <div key={item.id} onClick={() => {
@@ -2663,15 +2788,15 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                     if (v) { setLayer('feed'); setTimeout(() => openProfile(v), 100); }
                   }
                 }} style={{
-                  minWidth: 240, maxWidth: 240, borderRadius: 14, overflow: 'hidden',
+                  minWidth: 280, maxWidth: 280, borderRadius: 14, overflow: 'hidden',
                   background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
                   flexShrink: 0,
                 }}>
                   <div style={{
-                    height: 150, background: item.image_url ? `url(${cdnUrl(item.image_url, "grid")}) center/cover` : C.goldSoft,
+                    height: 180, background: item.image_url ? `url(${cdnUrl(item.image_url, 'portrait')}) center/cover` : C.goldSoft,
                   }} />
                   <div style={{ padding: '12px 14px' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
                       {item.vendor_name || item.title}
                     </p>
                     <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
@@ -2684,11 +2809,11 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
           </div>
         )}
 
-        {/* Special Offers */}
+        {/* ─────────────  5. THIS WEEK'S PRICING (Special offers, rebranded) ───────────── */}
         {offers.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-              Special offers
+          <div style={{ marginBottom: 28 }}>
+            <p style={{ margin: '0 0 14px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+              This week's pricing
             </p>
             <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
               {offers.map(item => (
@@ -2703,7 +2828,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                   flexShrink: 0,
                 }}>
                   <div style={{
-                    height: 150, background: item.image_url ? `url(${cdnUrl(item.image_url, "grid")}) center/cover` : C.goldSoft,
+                    height: 150, background: item.image_url ? `url(${cdnUrl(item.image_url, 'grid')}) center/cover` : C.goldSoft,
                     position: 'relative' as const,
                   }}>
                     {item.promo_text && (
@@ -2715,7 +2840,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                     )}
                   </div>
                   <div style={{ padding: '12px 14px' }}>
-                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
                       {item.vendor_name || item.title}
                     </p>
                     {item.promo_price && (
@@ -2730,12 +2855,19 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
           </div>
         )}
 
-        {/* Recently saved */}
+        {/* ─────────────  6. RECENTLY SAVED (with View all link) ───────────── */}
         {savedVendorsList.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-              Recently saved
-            </p>
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, padding: '0 20px', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+                Recently saved
+              </p>
+              <button onClick={() => setLayer('muse')} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
+                textTransform: 'uppercase' as const,
+              }}>View Muse →</button>
+            </div>
             <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
               {savedVendorsList.map(v => (
                 <div key={v.id} onClick={() => { setLayer('feed'); setTimeout(() => openProfile(v), 100); }} style={{
@@ -2743,7 +2875,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 }}>
                   <div style={{
                     width: '100%', aspectRatio: '3/4', borderRadius: 12,
-                    background: `url(${cdnUrl(getHeroImage(v), "grid")}) center/cover`,
+                    background: `url(${cdnUrl(getHeroImage(v), 'grid')}) center/cover`,
                     marginBottom: 8, border: `1px solid ${C.border}`,
                   }} />
                   <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2754,6 +2886,44 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
             </div>
           </div>
         )}
+
+        {/* ─────────────  7. BROWSE BY CATEGORY (demoted to utility section) ───────────── */}
+        <div style={{ padding: '8px 20px 28px' }}>
+          <p style={{ margin: '0 0 12px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Or browse by category
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {CATEGORIES.map(cat => {
+              const sticky = readFromSticky(cat.id);
+              const hasSticky = sticky && (sticky.budget_max < 5000000 || sticky.budget_min > 0 || sticky.city || sticky.date);
+              const vendorCount = vendors.filter(v => v.category === cat.id).length;
+              return (
+                <button key={cat.id} onClick={() => openCategoryLayover(cat.id)} style={{
+                  padding: '14px 14px', borderRadius: 12,
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  textAlign: 'left' as const, position: 'relative' as const,
+                }}>
+                  <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                    {cat.label}
+                  </p>
+                  {hasSticky ? (
+                    <p style={{ margin: 0, fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400 }}>
+                      ● Saved filters
+                    </p>
+                  ) : vendorCount > 0 ? (
+                    <p style={{ margin: 0, fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      {vendorCount} {vendorCount === 1 ? 'option' : 'options'}
+                    </p>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      Coming soon
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* CATEGORY LAYOVER (also appears here) */}
         {showCategoryLayover && renderCategoryLayover()}
