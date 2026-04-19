@@ -2443,6 +2443,7 @@ export default function AdminPage() {
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Completion</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Listed?</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Expires</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Couture</th>
                                   <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Actions</th>
                                 </tr>
                               </thead>
@@ -2456,6 +2457,26 @@ export default function AdminPage() {
                                       <span style={{ padding: '3px 8px', borderRadius: 4, background: v.discover_listed ? '#E8F5E9' : '#FFF3DB', color: v.discover_listed ? '#2E7D32' : '#B8963A' }}>{v.discover_listed ? 'Live' : 'Not listed'}</span>
                                     </td>
                                     <td style={{ padding: '12px', fontSize: 11, color: '#8C7B6E' }}>{v.vendor_discover_expires_at ? new Date(v.vendor_discover_expires_at).toLocaleDateString() : '—'}</td>
+                                    <td style={{ padding: '12px', fontSize: 11 }}>
+                                      <button onClick={async () => {
+                                        const next = !v.couture_eligible;
+                                        try {
+                                          await fetch(`${API}/api/couture/admin/toggle`, {
+                                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ vendor_id: v.id, eligible: next }),
+                                          });
+                                          loadVendorDiscover();
+                                        } catch {}
+                                      }} style={{
+                                        padding: '4px 10px', fontSize: 10, borderRadius: 4,
+                                        background: v.couture_eligible ? '#2C2420' : 'transparent',
+                                        color: v.couture_eligible ? '#C9A84C' : '#8C7B6E',
+                                        border: `1px solid ${v.couture_eligible ? '#2C2420' : '#E8E0D5'}`,
+                                        cursor: 'pointer', fontWeight: 500, letterSpacing: 0.5,
+                                      }}>
+                                        {v.couture_eligible ? '✓ COUTURE' : 'Mark Couture'}
+                                      </button>
+                                    </td>
                                     <td style={{ padding: '12px', textAlign: 'right' }}>
                                       <button onClick={() => vendDiscRevoke(v.id)} style={{ padding: '6px 12px', fontSize: 11, background: 'transparent', color: '#C62828', border: '1px solid #FFCDD2', borderRadius: 6, cursor: 'pointer' }}>Revoke</button>
                                     </td>
@@ -2553,6 +2574,21 @@ export default function AdminPage() {
                               <>
                                 <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                                   <button onClick={() => approvePhoto(pa.id)} style={{ flex: 1, padding: '4px 8px', fontSize: 10, background: '#2E7D32', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 500 }}>Approve</button>
+                                </div>
+                                {/* Build 3: Quick-pick rejection reason chips — ego-safe phrasing */}
+                                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' as const, marginBottom: 4 }}>
+                                  {[
+                                    { label: 'Res', text: "We'd love a higher-res version of this shot" },
+                                    { label: 'Light', text: 'A brighter version would work better for our feed aesthetic' },
+                                    { label: 'Frame', text: 'Great shot — our feed needs a wider/tighter composition for this subject' },
+                                    { label: 'Dup', text: "We already have similar shots, let's showcase variety" },
+                                    { label: 'Brand', text: 'We avoid photos where another vendor or brand is visible' },
+                                  ].map(c => (
+                                    <button key={c.label} onClick={() => setRejectPhotoReason(prev => ({ ...prev, [pa.id]: c.text }))} style={{
+                                      padding: '2px 6px', fontSize: 9, background: '#FAF6F0', border: '1px solid #E8E0D5',
+                                      borderRadius: 3, cursor: 'pointer', color: '#8C7B6E', fontWeight: 500,
+                                    }} title={c.text}>{c.label}</button>
+                                  ))}
                                 </div>
                                 <input
                                   type="text"

@@ -5,9 +5,10 @@ import {
   Home, BookOpen, Users, Heart, ChevronRight, X,
   Compass, CheckSquare, PieChart, Briefcase, Bell,
   Zap, ArrowRight, Sparkles, Phone, Eye, EyeOff,
-  Plus, Trash2, Clock, AlertCircle, Check, Edit3, Circle,
+  Plus, Trash2, Clock, AlertCircle, Check, CheckCircle, Edit3, Circle,
   Camera, Paperclip, Image as ImageIcon, Gift, Upload,
   Link as LinkIcon, Share2, ExternalLink, Smartphone,
+  Lock as LockIcon, Send, MessageCircle, Settings2, ChevronDown,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -1681,7 +1682,15 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   const [requestReason, setRequestReason] = useState('');
 
   // ── Layer: feed (default landing) or dash (back-swipe from feed) ──
-  type Layer = 'feed' | 'dash';
+  // Layer = which sub-screen is visible within the Discover mode.
+  // 'dash' = Feed tab landing screen (category grid, boards, recently saved)
+  // 'feed' = Feed tab active browsing (full-screen swipeable card stack)
+  // 'muse' = Muse tab (saved vendors, grouped by category)
+  // 'messages' = Messages tab (enquiry threads list)
+  // 'message-thread' = inside a specific enquiry thread
+  // 'customize' = Customize tab (multi-event filter configuration)
+  type Layer = 'dash' | 'feed' | 'muse' | 'messages' | 'message-thread' | 'customize';
+  type DiscoverTab = 'feed' | 'muse' | 'messages' | 'customize';  // for bottom nav
   const [layer, setLayer] = useState<Layer>(() => {
     if (typeof window === 'undefined') return 'feed';
     return (localStorage.getItem('tdw_discover_layer') as Layer) || 'feed';
@@ -1744,6 +1753,35 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ── Featured boards ──
   const [boardItems, setBoardItems] = useState<any[]>([]);
 
+  // ── Build 2+3: extended state ──
+  // Lock Date sheet
+  const [showLockDateSheet, setShowLockDateSheet] = useState(false);
+  const [lockDateVendor, setLockDateVendor] = useState<any>(null);
+  // Muse saves
+  const [museSaves, setMuseSaves] = useState<any[]>([]);
+  const [museLoading, setMuseLoading] = useState(false);
+  const [museFilter, setMuseFilter] = useState<string>('');
+  // Profile extended data
+  const [profilePackages, setProfilePackages] = useState<any[]>([]);
+  const [profileAlbums, setProfileAlbums] = useState<any[]>([]);
+  const [profileBlocks, setProfileBlocks] = useState<any[]>([]);
+  const [profileHeroIndex, setProfileHeroIndex] = useState(0);
+  // Messages
+  const [enquiries, setEnquiries] = useState<any[]>([]);
+  const [enquiriesLoading, setEnquiriesLoading] = useState(false);
+  const [activeThread, setActiveThread] = useState<any>(null);
+  const [threadMessages, setThreadMessages] = useState<any[]>([]);
+  const [threadInput, setThreadInput] = useState('');
+  const [threadSending, setThreadSending] = useState(false);
+  // Customize (events)
+  const [events, setEvents] = useState<any[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<any>(null);
+  // Enquire from profile
+  const [showEnquireSheet, setShowEnquireSheet] = useState(false);
+  const [enquireVendor, setEnquireVendor] = useState<any>(null);
+  const [enquireMessage, setEnquireMessage] = useState('');
+
   // ── Sticky per-category filter state ──
   type CategoryFilter = { budget_min: number; budget_max: number; city: string; date: string };
   const getStickyFilters = (): Record<string, CategoryFilter> => {
@@ -1781,6 +1819,166 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
 
   const CITIES = ['Delhi NCR', 'Mumbai', 'Bangalore', 'Jaipur', 'Udaipur', 'Kolkata', 'Chennai', 'Hyderabad', 'Lucknow', 'Goa', 'Chandigarh', 'Pune'];
 
+  // ── Build 2: Cloudinary URL transformer ──
+  const cdnUrl = (raw: string | undefined, variant: 'hero' | 'thumb' | 'grid' | 'portrait' | 'profile'): string => {
+    if (!raw || !raw.includes('cloudinary.com') || !raw.includes('/upload/')) return raw || '';
+    const params: Record<string, string> = {
+      hero:     'f_auto,q_auto:good,w_900,h_1200,c_fill,g_auto,dpr_auto',
+      portrait: 'f_auto,q_auto:good,w_900,h_1350,c_fill,g_auto,dpr_auto',
+      thumb:    'f_auto,q_auto:eco,w_200,c_fill,g_auto,dpr_auto',
+      grid:     'f_auto,q_auto:good,w_400,c_fill,g_auto,dpr_auto',
+      profile:  'f_auto,q_auto:good,w_1200,c_fill,g_auto,dpr_auto',
+    };
+    return raw.replace('/upload/', `/upload/${params[variant]}/`);
+  };
+
+  // ── Muse loader ──
+  const loadMuse = async () => {
+    if (!session?.id) return;
+    setMuseLoading(true);
+    try {
+      const res = await fetch(`${API}/api/couple/muse/${session.id}`);
+      const d = await res.json();
+      if (d.success) setMuseSaves(d.data || []);
+    } catch {}
+    setMuseLoading(false);
+  };
+
+  // ── Profile extended details loader ──
+  const loadProfileDetails = async (vendorId: string) => {
+    try {
+      const [pkgRes, albRes, avaRes] = await Promise.all([
+        fetch(`${API}/api/vendor-discover/packages/${vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/vendor-discover/albums/${vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/vendor-discover/availability/${vendorId}`).then(r => r.json()),
+      ]);
+      setProfilePackages(pkgRes.success ? (pkgRes.data || []) : []);
+      setProfileAlbums(albRes.success ? (albRes.data || []) : []);
+      setProfileBlocks(avaRes.success ? (avaRes.data || []) : []);
+    } catch {
+      setProfilePackages([]); setProfileAlbums([]); setProfileBlocks([]);
+    }
+  };
+
+  // ── Lock Date interest tracking ──
+  const trackLockDateInterest = (vendor: any, exploredCouture: boolean = false) => {
+    if (!session?.id || !vendor?.id) return;
+    fetch(`${API}/api/lock-date/interest`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        couple_id: session.id, vendor_id: vendor.id,
+        wedding_date: session.weddingDate || null,
+        source: 'profile', explored_couture: exploredCouture,
+      }),
+    }).catch(() => {});
+  };
+
+  // ── Messages loaders ──
+  const loadEnquiries = async () => {
+    if (!session?.id) return;
+    setEnquiriesLoading(true);
+    try {
+      const res = await fetch(`${API}/api/enquiries/couple/${session.id}`);
+      const d = await res.json();
+      if (d.success) setEnquiries(d.data || []);
+    } catch {}
+    setEnquiriesLoading(false);
+  };
+
+  const openThread = async (enquiry: any) => {
+    setActiveThread(enquiry);
+    setLayer('message-thread');
+    cNavPush('discover-message-thread');
+    try {
+      const res = await fetch(`${API}/api/enquiries/${enquiry.id}`);
+      const d = await res.json();
+      if (d.success) {
+        setThreadMessages(d.data.messages || []);
+        // Mark read
+        fetch(`${API}/api/enquiries/${enquiry.id}/read`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'couple' }),
+        }).catch(() => {});
+      }
+    } catch {}
+  };
+
+  const sendThreadMessage = async () => {
+    if (!threadInput.trim() || !activeThread) return;
+    setThreadSending(true);
+    try {
+      const res = await fetch(`${API}/api/enquiries/${activeThread.id}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_role: 'couple', content: threadInput.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setThreadMessages(prev => [...prev, d.data]);
+        setThreadInput('');
+      }
+    } catch {}
+    setThreadSending(false);
+  };
+
+  // ── Create enquiry from profile ──
+  const submitEnquire = async () => {
+    if (!enquireVendor || !enquireMessage.trim() || !session?.id) return;
+    try {
+      const res = await fetch(`${API}/api/enquiries`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          couple_id: session.id,
+          vendor_id: enquireVendor.id,
+          wedding_date: session.weddingDate || null,
+          initial_message: enquireMessage.trim(),
+        }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setShowEnquireSheet(false);
+        setEnquireMessage('');
+        setEnquireVendor(null);
+        // Jump to Messages tab and open the thread
+        await loadEnquiries();
+        setLayer('messages');
+      }
+    } catch {}
+  };
+
+  // ── Events loaders (Customize) ──
+  const loadEvents = async () => {
+    if (!session?.id) return;
+    setEventsLoading(true);
+    try {
+      const res = await fetch(`${API}/api/couple/events/${session.id}`);
+      const d = await res.json();
+      if (d.success) setEvents(d.data || []);
+    } catch {}
+    setEventsLoading(false);
+  };
+
+  const upsertEvent = async (ev: any) => {
+    if (!session?.id) return;
+    try {
+      if (ev.id) {
+        await fetch(`${API}/api/couple/events/${ev.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ev),
+        });
+      } else {
+        await fetch(`${API}/api/couple/events`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...ev, couple_id: session.id }),
+        });
+      }
+      loadEvents();
+    } catch {}
+  };
+
+  const toggleEventActive = async (ev: any) => {
+    await upsertEvent({ ...ev, is_active: !ev.is_active });
+  };
+
   // ── Check access on mount ──
   useEffect(() => {
     if (!session?.id) { setAccessStatus('denied'); return; }
@@ -1811,6 +2009,40 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     if (accessStatus !== 'granted') return;
     loadBoards();
   }, [accessStatus]);
+
+  // Load Muse on access + when entering Muse tab
+  useEffect(() => {
+    if (accessStatus === 'granted' && session?.id) loadMuse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessStatus, session?.id]);
+
+  useEffect(() => {
+    if (accessStatus === 'granted' && layer === 'muse') loadMuse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer]);
+
+  // Load Messages when entering Messages tab
+  useEffect(() => {
+    if (accessStatus === 'granted' && layer === 'messages') loadEnquiries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer]);
+
+  // Load Events when entering Customize tab
+  useEffect(() => {
+    if (accessStatus === 'granted' && layer === 'customize') loadEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer]);
+
+  // Load profile details when profile opens
+  useEffect(() => {
+    if (profileVendor?.id) {
+      loadProfileDetails(profileVendor.id);
+      setProfileHeroIndex(0);
+    } else {
+      setProfilePackages([]); setProfileAlbums([]); setProfileBlocks([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileVendor?.id]);
 
   const loadVendors = async () => {
     setVendorsLoading(true);
@@ -1852,6 +2084,10 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
       else if (detail === 'discover-filter') setShowFilter(false);
       else if (detail === 'discover-layover') setShowCategoryLayover(false);
       else if (detail === 'discover-feed-to-dash') setLayer('dash');
+      else if (detail === 'discover-lock-date-sheet') setShowLockDateSheet(false);
+      else if (detail === 'discover-enquire-sheet') setShowEnquireSheet(false);
+      else if (detail === 'discover-message-thread') { setActiveThread(null); setLayer('messages'); }
+      else if (detail === 'discover-edit-event') setEditingEvent(null);
     };
     window.addEventListener('tdw-discover-back', handler);
     return () => window.removeEventListener('tdw-discover-back', handler);
@@ -1874,7 +2110,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
       const url = imgs?.[0];
       if (url) {
         const img = new Image();
-        img.src = url;
+        img.src = cdnUrl(url, 'hero');
       }
     }
   }, [currentIndex, vendors]);
@@ -2251,7 +2487,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     const offers = boardItems.filter(b => b.board_type === 'special_offers');
     const savedVendorsList = vendors.filter(v => savedIds.has(v.id)).slice(0, 10);
 
-    return (
+    return (<>
       <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
 
         {/* Hero / greeting */}
@@ -2333,7 +2569,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                   flexShrink: 0,
                 }}>
                   <div style={{
-                    height: 150, background: item.image_url ? `url(${item.image_url}) center/cover` : C.goldSoft,
+                    height: 150, background: item.image_url ? `url(${cdnUrl(item.image_url, "grid")}) center/cover` : C.goldSoft,
                   }} />
                   <div style={{ padding: '12px 14px' }}>
                     <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
@@ -2368,7 +2604,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                   flexShrink: 0,
                 }}>
                   <div style={{
-                    height: 150, background: item.image_url ? `url(${item.image_url}) center/cover` : C.goldSoft,
+                    height: 150, background: item.image_url ? `url(${cdnUrl(item.image_url, "grid")}) center/cover` : C.goldSoft,
                     position: 'relative' as const,
                   }}>
                     {item.promo_text && (
@@ -2408,7 +2644,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 }}>
                   <div style={{
                     width: '100%', aspectRatio: '3/4', borderRadius: 12,
-                    background: `url(${getHeroImage(v)}) center/cover`,
+                    background: `url(${cdnUrl(getHeroImage(v), "grid")}) center/cover`,
                     marginBottom: 8, border: `1px solid ${C.border}`,
                   }} />
                   <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2423,14 +2659,497 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
         {/* CATEGORY LAYOVER (also appears here) */}
         {showCategoryLayover && renderCategoryLayover()}
       </div>
-    );
+      {renderDiscoverNav()}
+    </>);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // MUSE — saved vendors (grouped by category)
+  // ══════════════════════════════════════════════════════════════
+  if (layer === 'muse') {
+    // Group by category
+    const byCategory: Record<string, any[]> = {};
+    museSaves.forEach(s => {
+      const cat = s.vendor?.category || 'other';
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(s);
+    });
+    const catKeys = Object.keys(byCategory).sort();
+    const filtered = museFilter ? { [museFilter]: byCategory[museFilter] || [] } : byCategory;
+
+    return (<>
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+        <div style={{ padding: '24px 20px 12px' }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Your Muse
+          </p>
+          <h2 style={{ margin: 0, fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+            Vendors who caught your eye.
+          </h2>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            {museSaves.length > 0 ? `${museSaves.length} saved · also visible in your Plan Moodboard` : 'Start saving vendors from your feed.'}
+          </p>
+        </div>
+
+        {catKeys.length > 1 && (
+          <div style={{ padding: '8px 20px 4px', display: 'flex', gap: 8, overflow: 'auto', scrollbarWidth: 'none' as const }}>
+            <button onClick={() => setMuseFilter('')} style={{
+              padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+              background: museFilter === '' ? C.dark : C.ivory,
+              color: museFilter === '' ? C.gold : C.dark,
+              border: `1px solid ${museFilter === '' ? C.dark : C.border}`,
+              fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+            }}>All ({museSaves.length})</button>
+            {catKeys.map(c => (
+              <button key={c} onClick={() => setMuseFilter(museFilter === c ? '' : c)} style={{
+                padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+                background: museFilter === c ? C.dark : C.ivory,
+                color: museFilter === c ? C.gold : C.dark,
+                border: `1px solid ${museFilter === c ? C.dark : C.border}`,
+                fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+              }}>{c.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} ({byCategory[c].length})</button>
+            ))}
+          </div>
+        )}
+
+        {museLoading ? (
+          <p style={{ textAlign: 'center' as const, padding: '40px 0', color: C.muted, fontSize: 13, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
+        ) : museSaves.length === 0 ? (
+          <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
+            <Sparkles size={28} color={C.goldBorder} />
+            <p style={{ margin: '12px 0 6px', fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>Your Muse awaits</p>
+            <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Save vendors you love from the Feed to start building your Muse.</p>
+            <button onClick={() => setLayer('dash')} style={{
+              marginTop: 16, padding: '10px 20px', borderRadius: 10,
+              background: C.dark, border: 'none', cursor: 'pointer',
+              color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+            }}>Browse Feed</button>
+          </div>
+        ) : (
+          <div style={{ padding: '12px 20px' }}>
+            {Object.entries(filtered).map(([cat, saves]: [string, any]) => (
+              <div key={cat} style={{ marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 10px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
+                  {cat.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                  {saves.map((save: any) => {
+                    const v = save.vendor;
+                    if (!v) return null;
+                    const heroImg = (v.featured_photos?.[0] || v.portfolio_images?.[0]) as string;
+                    return (
+                      <div key={save.id} onClick={() => { setLayer('feed'); setTimeout(() => openProfile(v), 50); }} style={{
+                        background: C.ivory, borderRadius: 14, overflow: 'hidden',
+                        border: `1px solid ${C.border}`, cursor: 'pointer',
+                        position: 'relative' as const,
+                      }}>
+                        <div style={{
+                          width: '100%', aspectRatio: '3/4',
+                          background: heroImg ? `url(${cdnUrl(heroImg, 'grid')}) center/cover` : C.goldSoft,
+                        }} />
+                        {v.couture_eligible && (
+                          <div style={{
+                            position: 'absolute' as const, top: 8, left: 8,
+                            background: 'rgba(44,36,32,0.85)', borderRadius: 6,
+                            padding: '3px 8px', fontSize: 9, color: C.gold,
+                            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px',
+                            backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+                          }}>COUTURE</div>
+                        )}
+                        <button onClick={e => {
+                          e.stopPropagation();
+                          if (confirm('Remove from Muse?')) {
+                            fetch(`${API}/api/couple/muse/remove`, {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ couple_id: session?.id, vendor_id: v.id }),
+                            }).then(() => {
+                              setSavedIds(prev => { const next = new Set(prev); next.delete(v.id); return next; });
+                              loadMuse();
+                            }).catch(() => {});
+                          }
+                        }} style={{
+                          position: 'absolute' as const, top: 8, right: 8,
+                          background: 'rgba(0,0,0,0.5)', border: 'none',
+                          borderRadius: 16, width: 28, height: 28, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+                        }}>
+                          <Heart size={12} color={C.gold} fill={C.gold} />
+                        </button>
+                        <div style={{ padding: '10px 12px' }}>
+                          <p style={{ margin: '0 0 2px', fontSize: 13, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</p>
+                          <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                            {v.city}
+                          </p>
+                          {v.starting_price > 0 && (
+                            <p style={{ margin: '4px 0 0', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                              {fmtPrice(v.starting_price)}+
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {renderDiscoverNav()}
+    </>);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // MESSAGES — enquiry threads list
+  // ══════════════════════════════════════════════════════════════
+  if (layer === 'messages') {
+    return (<>
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+        <div style={{ padding: '24px 20px 12px' }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Messages
+          </p>
+          <h2 style={{ margin: 0, fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+            Your conversations.
+          </h2>
+        </div>
+
+        {enquiriesLoading ? (
+          <p style={{ textAlign: 'center' as const, padding: '40px 0', color: C.muted, fontSize: 13, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
+        ) : enquiries.length === 0 ? (
+          <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
+            <MessageCircle size={28} color={C.goldBorder} />
+            <p style={{ margin: '12px 0 6px', fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>No enquiries yet</p>
+            <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>When you enquire with vendors, conversations appear here.</p>
+          </div>
+        ) : (
+          <div style={{ padding: '8px 0' }}>
+            {enquiries.map(e => {
+              const v = e.vendor || {};
+              const heroImg = (v.featured_photos?.[0] || v.portfolio_images?.[0]);
+              return (
+                <button key={e.id} onClick={() => openThread(e)} style={{
+                  display: 'flex' as const, alignItems: 'center', gap: 12,
+                  width: '100%', padding: '12px 20px', background: 'transparent', border: 'none',
+                  borderBottom: `1px solid ${C.border}`, cursor: 'pointer',
+                  textAlign: 'left' as const,
+                }}>
+                  <div style={{
+                    width: 52, height: 52, borderRadius: 26, flexShrink: 0,
+                    background: heroImg ? `url(${cdnUrl(heroImg, 'thumb')}) center/cover` : C.goldSoft,
+                    border: `1px solid ${C.border}`,
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+                      <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {v.name || 'Vendor'}
+                      </p>
+                      {e.last_message_at && (
+                        <span style={{ fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif', flexShrink: 0, marginLeft: 8 }}>
+                          {new Date(e.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: e.couple_unread_count > 0 ? 500 : 300, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {e.last_message_preview || e.initial_message}
+                    </p>
+                    {e.lock_date_paid && (
+                      <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{
+                          background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                          borderRadius: 4, padding: '2px 6px', fontSize: 9,
+                          color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                          fontWeight: 500, letterSpacing: '0.5px',
+                        }}>🔒 LOCKED</span>
+                      </div>
+                    )}
+                  </div>
+                  {e.couple_unread_count > 0 && (
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 10, background: C.gold,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, color: C.dark, fontWeight: 600, flexShrink: 0,
+                    }}>{e.couple_unread_count}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {renderDiscoverNav()}
+    </>);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // MESSAGE-THREAD — single thread chat view
+  // ══════════════════════════════════════════════════════════════
+  if (layer === 'message-thread' && activeThread) {
+    const v = activeThread.vendor || {};
+    const heroImg = (v.featured_photos?.[0] || v.portfolio_images?.[0]);
+    const canWhatsApp = activeThread.lock_date_paid || v.show_whatsapp_public;
+    const whatsappPrefill = activeThread.lock_date_paid
+      ? `Hi ${v.name}, I'm reaching via The Dream Wedding. I've locked my wedding date${activeThread.wedding_date ? ' (' + activeThread.wedding_date + ')' : ''} with you — can we finalise?`
+      : `Hi ${v.name}! I found you on The Dream Wedding.`;
+
+    return (<>
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, display: 'flex' as const, flexDirection: 'column' as const, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+        {/* Thread header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.cream,
+          position: 'sticky' as const, top: 0, zIndex: 10,
+          display: 'flex' as const, alignItems: 'center', gap: 12,
+        }}>
+          <button onClick={() => { setActiveThread(null); setLayer('messages'); }} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+          }}>
+            <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+          </button>
+          <div style={{
+            width: 36, height: 36, borderRadius: 18,
+            background: heroImg ? `url(${cdnUrl(heroImg, 'thumb')}) center/cover` : C.goldSoft,
+            border: `1px solid ${C.border}`, flexShrink: 0,
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{v.name || 'Vendor'}</p>
+            <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              {v.category?.replace(/-/g, ' ')} · {v.city}
+            </p>
+          </div>
+          {canWhatsApp && v.phone && (
+            <button onClick={() => {
+              const phone = v.phone?.replace(/\D/g, '').slice(-10);
+              if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(whatsappPrefill)}`, '_blank');
+            }} style={{
+              padding: '6px 12px', borderRadius: 20, background: '#25D366',
+              border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              <Phone size={12} color="#fff" />
+              <span style={{ fontSize: 11, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>WhatsApp</span>
+            </button>
+          )}
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex: 1, padding: '16px 20px', overflow: 'auto' as const }}>
+          {activeThread.lock_date_paid && (
+            <div style={{
+              padding: '10px 14px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+              borderRadius: 10, marginBottom: 14, textAlign: 'center' as const,
+            }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                🔒 Date locked for {activeThread.wedding_date ? new Date(activeThread.wedding_date).toLocaleDateString('en-GB') : 'your wedding'}
+              </p>
+              {activeThread.lock_date_expires_at && (
+                <p style={{ margin: '2px 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>
+                  Expires {new Date(activeThread.lock_date_expires_at).toLocaleDateString('en-GB')}
+                </p>
+              )}
+            </div>
+          )}
+          {threadMessages.map(m => {
+            const isCouple = m.from_role === 'couple';
+            const isSystem = m.from_role === 'system';
+            if (isSystem) {
+              return (
+                <div key={m.id} style={{ margin: '12px 0', textAlign: 'center' as const }}>
+                  <span style={{
+                    background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12,
+                    padding: '6px 12px', fontSize: 11, color: C.dark,
+                    fontFamily: 'DM Sans, sans-serif', fontWeight: 400, fontStyle: 'italic' as const,
+                  }}>{m.content}</span>
+                </div>
+              );
+            }
+            return (
+              <div key={m.id} style={{ display: 'flex' as const, justifyContent: isCouple ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+                <div style={{
+                  maxWidth: '78%', padding: '10px 14px', borderRadius: 14,
+                  background: isCouple ? C.dark : C.ivory,
+                  color: isCouple ? C.gold : C.dark,
+                  border: isCouple ? 'none' : `1px solid ${C.border}`,
+                  fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '19px',
+                }}>
+                  {m.content}
+                  <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4, textAlign: 'right' as const }}>
+                    {new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Input */}
+        <div style={{
+          position: 'fixed' as const, bottom: 'max(60px, env(safe-area-inset-bottom))',
+          left: 0, right: 0, maxWidth: 480, margin: '0 auto',
+          padding: '10px 14px', background: C.cream,
+          borderTop: `1px solid ${C.border}`,
+          display: 'flex' as const, gap: 8, zIndex: 15,
+        }}>
+          <input value={threadInput} onChange={e => setThreadInput(e.target.value)}
+            placeholder="Type a message..." disabled={threadSending}
+            onKeyDown={e => { if (e.key === 'Enter' && threadInput.trim()) sendThreadMessage(); }}
+            style={{
+              flex: 1, padding: '10px 14px', borderRadius: 22,
+              border: `1px solid ${C.border}`, background: C.ivory,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+              outline: 'none',
+            }} />
+          <button onClick={sendThreadMessage} disabled={!threadInput.trim() || threadSending} style={{
+            width: 40, height: 40, borderRadius: 20, background: C.dark,
+            border: 'none', cursor: 'pointer',
+            display: 'flex' as const, alignItems: 'center', justifyContent: 'center',
+            opacity: threadInput.trim() ? 1 : 0.4,
+          }}>
+            <Send size={14} color={C.gold} />
+          </button>
+        </div>
+      </div>
+      {renderDiscoverNav()}
+    </>);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // CUSTOMIZE — multi-event configuration
+  // ══════════════════════════════════════════════════════════════
+  if (layer === 'customize') {
+    const EVENT_TYPES = [
+      { id: 'ceremony',  label: 'Ceremony',  emoji: '💐', default: true },
+      { id: 'reception', label: 'Reception', emoji: '🥂', default: true },
+      { id: 'sangeet',   label: 'Sangeet',   emoji: '🎵', default: false },
+      { id: 'haldi',     label: 'Haldi',     emoji: '🌼', default: false },
+      { id: 'mehendi',   label: 'Mehendi',   emoji: '🎨', default: false },
+      { id: 'cocktail',  label: 'Cocktail',  emoji: '🍸', default: false },
+    ];
+
+    const existingTypes = new Set(events.map(e => e.event_type));
+    const missingDefaults = EVENT_TYPES.filter(t => t.default && !existingTypes.has(t.id));
+
+    return (<>
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+        <div style={{ padding: '24px 20px 12px' }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Customize
+          </p>
+          <h2 style={{ margin: 0, fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+            Your wedding, your way.
+          </h2>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+            Configure each event separately. Your Feed will show vendors matching your filters.
+          </p>
+        </div>
+
+        <div style={{ padding: '12px 20px' }}>
+          <p style={{ margin: '0 0 12px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Your events</p>
+
+          {/* Existing events */}
+          {events.map(ev => {
+            const typeMeta = EVENT_TYPES.find(t => t.id === ev.event_type);
+            return (
+              <div key={ev.id} style={{
+                background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14,
+                marginBottom: 10, padding: '14px 16px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 22 }}>{typeMeta?.emoji || '✨'}</span>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
+                      {typeMeta?.label || ev.event_type}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      {ev.event_date ? new Date(ev.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date TBD'}
+                      {ev.event_city && ` · ${ev.event_city}`}
+                      {ev.budget_total && ` · ${fmtPrice(ev.budget_total)}`}
+                    </p>
+                  </div>
+                  <button onClick={() => toggleEventActive(ev)} style={{
+                    padding: '5px 10px', borderRadius: 14,
+                    background: ev.is_active ? C.gold : 'transparent',
+                    border: `1px solid ${ev.is_active ? C.gold : C.border}`,
+                    color: ev.is_active ? C.dark : C.muted,
+                    fontSize: 10, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                  }}>{ev.is_active ? 'ON' : 'OFF'}</button>
+                  <button onClick={() => { setEditingEvent(ev); cNavPush('discover-edit-event'); }} style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                  }}>
+                    <Edit3 size={14} color={C.muted} />
+                  </button>
+                </div>
+                {ev.vibe_tags && ev.vibe_tags.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const, marginTop: 6 }}>
+                    {ev.vibe_tags.map((t: string) => (
+                      <span key={t} style={{
+                        background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 14,
+                        padding: '2px 8px', fontSize: 10, color: C.dark,
+                        fontFamily: 'DM Sans, sans-serif',
+                      }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Add missing default events quick-add */}
+          {missingDefaults.length > 0 && events.length === 0 && (
+            <div style={{
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12,
+              padding: '14px 16px', marginBottom: 14,
+            }}>
+              <p style={{ margin: '0 0 8px', fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                Quick start
+              </p>
+              <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                Add the usual events or customize from scratch below.
+              </p>
+              <button onClick={async () => {
+                for (const t of missingDefaults) {
+                  await upsertEvent({ event_type: t.id, is_active: true, sort_order: EVENT_TYPES.indexOf(t) });
+                }
+              }} style={{
+                width: '100%', padding: '10px', borderRadius: 8,
+                background: C.dark, border: 'none', cursor: 'pointer',
+                color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+              }}>Add Ceremony + Reception</button>
+            </div>
+          )}
+
+          {/* Add more events */}
+          <p style={{ margin: '20px 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Add event</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
+            {EVENT_TYPES.filter(t => !existingTypes.has(t.id)).map(t => (
+              <button key={t.id} onClick={async () => {
+                await upsertEvent({ event_type: t.id, is_active: true, sort_order: EVENT_TYPES.indexOf(t) });
+              }} style={{
+                padding: '8px 14px', borderRadius: 20, background: C.ivory,
+                border: `1px solid ${C.border}`, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400,
+              }}>
+                <span>{t.emoji}</span>
+                <Plus size={10} color={C.muted} />
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {eventsLoading && (
+            <p style={{ textAlign: 'center' as const, padding: 20, color: C.muted, fontSize: 12, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
+          )}
+        </div>
+      </div>
+      {renderDiscoverNav()}
+    </>);
   }
 
   // ══════════════════════════════════════════════════════════════
   // FEED — full-screen immersive browse
   // ══════════════════════════════════════════════════════════════
   if (vendorsLoading) {
-    return (
+    return (<>
       <div style={{ height: 'calc(100vh - 60px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.cream }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: 32, height: 32, border: `2px solid ${C.goldBorder}`, borderTopColor: C.gold, borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
@@ -2438,11 +3157,12 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
-    );
+      {renderDiscoverNav()}
+    </>);
   }
 
   if (vendors.length === 0) {
-    return (
+    return (<>
       <div style={{ height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 28px', textAlign: 'center' }}>
         <Compass size={40} color={C.goldBorder} />
         <h3 style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, margin: '16px 0 8px', fontWeight: 400 }}>No vendors match your filters</h3>
@@ -2458,7 +3178,8 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
           }}>Go to Dash</button>
         </div>
       </div>
-    );
+      {renderDiscoverNav()}
+    </>);
   }
 
   // End of stack for swipe mode
@@ -2486,7 +3207,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     const isSaved = savedIds.has(v.id);
     return (
       <>
-        <img src={getHeroImage(v)} alt={blindMode ? '' : v.name}
+        <img src={cdnUrl(getHeroImage(v), "hero")} alt={blindMode ? '' : v.name}
           loading="eager" decoding="async"
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
@@ -2699,6 +3420,63 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ══════════════════════════════════════════════════════════════
   // CATEGORY LAYOVER — shared render function
   // ══════════════════════════════════════════════════════════════
+  // DISCOVER BOTTOM NAV — replaces global nav while in Discover mode
+  function renderDiscoverNav() {
+    const activeTab: DiscoverTab =
+      (layer === 'muse') ? 'muse'
+      : (layer === 'messages' || layer === 'message-thread') ? 'messages'
+      : (layer === 'customize') ? 'customize'
+      : 'feed';
+    const tabs: { id: DiscoverTab; label: string; Icon: any }[] = [
+      { id: 'feed',      label: 'Feed',      Icon: Compass      },
+      { id: 'muse',      label: 'Muse',      Icon: Sparkles     },
+      { id: 'messages',  label: 'Messages',  Icon: MessageCircle},
+      { id: 'customize', label: 'Customize', Icon: Settings2    },
+    ];
+    return (
+      <div style={{
+        position: 'fixed' as const, bottom: 0, left: 0, right: 0,
+        background: C.cream, borderTop: `1px solid ${C.border}`,
+        display: 'flex' as const, justifyContent: 'space-around',
+        padding: 'max(8px, env(safe-area-inset-bottom)) 0 8px',
+        zIndex: 45, maxWidth: 480, margin: '0 auto',
+      }}>
+        {tabs.map(t => {
+          const a = activeTab === t.id;
+          const unread = t.id === 'messages' ? enquiries.reduce((s, e) => s + (e.couple_unread_count || 0), 0) : 0;
+          return (
+            <button key={t.id} onClick={() => {
+              if (t.id === 'feed') setLayer('dash');
+              else if (t.id === 'muse') setLayer('muse');
+              else if (t.id === 'messages') setLayer('messages');
+              else if (t.id === 'customize') setLayer('customize');
+            }} style={{
+              display: 'flex' as const, flexDirection: 'column' as const,
+              alignItems: 'center', gap: 2, position: 'relative' as const,
+              background: 'none', border: 'none', cursor: 'pointer', padding: '4px 16px',
+            }}>
+              <t.Icon size={20} color={a ? C.gold : C.mutedLight} />
+              <span style={{
+                fontSize: 10, fontWeight: a ? 500 : 300,
+                color: a ? C.gold : C.mutedLight,
+                fontFamily: 'DM Sans, sans-serif',
+              }}>{t.label}</span>
+              {unread > 0 && (
+                <span style={{
+                  position: 'absolute' as const, top: 0, right: 8,
+                  background: C.gold, color: C.dark,
+                  width: 14, height: 14, borderRadius: 7,
+                  fontSize: 9, fontWeight: 600,
+                  display: 'flex' as const, alignItems: 'center', justifyContent: 'center',
+                }}>{unread > 9 ? '9+' : unread}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderCategoryLayover() {
     return (
       <div style={{
@@ -2708,20 +3486,43 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
         <div onClick={e => e.stopPropagation()} style={{
           width: '100%', maxWidth: 480, margin: '0 auto',
           background: C.cream, borderRadius: '20px 20px 0 0',
-          padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
-          maxHeight: '85vh', overflow: 'auto',
+          maxHeight: '88vh',
+          display: 'flex' as const, flexDirection: 'column' as const,
           overscrollBehavior: 'contain' as const,
         }}>
-          <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+          {/* STICKY HEADER */}
+          <div style={{
+            padding: '10px 20px 14px', borderBottom: `1px solid ${C.border}`,
+            background: C.cream, borderRadius: '20px 20px 0 0', flexShrink: 0,
+          }}>
+            <div style={{ padding: '0 0 10px', textAlign: 'center' as const }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+            </div>
+            <h3 style={{ margin: '0 0 4px', fontSize: 18, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
+              Tell us what you're looking for
+            </h3>
+            <p style={{ margin: '0 0 14px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              All optional. We'll remember your choices.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={browseAllFromLayover} style={{
+                flex: 1, padding: '12px', borderRadius: 10, background: C.ivory,
+                border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+              }}>Just browsing</button>
+              <button onClick={applyLayoverFilters} style={{
+                flex: 2, padding: '12px', borderRadius: 10, background: C.dark,
+                border: 'none', color: C.gold, fontSize: 13,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+              }}>Apply filters</button>
+            </div>
           </div>
-
-          <h3 style={{ margin: '0 0 4px', fontSize: 20, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
-            Tell us what you're looking for
-          </h3>
-          <p style={{ margin: '0 0 20px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-            All optional. We'll remember your choices.
-          </p>
+          {/* SCROLLABLE BODY */}
+          <div style={{
+            flex: 1, overflow: 'auto',
+            padding: '16px 20px max(24px, env(safe-area-inset-bottom))',
+            overscrollBehavior: 'contain' as const,
+          }}>
 
           {/* Categories */}
           <div style={{ marginBottom: 20 }}>
@@ -2809,19 +3610,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
             }} />
           </div>
 
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={browseAllFromLayover} style={{
-              flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
-              border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
-              fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
-            }}>Just browsing</button>
-            <button onClick={applyLayoverFilters} style={{
-              flex: 2, padding: '14px', borderRadius: 10, background: C.dark,
-              border: 'none', color: C.gold, fontSize: 13,
-              fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-            }}>Apply filters</button>
-          </div>
+          </div>{/* end scrollable body */}
         </div>
       </div>
     );
@@ -2830,7 +3619,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ══════════════════════════════════════════════════════════════
   // FEED RENDER
   // ══════════════════════════════════════════════════════════════
-  return (
+  return (<>
     <div style={{ position: 'relative' }}>
 
       {/* Card viewport — fixed height, manual gesture */}
@@ -2916,20 +3705,43 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
           <div onClick={e => e.stopPropagation()} style={{
             width: '100%', maxWidth: 480, margin: '0 auto',
             background: C.cream, borderRadius: '20px 20px 0 0',
-            padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
-            maxHeight: '85vh', overflow: 'auto',
+            maxHeight: '88vh',
+            display: 'flex' as const, flexDirection: 'column' as const,
             overscrollBehavior: 'contain' as const,
           }}>
-            <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
-              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+            {/* STICKY HEADER */}
+            <div style={{
+              padding: '10px 20px 14px', borderBottom: `1px solid ${C.border}`,
+              background: C.cream, borderRadius: '20px 20px 0 0', flexShrink: 0,
+            }}>
+              <div style={{ padding: '0 0 10px', textAlign: 'center' as const }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>Refine your search</h3>
+                <button onClick={() => setShowFilter(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+                  <X size={18} color={C.muted} />
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={clearFeedFilters} style={{
+                  flex: 1, padding: '12px', borderRadius: 10, background: C.ivory,
+                  border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+                }}>Clear all</button>
+                <button onClick={applyFeedFilters} style={{
+                  flex: 2, padding: '12px', borderRadius: 10, background: C.dark,
+                  border: 'none', color: C.gold, fontSize: 13,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                }}>Show results</button>
+              </div>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>Refine your search</h3>
-              <button onClick={() => setShowFilter(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                <X size={18} color={C.muted} />
-              </button>
-            </div>
+            {/* SCROLLABLE BODY */}
+            <div style={{
+              flex: 1, overflow: 'auto',
+              padding: '16px 20px max(24px, env(safe-area-inset-bottom))',
+              overscrollBehavior: 'contain' as const,
+            }}>
 
             {/* Category */}
             <div style={{ marginBottom: 20 }}>
@@ -2996,155 +3808,590 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
               }} />
             </div>
 
+            </div>{/* end scrollable body */}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════
+          VENDOR PROFILE SLIDE-UP — REDESIGNED (Build 3)
+          ══════════════════════════════════════════════════════════ */}
+      {profileVendor && (() => {
+        const v = profileVendor;
+        const heroImages = (v.featured_photos?.length > 0 ? v.featured_photos : v.portfolio_images) || [];
+        const langs = Array.isArray(v.languages) ? v.languages : [];
+        const srvCities = Array.isArray(v.serves_cities) ? v.serves_cities : [];
+        const isSaved = savedIds.has(v.id);
+        const coutureEligible = !!v.couture_eligible;
+        const acceptsLockDate = !!v.accepts_lock_date;
+        const showWA = !!v.show_whatsapp_public;
+        const blockedDates = new Set(profileBlocks.map((b: any) => b.blocked_date));
+        const isAvailableOnWeddingDate = session?.weddingDate ? !blockedDates.has(session.weddingDate) : null;
+
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 55,
+            background: profileVisible ? 'rgba(0,0,0,0.5)' : 'transparent',
+            transition: 'background 0.3s',
+            pointerEvents: profileVisible ? 'auto' : 'none',
+          }} onClick={closeProfile}>
+            <div
+              ref={profileContentRef}
+              onClick={e => e.stopPropagation()}
+              onTouchStart={handleProfileTouchStart}
+              onTouchMove={handleProfileTouchMove}
+              onTouchEnd={handleProfileTouchEnd}
+              style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                maxWidth: 480, margin: '0 auto',
+                background: C.cream, borderRadius: '20px 20px 0 0',
+                height: '94vh',
+                transform: profileVisible ? `translateY(${profileOffset}px)` : 'translateY(100%)',
+                transition: profileOffset === 0 ? 'transform 0.3s ease' : 'none',
+                overflow: 'auto',
+                overscrollBehavior: 'contain' as const,
+                paddingBottom: 80,
+              }}>
+              <div style={{ padding: '10px 0 4px', textAlign: 'center' as const, position: 'sticky' as const, top: 0, background: C.cream, borderRadius: '20px 20px 0 0', zIndex: 10 }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+              </div>
+
+              {/* 1. HERO */}
+              <div style={{ position: 'relative' as const, height: 420, background: C.dark }}>
+                {heroImages.length > 0 && (
+                  <img src={cdnUrl(heroImages[profileHeroIndex], 'portrait')} alt={v.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' as const, objectPosition: 'center' }} />
+                )}
+                <div style={{ position: 'absolute' as const, bottom: 0, left: 0, right: 0, height: '50%', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }} />
+                {heroImages.length > 1 && (
+                  <div style={{ position: 'absolute' as const, top: 16, left: 16, right: 16, display: 'flex', gap: 4 }}>
+                    {heroImages.slice(0, 8).map((_: any, i: number) => (
+                      <div key={i} style={{
+                        flex: 1, height: 2, borderRadius: 1,
+                        background: i === profileHeroIndex ? '#fff' : 'rgba(255,255,255,0.35)',
+                        transition: 'background 0.3s',
+                      }} />
+                    ))}
+                  </div>
+                )}
+                {heroImages.length > 1 && (
+                  <>
+                    <button onClick={() => setProfileHeroIndex(i => Math.max(0, i - 1))}
+                      style={{ position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: '40%', background: 'transparent', border: 'none', cursor: 'pointer' }} />
+                    <button onClick={() => setProfileHeroIndex(i => Math.min(heroImages.length - 1, i + 1))}
+                      style={{ position: 'absolute' as const, right: 0, top: 0, bottom: 0, width: '40%', background: 'transparent', border: 'none', cursor: 'pointer' }} />
+                  </>
+                )}
+                <div style={{ position: 'absolute' as const, top: 28, right: 16, display: 'flex', gap: 6, flexDirection: 'column' as const, alignItems: 'flex-end' }}>
+                  {coutureEligible && (
+                    <div style={{
+                      background: 'rgba(44,36,32,0.85)', borderRadius: 6,
+                      padding: '4px 10px', fontSize: 10, color: C.gold,
+                      fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
+                      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                    }}>COUTURE</div>
+                  )}
+                  {v.is_verified && (
+                    <div style={{
+                      background: 'rgba(201,168,76,0.92)', borderRadius: 6,
+                      padding: '4px 10px', fontSize: 10, color: C.dark,
+                      fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
+                      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                    }}>VERIFIED</div>
+                  )}
+                </div>
+                <div style={{ position: 'absolute' as const, bottom: 18, left: 20, right: 20 }}>
+                  <h2 style={{ margin: '0 0 4px', fontSize: 26, color: '#fff', fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '32px' }}>{v.name}</h2>
+                  <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.75)', fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                    {v.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} · {v.city}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ padding: '16px 20px 0' }}>
+                {/* 2. SNAPSHOT STRIP */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 8, marginBottom: 18 }}>
+                  {v.starting_price > 0 && (
+                    <div style={{ padding: '10px 12px', background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+                      <p style={{ margin: '0 0 2px', fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>From</p>
+                      <p style={{ margin: 0, fontSize: 14, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{fmtPrice(v.starting_price)}</p>
+                    </div>
+                  )}
+                  {v.rating > 0 && (
+                    <div style={{ padding: '10px 12px', background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+                      <p style={{ margin: '0 0 2px', fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>Rating</p>
+                      <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>★ {v.rating}</p>
+                    </div>
+                  )}
+                  {v.weddings_delivered && (
+                    <div style={{ padding: '10px 12px', background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+                      <p style={{ margin: '0 0 2px', fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>Weddings</p>
+                      <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{v.weddings_delivered}</p>
+                    </div>
+                  )}
+                  {v.years_active && (
+                    <div style={{ padding: '10px 12px', background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+                      <p style={{ margin: '0 0 2px', fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>Since</p>
+                      <p style={{ margin: 0, fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{v.years_active}</p>
+                    </div>
+                  )}
+                </div>
+
+                {v.vibe_tags?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 18 }}>
+                    {v.vibe_tags.map((t: string) => (
+                      <span key={t} style={{
+                        background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 20,
+                        padding: '4px 12px', fontSize: 11, color: C.dark,
+                        fontFamily: 'DM Sans, sans-serif', fontWeight: 400,
+                      }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 3. AVAILABILITY STRIP */}
+                {session?.weddingDate && isAvailableOnWeddingDate !== null && (
+                  <div style={{
+                    padding: '12px 14px',
+                    background: isAvailableOnWeddingDate ? '#EFF7EF' : '#FFF0F0',
+                    border: `1px solid ${isAvailableOnWeddingDate ? '#C8E6C9' : '#F0A8A8'}`,
+                    borderRadius: 10, marginBottom: 18,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    {isAvailableOnWeddingDate ? (
+                      <><CheckCircle size={16} color="#4CAF50" />
+                      <div>
+                        <p style={{ margin: 0, fontSize: 13, color: '#2C5E2E', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Available on your wedding date</p>
+                        <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{new Date(session.weddingDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      </div></>
+                    ) : (
+                      <><X size={16} color="#C65757" />
+                      <div>
+                        <p style={{ margin: 0, fontSize: 13, color: '#B24646', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Not available on your wedding date</p>
+                        <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>You can still enquire — they may have flexibility</p>
+                      </div></>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. ABOUT */}
+                {v.about && (
+                  <div style={{ marginBottom: 22 }}>
+                    <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>About</p>
+                    <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '22px' }}>{v.about}</p>
+                  </div>
+                )}
+
+                {/* 5. PACKAGES */}
+                {profilePackages.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Packages</p>
+                    <div style={{ display: 'flex', gap: 10, overflow: 'auto', scrollbarWidth: 'none' as const, padding: '0 0 6px' }}>
+                      {profilePackages.map((pkg: any) => (
+                        <div key={pkg.id} style={{
+                          minWidth: 240, maxWidth: 260, flexShrink: 0,
+                          background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 12,
+                          padding: '14px 16px',
+                        }}>
+                          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px', textTransform: 'uppercase' as const }}>
+                            {pkg.ideal_for || 'Package'}
+                          </p>
+                          <p style={{ margin: '0 0 8px', fontSize: 16, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{pkg.name}</p>
+                          {pkg.price && (
+                            <p style={{ margin: '0 0 8px', fontSize: 18, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>{fmtPrice(pkg.price)}</p>
+                          )}
+                          {pkg.duration && (
+                            <p style={{ margin: '0 0 8px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 400 }}>{pkg.duration}</p>
+                          )}
+                          {pkg.deliverables && pkg.deliverables.length > 0 && (
+                            <div>
+                              {pkg.deliverables.slice(0, 4).map((d: string, i: number) => (
+                                <p key={i} style={{ margin: '2px 0', fontSize: 11, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>· {d}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. PORTFOLIO */}
+                {profileAlbums.length > 0 ? (
+                  <div style={{ marginBottom: 22 }}>
+                    <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Past weddings</p>
+                    {profileAlbums.map((alb: any) => (
+                      <div key={alb.id} style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                          <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{alb.title}</p>
+                          {alb.city && <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>{alb.city}{alb.event_date ? ` · ${new Date(alb.event_date).getFullYear()}` : ''}</p>}
+                        </div>
+                        {alb.images && alb.images.length > 0 && (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
+                            {alb.images.slice(0, 9).map((img: string, i: number) => (
+                              <div key={i} style={{ aspectRatio: '1', background: `url(${cdnUrl(img, 'grid')}) center/cover` }} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : v.portfolio_images?.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Portfolio</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
+                      {v.portfolio_images.slice(0, 12).map((img: string, i: number) => (
+                        <div key={i} style={{ aspectRatio: '1', background: `url(${cdnUrl(img, 'grid')}) center/cover` }} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. DETAILS */}
+                <div style={{ marginBottom: 22 }}>
+                  <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Details</p>
+                  <div style={{ background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+                    {[
+                      v.team_size && { k: 'Team', v: v.team_size === 'solo' ? 'Solo practitioner' : `${v.team_size} members` },
+                      langs.length > 0 && { k: 'Languages', v: langs.join(', ') },
+                      v.serves_flexible ? { k: 'Serves', v: 'Flexible — travels anywhere' } :
+                        (srvCities.length > 0 && { k: 'Serves', v: srvCities.slice(0, 4).join(', ') + (srvCities.length > 4 ? `, +${srvCities.length - 4}` : '') }),
+                      v.instagram && { k: 'Instagram', v: v.instagram.startsWith('@') ? v.instagram : `@${v.instagram}` },
+                      v.cancellation_policy && { k: 'Cancellation', v: v.cancellation_policy.charAt(0).toUpperCase() + v.cancellation_policy.slice(1) },
+                    ].filter(Boolean).map((d: any, i: number, arr: any[]) => (
+                      <div key={i} style={{
+                        padding: '12px 16px',
+                        borderBottom: i === arr.length - 1 ? 'none' : `1px solid ${C.border}`,
+                        display: 'flex', justifyContent: 'space-between', gap: 12,
+                      }}>
+                        <span style={{ fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, flexShrink: 0 }}>{d.k}</span>
+                        <span style={{ fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, textAlign: 'right' as const }}>{d.v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* STICKY BOTTOM BAR — Save + Enquire + (WhatsApp direct if enabled) + Lock Date */}
+              <div style={{
+                position: 'fixed' as const, bottom: 0, left: 0, right: 0,
+                maxWidth: 480, margin: '0 auto',
+                background: C.cream, borderTop: `1px solid ${C.border}`,
+                padding: '12px 16px max(12px, env(safe-area-inset-bottom))',
+                display: 'flex', gap: 8, zIndex: 20,
+              }}>
+                <button onClick={() => handleSave(v)} style={{
+                  flex: '0 0 auto', padding: '12px 14px', borderRadius: 10,
+                  background: isSaved ? C.goldSoft : C.ivory,
+                  border: `1px solid ${isSaved ? C.goldBorder : C.border}`, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                }}>
+                  <Heart size={16} fill={isSaved ? C.gold : 'none'} color={isSaved ? C.gold : C.dark} />
+                </button>
+                <button onClick={() => {
+                  setEnquireVendor(v);
+                  setEnquireMessage(`Hi ${v.name}! I saw your work on The Dream Wedding and I'm interested in your services${session?.weddingDate ? ` for my wedding on ${new Date(session.weddingDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}. Could you share more?`);
+                  setShowEnquireSheet(true);
+                  cNavPush('discover-enquire-sheet');
+                }} style={{
+                  flex: 1, padding: '12px', borderRadius: 10, background: C.dark,
+                  border: 'none', cursor: 'pointer', color: C.gold, fontSize: 13,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                }}>Enquire</button>
+                {showWA && (
+                  <button onClick={() => {
+                    const phone = v.phone?.replace(/\D/g, '').slice(-10);
+                    if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(`Hi ${v.name}! I found you on The Dream Wedding.`)}`, '_blank');
+                  }} style={{
+                    flex: '0 0 auto', padding: '12px 14px', borderRadius: 10,
+                    background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Phone size={16} color={C.dark} />
+                  </button>
+                )}
+                <button onClick={() => {
+                  setLockDateVendor(v);
+                  setShowLockDateSheet(true);
+                  trackLockDateInterest(v, false);
+                  cNavPush('discover-lock-date-sheet');
+                }} style={{
+                  flex: '0 0 auto', padding: '12px 14px', borderRadius: 10,
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  color: C.dark, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                  position: 'relative' as const,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  <LockIcon size={12} color={C.gold} />
+                  <span>Lock Date</span>
+                  {acceptsLockDate && v.lock_date_amount && (
+                    <span style={{ fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                      · {fmtPrice(v.lock_date_amount)}
+                    </span>
+                  )}
+                  <span style={{
+                    position: 'absolute' as const, top: -6, right: -4,
+                    background: C.gold, color: C.dark, fontSize: 8,
+                    fontWeight: 600, letterSpacing: '0.5px',
+                    padding: '1px 5px', borderRadius: 4,
+                    fontFamily: 'DM Sans, sans-serif',
+                  }}>BETA</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════ LOCK DATE SHEET ═══════════ */}
+      {showLockDateSheet && lockDateVendor && (() => {
+        const lv = lockDateVendor;
+        const lvAccepts = !!lv.accepts_lock_date;
+        const lvAmount = lv.lock_date_amount || 0;
+        return (
+          <div style={{
+            position: 'fixed' as const, inset: 0, zIndex: 70,
+            background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end',
+          }} onClick={() => setShowLockDateSheet(false)}>
+            <div onClick={e => e.stopPropagation()} style={{
+              width: '100%', maxWidth: 480, margin: '0 auto',
+              background: C.cream, borderRadius: '20px 20px 0 0',
+              padding: '20px 24px max(24px, env(safe-area-inset-bottom))',
+              maxHeight: '85vh', overflow: 'auto',
+              overscrollBehavior: 'contain' as const,
+            }}>
+              <div style={{ padding: '6px 0 16px', textAlign: 'center' as const }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+              </div>
+
+              <div style={{
+                width: 56, height: 56, borderRadius: 18,
+                background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 18px',
+              }}>
+                <LockIcon size={22} color={C.gold} />
+              </div>
+
+              <h2 style={{
+                margin: '0 0 10px', textAlign: 'center' as const,
+                fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400,
+              }}>Hold your date with {lv.name}.</h2>
+
+              {lvAccepts && lvAmount > 0 ? (
+                <>
+                  <p style={{ margin: '0 0 20px', textAlign: 'center' as const,
+                    fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '22px' }}>
+                    A refundable deposit of <strong style={{ color: C.gold }}>{fmtPrice(lvAmount)}</strong> goes into escrow. If you book within 7 days, it applies to your fee. If not, it's refunded (minus a small processing charge).
+                  </p>
+
+                  <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 12, padding: '14px 16px', marginBottom: 18 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, fontStyle: 'italic' as const, lineHeight: '18px' }}>
+                      Lock Date is in Beta. Payment integration arriving soon. For now, we capture your intent and notify the vendor.
+                    </p>
+                  </div>
+
+                  <button onClick={() => {
+                    // Placeholder: capture intent as system message in an enquiry
+                    alert('Lock Date intent captured! Payment integration coming soon. The vendor will be notified of your interest.');
+                    setShowLockDateSheet(false);
+                  }} style={{
+                    width: '100%', padding: '14px', borderRadius: 10,
+                    background: C.dark, border: 'none', cursor: 'pointer',
+                    color: C.gold, fontSize: 14, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                    letterSpacing: '0.3px',
+                  }}>Proceed with {fmtPrice(lvAmount)}</button>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: '0 0 20px', textAlign: 'center' as const,
+                    fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '22px' }}>
+                    Lock Date lets you hold your wedding date with a vendor you love. A refundable deposit goes into escrow — if you book within 7 days, it applies to the fee.
+                  </p>
+                  <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 12, padding: '14px 16px', marginBottom: 18 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, fontStyle: 'italic' as const, lineHeight: '18px' }}>
+                      This vendor hasn't enabled Lock Date yet. Send an enquiry to start the conversation, or explore our Couture collection for vendors accepting Lock Date.
+                    </p>
+                  </div>
+                  <button onClick={() => {
+                    trackLockDateInterest(lv, true);
+                    setShowLockDateSheet(false);
+                    onBackToPlan();
+                  }} style={{
+                    width: '100%', padding: '14px', borderRadius: 10,
+                    background: C.dark, border: 'none', cursor: 'pointer',
+                    color: C.gold, fontSize: 14, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                    letterSpacing: '0.3px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}>
+                    Explore Couture <ArrowRight size={14} color={C.gold} />
+                  </button>
+                </>
+              )}
+
+              <p style={{ margin: '14px 0 0', textAlign: 'center' as const,
+                fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif',
+                fontWeight: 400, letterSpacing: '1.5px', textTransform: 'uppercase' as const }}>
+                Lock Date · Beta
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════ ENQUIRE SHEET ═══════════ */}
+      {showEnquireSheet && enquireVendor && (
+        <div style={{
+          position: 'fixed' as const, inset: 0, zIndex: 70,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end',
+        }} onClick={() => setShowEnquireSheet(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 480, margin: '0 auto',
+            background: C.cream, borderRadius: '20px 20px 0 0',
+            padding: '20px 24px max(24px, env(safe-area-inset-bottom))',
+            maxHeight: '85vh', overflow: 'auto',
+          }}>
+            <div style={{ padding: '6px 0 16px', textAlign: 'center' as const }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+            </div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 20, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+              Send an enquiry
+            </h3>
+            <p style={{ margin: '0 0 14px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+              To {enquireVendor.name}
+            </p>
+            <textarea
+              value={enquireMessage}
+              onChange={e => setEnquireMessage(e.target.value)}
+              rows={6}
+              placeholder="Write a short note about your wedding, budget, and vision..."
+              style={{
+                width: '100%', padding: '12px 14px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.ivory,
+                fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+                outline: 'none', resize: 'none' as const, marginBottom: 14,
+                boxSizing: 'border-box' as const,
+              }}
+            />
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={clearFeedFilters} style={{
-                flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
+              <button onClick={() => setShowEnquireSheet(false)} style={{
+                flex: 1, padding: '12px', borderRadius: 10, background: C.ivory,
                 border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
                 fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
-              }}>Clear all</button>
-              <button onClick={applyFeedFilters} style={{
-                flex: 2, padding: '14px', borderRadius: 10, background: C.dark,
+              }}>Cancel</button>
+              <button onClick={submitEnquire} disabled={!enquireMessage.trim()} style={{
+                flex: 2, padding: '12px', borderRadius: 10, background: C.dark,
                 border: 'none', color: C.gold, fontSize: 13,
                 fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-              }}>Show results</button>
+                opacity: enquireMessage.trim() ? 1 : 0.5,
+              }}>Send enquiry</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* VENDOR PROFILE SLIDE-UP */}
-      {profileVendor && (
+      {/* ═══════════ EVENT EDITOR SHEET ═══════════ */}
+      {editingEvent && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 55,
-          background: profileVisible ? 'rgba(0,0,0,0.5)' : 'transparent',
-          transition: 'background 0.3s',
-          pointerEvents: profileVisible ? 'auto' : 'none',
-        }} onClick={closeProfile}>
-          <div
-            ref={profileContentRef}
-            onClick={e => e.stopPropagation()}
-            onTouchStart={handleProfileTouchStart}
-            onTouchMove={handleProfileTouchMove}
-            onTouchEnd={handleProfileTouchEnd}
-            style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              maxWidth: 480, margin: '0 auto',
-              background: C.cream, borderRadius: '20px 20px 0 0',
-              height: '92vh',
-              transform: profileVisible ? `translateY(${profileOffset}px)` : 'translateY(100%)',
-              transition: profileOffset === 0 ? 'transform 0.3s ease' : 'none',
-              overflow: 'auto',
-              overscrollBehavior: 'contain' as const,
-            }}>
-            <div style={{ padding: '10px 0 4px', textAlign: 'center', position: 'sticky', top: 0, background: C.cream, borderRadius: '20px 20px 0 0', zIndex: 2 }}>
+          position: 'fixed' as const, inset: 0, zIndex: 70,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end',
+        }} onClick={() => setEditingEvent(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 480, margin: '0 auto',
+            background: C.cream, borderRadius: '20px 20px 0 0',
+            padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
+            maxHeight: '88vh', overflow: 'auto',
+            overscrollBehavior: 'contain' as const,
+          }}>
+            <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
               <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
             </div>
+            <h3 style={{ margin: '0 0 14px', fontSize: 20, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
+              {editingEvent.event_type?.charAt(0).toUpperCase() + editingEvent.event_type?.slice(1)}
+            </h3>
 
-            <div style={{
-              height: 300,
-              background: `url(${getHeroImage(profileVendor)}) center/cover`,
-              position: 'relative',
-            }}>
-              <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, height: '60%',
-                background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-              }} />
-              <div style={{ position: 'absolute', bottom: 20, left: 20, right: 20 }}>
-                <h2 style={{ margin: '0 0 4px', fontSize: 24, color: '#fff', fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>{profileVendor.name}</h2>
-                <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.7)', fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-                  {profileVendor.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} · {profileVendor.city}
-                </p>
-              </div>
+            <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Event date</label>
+            <input type="date" value={editingEvent.event_date || ''} onChange={e => setEditingEvent({ ...editingEvent, event_date: e.target.value })}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+
+            <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>City</label>
+            <input value={editingEvent.event_city || ''} onChange={e => setEditingEvent({ ...editingEvent, event_city: e.target.value })} placeholder="e.g. Udaipur"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+
+            <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Total budget for this event (Rs)</label>
+            <input type="number" value={editingEvent.budget_total ? editingEvent.budget_total / 100 : ''} onChange={e => setEditingEvent({ ...editingEvent, budget_total: e.target.value ? parseInt(e.target.value) * 100 : null })} placeholder="e.g. 500000"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.ivory, fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 12 }} />
+
+            <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Guest count</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 12 }}>
+              {['<100', '100-250', '250-500', '500+'].map(opt => (
+                <button key={opt} onClick={() => setEditingEvent({ ...editingEvent, guest_count_range: opt })} style={{
+                  padding: '6px 12px', borderRadius: 20,
+                  background: editingEvent.guest_count_range === opt ? C.dark : C.ivory,
+                  color: editingEvent.guest_count_range === opt ? C.gold : C.dark,
+                  border: `1px solid ${editingEvent.guest_count_range === opt ? C.dark : C.border}`,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                }}>{opt}</button>
+              ))}
             </div>
 
-            <div style={{ padding: '20px 20px max(24px, env(safe-area-inset-bottom))' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div>
-                  <p style={{ margin: '0 0 2px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Starting from</p>
-                  <p style={{ margin: 0, fontSize: 20, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>{fmtPrice(profileVendor.starting_price)}</p>
-                </div>
-                {profileVendor.rating > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 20, padding: '6px 12px' }}>
-                    <span style={{ fontSize: 14, color: C.gold }}>★</span>
-                    <span style={{ fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{profileVendor.rating}</span>
-                  </div>
-                )}
-              </div>
+            <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, display: 'block', marginBottom: 6 }}>Vibe (pick any)</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
+              {['Luxury', 'Traditional', 'Modern', 'Intimate', 'Grand', 'Destination', 'Bohemian', 'Royal', 'Minimalist'].map(t => {
+                const arr = editingEvent.vibe_tags || [];
+                const active = arr.includes(t);
+                return (
+                  <button key={t} onClick={() => {
+                    const next = active ? arr.filter((x: string) => x !== t) : [...arr, t];
+                    setEditingEvent({ ...editingEvent, vibe_tags: next });
+                  }} style={{
+                    padding: '6px 12px', borderRadius: 20,
+                    background: active ? C.dark : C.ivory,
+                    color: active ? C.gold : C.dark,
+                    border: `1px solid ${active ? C.dark : C.border}`,
+                    fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                  }}>{t}</button>
+                );
+              })}
+            </div>
 
-              {profileVendor.vibe_tags?.length > 0 && (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 20 }}>
-                  {profileVendor.vibe_tags.map((t: string) => (
-                    <span key={t} style={{ background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 20, padding: '4px 12px', fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif' }}>{t}</span>
-                  ))}
-                </div>
-              )}
-
-              {profileVendor.about && (
-                <div style={{ marginBottom: 20 }}>
-                  <p style={{ margin: '0 0 8px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>About</p>
-                  <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '22px' }}>{profileVendor.about}</p>
-                </div>
-              )}
-
-              {profileVendor.portfolio_images?.length > 0 && (
-                <div style={{ marginBottom: 20 }}>
-                  <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Portfolio</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
-                    {profileVendor.portfolio_images.slice(0, 9).map((img: string, i: number) => (
-                      <div key={i} style={{ aspectRatio: '1', background: `url(${img}) center/cover` }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginBottom: 20 }}>
-                <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Details</p>
-                <div style={{ background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-                  {[
-                    profileVendor.city && { k: 'Location', v: profileVendor.city },
-                    profileVendor.instagram && { k: 'Instagram', v: profileVendor.instagram },
-                    profileVendor.equipment && { k: 'Equipment', v: profileVendor.equipment },
-                    profileVendor.delivery_time && { k: 'Delivery', v: profileVendor.delivery_time },
-                  ].filter(Boolean).map((d: any, i: number) => (
-                    <div key={i} style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 400 }}>{d.k}</span>
-                      <span style={{ fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, textAlign: 'right' as const, maxWidth: '60%' }}>{d.v}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12, padding: '16px 20px', marginBottom: 24, textAlign: 'center' }}>
-                <p style={{ margin: '0 0 4px', fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Packages coming soon</p>
-                <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Detailed pricing and deliverables will be available here</p>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => handleSave(profileVendor)} style={{
-                  flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
-                  border: `1px solid ${C.border}`, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  color: savedIds.has(profileVendor.id) ? C.gold : C.dark, fontSize: 13,
-                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
-                }}>
-                  <Heart size={14} fill={savedIds.has(profileVendor.id) ? C.gold : 'none'} color={savedIds.has(profileVendor.id) ? C.gold : C.dark} />
-                  {savedIds.has(profileVendor.id) ? 'Saved' : 'Save'}
-                </button>
-                <button onClick={() => {
-                  const phone = profileVendor.phone?.replace(/\D/g, '').slice(-10);
-                  if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(`Hi ${profileVendor.name}! I found you on The Dream Wedding and I'm interested in your services for my wedding.`)}`, '_blank');
+            <div style={{ display: 'flex', gap: 10 }}>
+              {editingEvent.id && (
+                <button onClick={async () => {
+                  if (!confirm('Delete this event? All its settings will be lost.')) return;
+                  try {
+                    await fetch(`${API}/api/couple/events/${editingEvent.id}`, { method: 'DELETE' });
+                    setEditingEvent(null);
+                    loadEvents();
+                  } catch {}
                 }} style={{
-                  flex: 2, padding: '14px', borderRadius: 10, background: C.dark,
-                  border: 'none', cursor: 'pointer', color: C.gold, fontSize: 13,
-                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
-                }}>Enquire</button>
-              </div>
+                  padding: '12px 14px', borderRadius: 10, background: 'transparent',
+                  border: `1px solid #E57373`, color: '#C65757', fontSize: 12,
+                  fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                }}>
+                  <Trash2 size={14} />
+                </button>
+              )}
+              <button onClick={() => setEditingEvent(null)} style={{
+                flex: 1, padding: '12px', borderRadius: 10, background: C.ivory,
+                border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+              }}>Cancel</button>
+              <button onClick={async () => {
+                await upsertEvent(editingEvent);
+                setEditingEvent(null);
+              }} style={{
+                flex: 2, padding: '12px', borderRadius: 10, background: C.dark,
+                border: 'none', color: C.gold, fontSize: 13,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+              }}>Save event</button>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
+    {renderDiscoverNav()}
+  </>);
 }
 
 
@@ -10916,7 +12163,7 @@ export default function CoupleApp() {
       else if (layer === 'dreamai') setShowDreamAi(false);
       else if (layer === 'feedback') setShowFeedback(false);
       else if (layer === 'tool') setActiveTool(null);
-      else if (layer === 'discover-profile' || layer === 'discover-filter' || layer === 'discover-layover' || layer === 'discover-feed-to-dash') {
+      else if (layer === 'discover-profile' || layer === 'discover-filter' || layer === 'discover-layover' || layer === 'discover-feed-to-dash' || layer === 'discover-lock-date-sheet' || layer === 'discover-enquire-sheet' || layer === 'discover-message-thread' || layer === 'discover-edit-event') {
         window.dispatchEvent(new CustomEvent('tdw-discover-back', { detail: layer }));
       }
     };

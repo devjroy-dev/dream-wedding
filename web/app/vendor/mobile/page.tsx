@@ -6650,6 +6650,11 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
   const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
   const [featuredPhotos, setFeaturedPhotos] = useState<string[]>([]);
   const [cancellationPolicy, setCancellationPolicy] = useState('');
+
+  // Build 3: Lock Date preferences
+  const [acceptsLockDate, setAcceptsLockDate] = useState(false);
+  const [lockDateAmount, setLockDateAmount] = useState<number>(0);          // in paise
+  const [showWhatsappPublic, setShowWhatsappPublic] = useState(false);
   const [categoryDetails, setCategoryDetails] = useState<any>({});
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [editingPackage, setEditingPackage] = useState<any>(null);
@@ -6724,6 +6729,10 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
         setPortfolioImages(Array.isArray(v.portfolio_images) ? v.portfolio_images : []);
         setFeaturedPhotos(Array.isArray(v.featured_photos) ? v.featured_photos : []);
         setCancellationPolicy(v.cancellation_policy || '');
+        // Build 3: Lock Date prefs
+        setAcceptsLockDate(!!v.accepts_lock_date);
+        setLockDateAmount(v.lock_date_amount || 0);
+        setShowWhatsappPublic(!!v.show_whatsapp_public);
         setCategoryDetails(v.category_details || {});
       }
     } catch {}
@@ -6777,12 +6786,44 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
     } catch { showToast('Submission failed'); }
   };
 
+  // Check image dimensions + file size before upload (Build 3)
+  const inspectImage = (file: File): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }> => {
+    return new Promise(resolve => {
+      if (file.size < 150 * 1024) {
+        resolve({ ok: false, reason: 'Image looks compressed (likely from WhatsApp) — try a fresh copy from your camera or gallery.' });
+        return;
+      }
+      const img = new window.Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const { width, height } = img;
+        if (width < 900 || height < 900) {
+          resolve({ ok: false, reason: `This photo is ${width}×${height}. We recommend at least 900×900 for a crisp display.`, width, height });
+          return;
+        }
+        resolve({ ok: true, width, height });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({ ok: false, reason: 'Could not read this image file.' });
+      };
+      img.src = url;
+    });
+  };
+
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setUploadingPhoto(true);
     const uploaded: string[] = [];
+    const skipped: string[] = [];
     for (const f of files) {
+      const check = await inspectImage(f);
+      if (!check.ok) {
+        skipped.push(`${f.name}: ${check.reason}`);
+        continue;
+      }
       const url = await uploadToCloudinary(f);
       if (url) uploaded.push(url);
     }
@@ -6790,6 +6831,9 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
       const next = [...portfolioImages, ...uploaded];
       setPortfolioImages(next);
       await saveFields({ portfolio_images: next });
+    }
+    if (skipped.length > 0) {
+      showToast(`${skipped.length} photo${skipped.length > 1 ? 's' : ''} skipped — try higher resolution`);
     }
     setUploadingPhoto(false);
     e.target.value = '';
@@ -7395,6 +7439,19 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
             </div>
 
             <label style={labelStyle}>Portfolio ({portfolioImages.length} photos — 10+ recommended)</label>
+
+            {/* Build 3: Coaching pill — framed as insight, not rule */}
+            <div style={{
+              background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+              borderRadius: 10, padding: '10px 14px', marginBottom: 12,
+              display: 'flex', gap: 8, alignItems: 'flex-start',
+            }}>
+              <Sparkles size={12} color={C.gold} style={{ marginTop: 2, flexShrink: 0 }} />
+              <p style={{ margin: 0, fontSize: 11, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, lineHeight: '16px' }}>
+                Couples tend to spend 3x longer on profiles with vertical, high-resolution photos.
+              </p>
+            </div>
+
             {portfolioImages.length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
                 {portfolioImages.map((url, i) => {
@@ -7558,6 +7615,139 @@ function DiscoveryComingSoon({ session }: { session: VendorSession }) {
           </div>
         )}
       </div>
+
+      {/* PHASE 7: Lock Date preferences (Build 3) */}
+      {(() => {
+        const tier = (session?.tier || 'essential').toLowerCase();
+        const bands: Record<string, [number, number, string]> = {
+          essential: [100000, 300000, 'Rs 1,000 – 3,000'],
+          signature: [300000, 1000000, 'Rs 3,000 – 10,000'],
+          prestige: [1000000, 5000000, 'Rs 10,000 – 50,000'],
+        };
+        const [minAmt, maxAmt, bandLabel] = bands[tier] || bands.essential;
+        const currentAmt = lockDateAmount || minAmt;
+        const phase7Done = acceptsLockDate && currentAmt >= minAmt;
+
+        const saveLockPrefs = async (updates: any) => {
+          try {
+            const res = await fetch(`${API}/api/vendor-discover/lock-prefs/${session?.vendorId}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updates),
+            });
+            const d = await res.json();
+            if (!d.success) showToast(d.error || 'Failed to save');
+            else showToast('Saved');
+          } catch {
+            showToast('Failed to save');
+          }
+        };
+
+        return (
+          <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, marginBottom: 10, overflow: 'hidden' }}>
+            <button onClick={() => togglePhase('lockdate')} style={phaseHeader}>
+              {phaseDot(phase7Done)}
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                  Lock Date & WhatsApp
+                  <span style={{ marginLeft: 6, fontSize: 8, fontWeight: 600, color: C.dark, background: C.gold, padding: '1px 5px', borderRadius: 3, letterSpacing: '0.5px', verticalAlign: 'middle' }}>BETA</span>
+                </p>
+                <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                  Accept date locks, set amount, WhatsApp visibility
+                </p>
+              </div>
+              <ChevronDown size={16} color={C.muted} style={{ transform: expandedPhase === 'lockdate' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+            </button>
+            {expandedPhase === 'lockdate' && (
+              <div style={phaseBody}>
+                <div style={{
+                  padding: '10px 12px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  borderRadius: 8, marginBottom: 14,
+                }}>
+                  <p style={{ margin: 0, fontSize: 11, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, lineHeight: '16px' }}>
+                    Vendors who accept Lock Date tend to receive higher-intent enquiries. When a couple pays this amount, they're committing to your 7-day response window.
+                  </p>
+                </div>
+
+                {/* Accept Lock Date toggle */}
+                <label style={labelStyle}>Accept Lock Date bookings?</label>
+                <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                  <button onClick={() => { setAcceptsLockDate(true); saveLockPrefs({ accepts_lock_date: true, lock_date_amount: currentAmt }); }} style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 10,
+                    background: acceptsLockDate ? C.dark : C.cream,
+                    color: acceptsLockDate ? C.gold : C.dark,
+                    border: `1px solid ${acceptsLockDate ? C.dark : C.border}`,
+                    fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                  }}>Yes, accept</button>
+                  <button onClick={() => { setAcceptsLockDate(false); saveLockPrefs({ accepts_lock_date: false }); }} style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 10,
+                    background: !acceptsLockDate ? C.dark : C.cream,
+                    color: !acceptsLockDate ? C.gold : C.dark,
+                    border: `1px solid ${!acceptsLockDate ? C.dark : C.border}`,
+                    fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                  }}>Not now</button>
+                </div>
+
+                {/* Lock amount slider */}
+                {acceptsLockDate && (
+                  <>
+                    <label style={labelStyle}>Lock amount (your tier: {tier}, {bandLabel})</label>
+                    <div style={{
+                      padding: '14px 16px', background: C.cream, border: `1px solid ${C.border}`,
+                      borderRadius: 10, marginBottom: 6,
+                    }}>
+                      <p style={{ margin: '0 0 8px', fontSize: 22, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 500, textAlign: 'center' as const }}>
+                        Rs {(currentAmt / 100).toLocaleString('en-IN')}
+                      </p>
+                      <input type="range"
+                        min={minAmt} max={maxAmt} step={10000}
+                        value={currentAmt}
+                        onChange={e => setLockDateAmount(parseInt(e.target.value))}
+                        onMouseUp={e => saveLockPrefs({ lock_date_amount: parseInt((e.target as HTMLInputElement).value) })}
+                        onTouchEnd={e => saveLockPrefs({ lock_date_amount: parseInt((e.target as HTMLInputElement).value) })}
+                        style={{ width: '100%', accentColor: C.gold }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                        <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Rs {(minAmt / 100).toLocaleString('en-IN')}</span>
+                        <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Rs {(maxAmt / 100).toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                    <p style={{ margin: '0 0 16px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const, lineHeight: '14px' }}>
+                      When a couple locks, this amount is held in escrow. If they book within 7 days, it applies to your fee. If not, they get refunded.
+                    </p>
+                  </>
+                )}
+
+                {/* WhatsApp toggle */}
+                <label style={labelStyle}>Show WhatsApp on your public profile?</label>
+                <div style={{
+                  padding: '10px 12px', background: C.cream, border: `1px solid ${C.border}`,
+                  borderRadius: 8, marginBottom: 12,
+                }}>
+                  <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>
+                    If ON: any couple can WhatsApp you directly. If OFF: couples must enquire in-app first, and WhatsApp becomes available only after Lock Date.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => { setShowWhatsappPublic(true); saveLockPrefs({ show_whatsapp_public: true }); }} style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 10,
+                    background: showWhatsappPublic ? C.dark : C.cream,
+                    color: showWhatsappPublic ? C.gold : C.dark,
+                    border: `1px solid ${showWhatsappPublic ? C.dark : C.border}`,
+                    fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                  }}>Show WhatsApp</button>
+                  <button onClick={() => { setShowWhatsappPublic(false); saveLockPrefs({ show_whatsapp_public: false }); }} style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 10,
+                    background: !showWhatsappPublic ? C.dark : C.cream,
+                    color: !showWhatsappPublic ? C.gold : C.dark,
+                    border: `1px solid ${!showWhatsappPublic ? C.dark : C.border}`,
+                    fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                  }}>Keep in-app only</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Package editor modal */}
       {editingPackage && (

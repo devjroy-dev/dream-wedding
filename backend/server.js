@@ -8265,3 +8265,411 @@ app.post('/api/vendor-discover/admin/submission/finalize', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 2 + BUILD 3 — Couture, Lock Date, Muse, Events, Enquiries, Messages
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Lock Date interest (validation mechanism) ──
+app.post('/api/lock-date/interest', async (req, res) => {
+  try {
+    const { couple_id, vendor_id, wedding_date, source, explored_couture } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
+    const { data, error } = await supabase.from('lock_date_interest').insert([{
+      couple_id: couple_id || null,
+      vendor_id,
+      wedding_date: wedding_date || null,
+      source: source || 'profile',
+      explored_couture: !!explored_couture,
+    }]).select().single();
+    if (error) throw error;
+    logActivity('lock_date_interest', `Lock Date tap — vendor ${vendor_id}`);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/lock-date/admin/stats', async (req, res) => {
+  try {
+    const { data: all } = await supabase.from('lock_date_interest')
+      .select('*').order('created_at', { ascending: false }).limit(500);
+    const total = all?.length || 0;
+    const unique_couples = new Set((all || []).map(r => r.couple_id).filter(Boolean)).size;
+    const explored = (all || []).filter(r => r.explored_couture).length;
+    const byVendor = {};
+    (all || []).forEach(r => { byVendor[r.vendor_id] = (byVendor[r.vendor_id] || 0) + 1; });
+    const vendorEntries = Object.entries(byVendor).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    const vendorIds = vendorEntries.map(([id]) => id);
+    const { data: vendors } = await supabase.from('vendors').select('id, name, category, city, couture_eligible').in('id', vendorIds);
+    const vendorMap = {};
+    (vendors || []).forEach(v => { vendorMap[v.id] = v; });
+    const top_vendors = vendorEntries.map(([id, count]) => ({ vendor: vendorMap[id], count }));
+    res.json({ success: true, total, unique_couples, explored_couture: explored, top_vendors, recent: (all || []).slice(0, 50) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Couture eligibility (admin toggle) ──
+app.post('/api/couture/admin/toggle', async (req, res) => {
+  try {
+    const { vendor_id, eligible } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
+    const { error } = await supabase.from('vendors').update({
+      couture_eligible: !!eligible,
+      couture_eligible_since: eligible ? new Date().toISOString() : null,
+    }).eq('id', vendor_id);
+    if (error) throw error;
+    logActivity('couture_toggle', `Vendor ${vendor_id} couture_eligible = ${eligible}`);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.get('/api/couture/admin/eligible', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendors')
+      .select('id, name, category, city, tier, couture_eligible, couture_eligible_since, discover_listed, discover_completion_pct, rating')
+      .eq('couture_eligible', true);
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── MUSE — saved vendors (uses correct table moodboard_items) ──
+app.get('/api/couple/muse/:couple_id', async (req, res) => {
+  try {
+    const { couple_id } = req.params;
+    if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    const { data: saves } = await supabase.from('moodboard_items')
+      .select('*').eq('user_id', couple_id).not('vendor_id', 'is', null)
+      .order('created_at', { ascending: false });
+    const vendorIds = [...new Set((saves || []).map(s => s.vendor_id).filter(Boolean))];
+    let vendorMap = {};
+    if (vendorIds.length > 0) {
+      const { data: vendors } = await supabase.from('vendors')
+        .select('id, name, category, city, portfolio_images, featured_photos, starting_price, rating, review_count, vibe_tags, tier, couture_eligible, accepts_lock_date, lock_date_amount, show_whatsapp_public, discover_listed, phone')
+        .in('id', vendorIds);
+      (vendors || []).forEach(v => { vendorMap[v.id] = v; });
+    }
+    const enriched = (saves || []).map(s => ({ ...s, vendor: vendorMap[s.vendor_id] || null }));
+    res.json({ success: true, data: enriched });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/couple/muse/:save_id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('moodboard_items').delete().eq('id', req.params.save_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/couple/muse/remove', async (req, res) => {
+  try {
+    const { couple_id, vendor_id } = req.body || {};
+    if (!couple_id || !vendor_id) return res.status(400).json({ success: false, error: 'couple_id and vendor_id required' });
+    const { error } = await supabase.from('moodboard_items').delete()
+      .eq('user_id', couple_id).eq('vendor_id', vendor_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Save a vendor to Muse (also creates moodboard_items row for Plan-side Moodboard sync)
+app.post('/api/couple/muse/save', async (req, res) => {
+  try {
+    const { couple_id, vendor_id, event } = req.body || {};
+    if (!couple_id || !vendor_id) return res.status(400).json({ success: false, error: 'couple_id and vendor_id required' });
+    // Check if already saved
+    const { data: existing } = await supabase.from('moodboard_items')
+      .select('id').eq('user_id', couple_id).eq('vendor_id', vendor_id).maybeSingle();
+    if (existing) return res.json({ success: true, already_saved: true });
+    const { data: vendor } = await supabase.from('vendors').select('name, category, portfolio_images, featured_photos').eq('id', vendor_id).maybeSingle();
+    const image = vendor?.featured_photos?.[0] || vendor?.portfolio_images?.[0] || null;
+    const { data, error } = await supabase.from('moodboard_items').insert([{
+      user_id: couple_id, vendor_id, vendor_name: vendor?.name || null,
+      vendor_category: vendor?.category || null, vendor_image: image,
+      event: event || 'general', source: 'discovery',
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 3: VENDOR LOCK DATE PREFERENCES
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/api/vendor-discover/lock-prefs/:vendor_id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendors')
+      .select('id, tier, accepts_lock_date, lock_date_amount, show_whatsapp_public')
+      .eq('id', req.params.vendor_id).maybeSingle();
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.patch('/api/vendor-discover/lock-prefs/:vendor_id', async (req, res) => {
+  try {
+    const allowed = ['accepts_lock_date', 'lock_date_amount', 'show_whatsapp_public'];
+    const updates = {};
+    for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
+    // Validate lock_date_amount against tier bands
+    if (updates.lock_date_amount !== undefined) {
+      const { data: v } = await supabase.from('vendors').select('tier').eq('id', req.params.vendor_id).maybeSingle();
+      const { data: sub } = await supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', req.params.vendor_id).maybeSingle();
+      const tier = (sub?.tier || v?.tier || 'essential').toLowerCase();
+      const amt = parseInt(updates.lock_date_amount);
+      const bands = {
+        essential: [100000, 300000],   // Rs 1000-3000
+        signature: [300000, 1000000],  // Rs 3000-10000
+        prestige: [1000000, 5000000],  // Rs 10000-50000
+      };
+      const band = bands[tier] || bands.essential;
+      if (amt < band[0] || amt > band[1]) {
+        return res.status(400).json({ success: false, error: `Amount must be between Rs ${band[0]/100} and Rs ${band[1]/100} for ${tier} tier` });
+      }
+    }
+    const { data, error } = await supabase.from('vendors').update(updates).eq('id', req.params.vendor_id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 3: COUPLE EVENTS — multi-event wedding configuration
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/api/couple/events/:couple_id', async (req, res) => {
+  try {
+    const { data: events } = await supabase.from('couple_events')
+      .select('*').eq('couple_id', req.params.couple_id)
+      .order('sort_order').order('event_date');
+    const eventIds = (events || []).map(e => e.id);
+    let budgetsMap = {};
+    if (eventIds.length > 0) {
+      const { data: budgets } = await supabase.from('couple_event_category_budgets')
+        .select('*').in('event_id', eventIds);
+      (budgets || []).forEach(b => {
+        if (!budgetsMap[b.event_id]) budgetsMap[b.event_id] = [];
+        budgetsMap[b.event_id].push(b);
+      });
+    }
+    const enriched = (events || []).map(e => ({ ...e, category_budgets: budgetsMap[e.id] || [] }));
+    res.json({ success: true, data: enriched });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/couple/events', async (req, res) => {
+  try {
+    const { couple_id, event_type, event_name, event_date, event_city, budget_total, vibe_tags, guest_count_range, is_active, notes, sort_order } = req.body || {};
+    if (!couple_id || !event_type) return res.status(400).json({ success: false, error: 'couple_id and event_type required' });
+    const { data, error } = await supabase.from('couple_events').insert([{
+      couple_id, event_type,
+      event_name: event_name || null,
+      event_date: event_date || null,
+      event_city: event_city || null,
+      budget_total: budget_total || null,
+      vibe_tags: vibe_tags || [],
+      guest_count_range: guest_count_range || null,
+      is_active: is_active !== false,
+      notes: notes || null,
+      sort_order: sort_order || 0,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.patch('/api/couple/events/:id', async (req, res) => {
+  try {
+    const allowed = ['event_name', 'event_date', 'event_city', 'budget_total', 'vibe_tags', 'guest_count_range', 'is_active', 'notes', 'sort_order'];
+    const updates = { updated_at: new Date().toISOString() };
+    for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
+    const { data, error } = await supabase.from('couple_events').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/couple/events/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('couple_events').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Category-specific budgets per event
+app.post('/api/couple/events/:event_id/category-budget', async (req, res) => {
+  try {
+    const { category, budget_min, budget_max } = req.body || {};
+    if (!category) return res.status(400).json({ success: false, error: 'category required' });
+    const { data, error } = await supabase.from('couple_event_category_budgets').upsert({
+      event_id: req.params.event_id, category,
+      budget_min: budget_min || null, budget_max: budget_max || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'event_id,category' }).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/couple/events/:event_id/category-budget/:category', async (req, res) => {
+  try {
+    const { error } = await supabase.from('couple_event_category_budgets')
+      .delete().eq('event_id', req.params.event_id).eq('category', req.params.category);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 3: ENQUIRIES + MESSAGES (in-app chat between couple and vendor)
+// ══════════════════════════════════════════════════════════════════════════════
+// Couple creates an enquiry (starts a thread)
+app.post('/api/enquiries', async (req, res) => {
+  try {
+    const { couple_id, vendor_id, event_id, wedding_date, initial_message } = req.body || {};
+    if (!couple_id || !vendor_id || !initial_message) return res.status(400).json({ success: false, error: 'couple_id, vendor_id, initial_message required' });
+    // Return existing thread if active one exists
+    const { data: existing } = await supabase.from('vendor_enquiries')
+      .select('id').eq('couple_id', couple_id).eq('vendor_id', vendor_id).eq('status', 'active').maybeSingle();
+    let enquiry;
+    if (existing) {
+      enquiry = existing;
+    } else {
+      const { data, error } = await supabase.from('vendor_enquiries').insert([{
+        couple_id, vendor_id,
+        event_id: event_id || null,
+        wedding_date: wedding_date || null,
+        initial_message,
+        last_message_at: new Date().toISOString(),
+        last_message_preview: initial_message.slice(0, 120),
+        last_message_from: 'couple',
+        vendor_unread_count: 1,
+      }]).select().single();
+      if (error) throw error;
+      enquiry = data;
+    }
+    // Add first message
+    await supabase.from('vendor_enquiry_messages').insert([{
+      enquiry_id: enquiry.id, from_role: 'couple', content: initial_message,
+    }]);
+    res.json({ success: true, data: enquiry });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// List enquiries for a couple (for Messages tab)
+app.get('/api/enquiries/couple/:couple_id', async (req, res) => {
+  try {
+    const { data: enquiries } = await supabase.from('vendor_enquiries')
+      .select('*').eq('couple_id', req.params.couple_id)
+      .order('last_message_at', { ascending: false });
+    const vendorIds = [...new Set((enquiries || []).map(e => e.vendor_id))];
+    let vendorMap = {};
+    if (vendorIds.length > 0) {
+      const { data: vendors } = await supabase.from('vendors')
+        .select('id, name, category, city, portfolio_images, featured_photos, show_whatsapp_public, phone, accepts_lock_date')
+        .in('id', vendorIds);
+      (vendors || []).forEach(v => { vendorMap[v.id] = v; });
+    }
+    const enriched = (enquiries || []).map(e => ({ ...e, vendor: vendorMap[e.vendor_id] || null }));
+    res.json({ success: true, data: enriched });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// List enquiries for a vendor (for vendor dashboard future use)
+app.get('/api/enquiries/vendor/:vendor_id', async (req, res) => {
+  try {
+    const { data: enquiries } = await supabase.from('vendor_enquiries')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('last_message_at', { ascending: false });
+    res.json({ success: true, data: enquiries || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Get thread detail with all messages
+app.get('/api/enquiries/:id', async (req, res) => {
+  try {
+    const { data: enquiry } = await supabase.from('vendor_enquiries').select('*').eq('id', req.params.id).maybeSingle();
+    if (!enquiry) return res.status(404).json({ success: false, error: 'not found' });
+    const { data: messages } = await supabase.from('vendor_enquiry_messages')
+      .select('*').eq('enquiry_id', req.params.id).order('created_at');
+    const { data: vendor } = await supabase.from('vendors')
+      .select('id, name, category, city, portfolio_images, featured_photos, show_whatsapp_public, phone, accepts_lock_date, lock_date_amount')
+      .eq('id', enquiry.vendor_id).maybeSingle();
+    res.json({ success: true, data: { enquiry, messages: messages || [], vendor } });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Send a new message in a thread
+app.post('/api/enquiries/:id/messages', async (req, res) => {
+  try {
+    const { from_role, content, attachments } = req.body || {};
+    if (!from_role || !['couple', 'vendor'].includes(from_role)) return res.status(400).json({ success: false, error: 'from_role required' });
+    if (!content) return res.status(400).json({ success: false, error: 'content required' });
+    const { data: msg, error } = await supabase.from('vendor_enquiry_messages').insert([{
+      enquiry_id: req.params.id, from_role, content,
+      attachments: attachments || [],
+    }]).select().single();
+    if (error) throw error;
+    // Update enquiry
+    const preview = content.slice(0, 120);
+    const now = new Date().toISOString();
+    const updates = {
+      last_message_at: now, last_message_preview: preview, last_message_from: from_role,
+    };
+    if (from_role === 'couple') {
+      updates.vendor_unread_count = (await supabase.from('vendor_enquiries').select('vendor_unread_count').eq('id', req.params.id).maybeSingle()).data?.vendor_unread_count + 1 || 1;
+    } else {
+      updates.couple_unread_count = (await supabase.from('vendor_enquiries').select('couple_unread_count').eq('id', req.params.id).maybeSingle()).data?.couple_unread_count + 1 || 1;
+    }
+    await supabase.from('vendor_enquiries').update(updates).eq('id', req.params.id);
+    res.json({ success: true, data: msg });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Mark thread as read
+app.post('/api/enquiries/:id/read', async (req, res) => {
+  try {
+    const { role } = req.body || {};
+    const updates = role === 'couple' ? { couple_unread_count: 0 } : { vendor_unread_count: 0 };
+    await supabase.from('vendor_enquiries').update(updates).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 3: LOCK DATE HOLDS (state machine, Razorpay wiring later)
+// ══════════════════════════════════════════════════════════════════════════════
+// Create a Lock Date hold (pending — awaits payment). For now, auto-marks as 'held' without payment.
+app.post('/api/lock-date/create-hold', async (req, res) => {
+  try {
+    const { enquiry_id, couple_id, vendor_id, wedding_date, amount } = req.body || {};
+    if (!enquiry_id || !couple_id || !vendor_id || !wedding_date || !amount) {
+      return res.status(400).json({ success: false, error: 'missing required fields' });
+    }
+    const holdExpires = new Date(Date.now() + 7 * 86400000).toISOString();
+    const now = new Date().toISOString();
+    const { data, error } = await supabase.from('lock_date_holds').insert([{
+      enquiry_id, couple_id, vendor_id,
+      wedding_date, amount,
+      status: 'held',  // Placeholder: mark as held. Real integration will do 'pending' then Razorpay webhook -> 'held'
+      held_at: now,
+      expires_at: holdExpires,
+    }]).select().single();
+    if (error) throw error;
+    // Update enquiry with lock date state
+    await supabase.from('vendor_enquiries').update({
+      lock_date_paid: true, lock_date_amount: amount,
+      lock_date_paid_at: now, lock_date_expires_at: holdExpires,
+    }).eq('id', enquiry_id);
+    // System message in thread
+    await supabase.from('vendor_enquiry_messages').insert([{
+      enquiry_id, from_role: 'system',
+      content: `Lock Date deposit placed: Rs ${(amount / 100).toLocaleString('en-IN')} for wedding date ${wedding_date}. Vendor has 7 days to confirm.`,
+      system_event: 'lock_date_paid',
+    }]);
+    logActivity('lock_date_held', `Lock Date hold for vendor ${vendor_id} — Rs ${amount / 100}`);
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
