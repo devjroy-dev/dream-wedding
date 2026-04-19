@@ -9484,6 +9484,47 @@ export default function CoupleApp() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [prefillCode, setPrefillCode] = useState<string | null>(null);
 
+  // ── Back-swipe / browser back / Android hardware back ─────────────────
+  const coupleNavRef = useRef<string[]>([]);
+  const coupleBackExitRef = useRef(false);
+  const coupleBackTimer = useRef<any>(null);
+  const [backToast, setBackToast] = useState<string | null>(null);
+
+  const cNavPush = (layer: string) => {
+    coupleNavRef.current.push(layer);
+    window.history.pushState({ tdw: layer }, '');
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.history.pushState({ tdw: 'root' }, '');
+
+    const handlePop = () => {
+      const layer = coupleNavRef.current.pop();
+      if (!layer) {
+        if (coupleBackExitRef.current) return;
+        coupleBackExitRef.current = true;
+        setBackToast('Tap back again to exit');
+        if (coupleBackTimer.current) clearTimeout(coupleBackTimer.current);
+        coupleBackTimer.current = setTimeout(() => { coupleBackExitRef.current = false; setBackToast(null); }, 2000);
+        window.history.pushState({ tdw: 'root' }, '');
+        return;
+      }
+      window.history.pushState({ tdw: 'restore' }, '');
+      if (layer === 'profile') setShowProfile(false);
+      else if (layer === 'templates') setShowTemplates(false);
+      else if (layer === 'dreamai') setShowDreamAi(false);
+      else if (layer === 'feedback') setShowFeedback(false);
+      else if (layer === 'tool') setActiveTool(null);
+    };
+
+    window.addEventListener('popstate', handlePop);
+    return () => {
+      window.removeEventListener('popstate', handlePop);
+      if (coupleBackTimer.current) clearTimeout(coupleBackTimer.current);
+    };
+  }, []);
+
   // Shared data hook — declared here so all children render against the
   // same tasks state. Hook is called on every render regardless of
   // whether session exists (hook-order discipline).
@@ -9501,6 +9542,7 @@ export default function CoupleApp() {
   const navTo = (tab: MainTab, tool?: string) => {
     setActiveTab(tab);
     setActiveTool(tool || null);
+    if (tool) cNavPush('tool');
     window.scrollTo(0, 0);
   };
 
@@ -9545,7 +9587,7 @@ export default function CoupleApp() {
           mode={appMode}
           onSwitch={m => { setAppMode(m); setActiveTool(null); }}
           session={session}
-          onProfileTap={() => setShowProfile(true)}
+          onProfileTap={() => { setShowProfile(true); cNavPush('profile'); }}
         />
 
         {appMode === 'discover' && <DiscoverTeaser session={session} />}
@@ -9646,7 +9688,7 @@ export default function CoupleApp() {
             {!activeTool && activeTab === 'plan' && (
               <MyWeddingScreen
                 session={session}
-                onToolOpen={id => setActiveTool(id)}
+                onToolOpen={id => { setActiveTool(id); cNavPush('tool'); }}
                 tasks={checklist.tasks}
                 budget={checklist.budget}
                 expenses={checklist.expenses}
@@ -9687,7 +9729,7 @@ export default function CoupleApp() {
         {/* DreamAi FAB */}
         {appMode === 'plan' && !activeTool && (
           <button
-            onClick={() => setShowDreamAi(true)}
+            onClick={() => { setShowDreamAi(true); cNavPush('dreamai'); }}
             style={{
               position: 'fixed',
               bottom: 'calc(max(8px, env(safe-area-inset-bottom)) + 64px)',
@@ -9771,6 +9813,18 @@ export default function CoupleApp() {
           />
         )}
       </div>
+      {backToast && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(92px + env(safe-area-inset-bottom))', left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#2C2420', color: '#FAF6F0',
+          padding: '11px 18px', borderRadius: '50px',
+          fontSize: '12px', fontFamily: 'DM Sans, sans-serif',
+          letterSpacing: '0.3px', maxWidth: 'calc(100% - 40px)',
+          boxShadow: '0 4px 20px rgba(26,20,16,0.3)',
+          zIndex: 300, textAlign: 'center',
+        }}>{backToast}</div>
+      )}
     </div>
   );
 }

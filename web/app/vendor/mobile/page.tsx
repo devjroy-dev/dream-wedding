@@ -123,6 +123,60 @@ export default function VendorMobilePage() {
   const [showProfile, setShowProfile] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // ── Back-swipe / browser back / Android hardware back ─────────────────
+  // Uses a ref-based stack so the popstate handler always reads current state.
+  const navStackRef = useRef<string[]>([]);
+  const backExitRef = useRef(false);
+  const backTimerRef = useRef<any>(null);
+
+  // Helpers to push/pop browser history in sync with nav stack
+  const navPush = (layer: string) => {
+    navStackRef.current.push(layer);
+    window.history.pushState({ tdw: layer }, '');
+  };
+  const navReplace = (layers: string[]) => {
+    navStackRef.current = layers;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Seed one entry so first back triggers popstate instead of leaving
+    window.history.pushState({ tdw: 'root' }, '');
+
+    const handlePop = () => {
+      const layer = navStackRef.current.pop();
+      if (!layer) {
+        // At root — double-tap to exit
+        if (backExitRef.current) return; // let browser navigate away
+        backExitRef.current = true;
+        setToast('Tap back again to exit');
+        if (backTimerRef.current) clearTimeout(backTimerRef.current);
+        backTimerRef.current = setTimeout(() => { backExitRef.current = false; }, 2000);
+        window.history.pushState({ tdw: 'root' }, '');
+        return;
+      }
+      // Prevent browser from actually going back — push a replacement entry
+      window.history.pushState({ tdw: 'restore' }, '');
+
+      if (layer === 'profile') setShowProfile(false);
+      else if (layer === 'addClient') { resetAddClient(); setShowAddClient(false); }
+      else if (layer === 'invoice') setShowQuickInvoice(false);
+      else if (layer === 'block') setShowQuickBlock(false);
+      else if (layer === 'reminder') setShowQuickReminder(false);
+      else if (layer === 'todo') setShowQuickTodo(false);
+      else if (layer === 'event') setShowQuickEvent(false);
+      else if (layer === 'aiModal') setShowAiModal(false);
+      else if (layer === 'subtool') setActiveSubTool(null);
+      else if (layer.startsWith('tab:')) setActiveTab('Overview');
+    };
+
+    window.addEventListener('popstate', handlePop);
+    return () => {
+      window.removeEventListener('popstate', handlePop);
+      if (backTimerRef.current) clearTimeout(backTimerRef.current);
+    };
+  }, []);
+
   // Data
   const [bookings, setBookings] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -185,6 +239,23 @@ export default function VendorMobilePage() {
   const [showQuickTask, setShowQuickTask] = useState(false);
   const [showQuickTodo, setShowQuickTodo] = useState(false);
   const [showQuickEvent, setShowQuickEvent] = useState(false);
+
+  // ── Nav-aware openers (push to back stack when opening) ───────────────
+  const openProfile = () => { setShowProfile(true); navPush('profile'); };
+  const openAddClient = () => { setShowAddClient(true); navPush('addClient'); };
+  const openInvoice = () => { setShowQuickInvoice(true); navPush('invoice'); };
+  const openBlock = () => { setShowQuickBlock(true); navPush('block'); };
+  const openReminder = () => { setShowQuickReminder(true); navPush('reminder'); };
+  const openTodo = () => { setShowQuickTodo(true); navPush('todo'); };
+  const openEvent = () => { setShowQuickEvent(true); navPush('event'); };
+  const openAiModal = () => { setShowAiModal(true); navPush('aiModal'); };
+  const openSubTool = (sub: string) => { setActiveSubTool(sub); navPush('subtool'); };
+  const switchTab = (t: Tab) => {
+    if (t !== activeTab) {
+      setActiveTab(t);
+      if (t !== 'Overview') navPush('tab:' + t);
+    }
+  };
 
   // ── Add Client modal ───────────────────────────────────────────────────
   const [showAddClient, setShowAddClient] = useState(false);
@@ -331,7 +402,7 @@ export default function VendorMobilePage() {
           setActiveSubTool(null);
           if (m === 'Business') setActiveTab('Overview');
         }}
-        onOpenProfile={() => setShowProfile(true)}
+        onOpenProfile={() => openProfile()}
       />
 
       {/* ── BODY ── */}
@@ -352,25 +423,25 @@ export default function VendorMobilePage() {
             events={events}
             loading={loading}
             onJumpToTab={(t: Tab) => {
-              setActiveTab(t);
+              switchTab(t);
               if (typeof window !== 'undefined') {
                 const pending = localStorage.getItem('tdw_pwa_open_sub');
                 if (t === 'Power' && pending) {
-                  setActiveSubTool(pending);
+                  openSubTool(pending);
                   localStorage.removeItem('tdw_pwa_open_sub');
                 }
               }
             }}
             vendorData={vendorData}
-            onOpenAiModal={() => setShowAiModal(true)}
+            onOpenAiModal={() => openAiModal()}
             checklistDismissed={checklistDismissed}
             onDismissChecklist={dismissChecklist}
-            onAddClient={() => setShowAddClient(true)}
-            onOpenInvoice={() => setShowQuickInvoice(true)}
-            onOpenBlockDate={() => setShowQuickBlock(true)}
-            onOpenReminder={() => setShowQuickReminder(true)}
-            onOpenTodo={() => setShowQuickTodo(true)}
-            onOpenEvent={() => setShowQuickEvent(true)}
+            onAddClient={() => openAddClient()}
+            onOpenInvoice={() => openInvoice()}
+            onOpenBlockDate={() => openBlock()}
+            onOpenReminder={() => openReminder()}
+            onOpenTodo={() => openTodo()}
+            onOpenEvent={() => openEvent()}
             onToggleTodo={async (id: string, done: boolean) => {
               try {
                 const res = await fetch(`${API}/api/todos/${id}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({done}) });
@@ -390,7 +461,7 @@ export default function VendorMobilePage() {
               // When the user backs out of the clients detail view,
               // they go back to the Clients tab root (not Power).
               if (s === null) return;
-              setActiveSubTool(s);
+              openSubTool(s);
             }}
             clients={clients}
             invoices={invoices}
@@ -399,10 +470,10 @@ export default function VendorMobilePage() {
             paymentSchedules={paymentSchedules}
             todos={todos}
             events={events}
-            onAddClient={() => setShowAddClient(true)}
-            onOpenInvoice={() => setShowQuickInvoice(true)}
-            onOpenTodo={() => setShowQuickTodo(true)}
-            onOpenEvent={() => setShowQuickEvent(true)}
+            onAddClient={() => openAddClient()}
+            onOpenInvoice={() => openInvoice()}
+            onOpenTodo={() => openTodo()}
+            onOpenEvent={() => openEvent()}
             onToggleTodo={async (id: string, done: boolean) => {
               try {
                 const res = await fetch(`${API}/api/todos/${id}`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({done}) });
@@ -438,7 +509,7 @@ export default function VendorMobilePage() {
             session={session}
             tier={tier}
             activeSubTool={activeSubTool}
-            setActiveSubTool={setActiveSubTool}
+            setActiveSubTool={openSubTool}
             clients={clients}
             invoices={invoices}
             bookings={bookings}
@@ -447,11 +518,11 @@ export default function VendorMobilePage() {
             todos={todos}
             events={events}
             blockedDates={blockedDates}
-            onAddClient={() => setShowAddClient(true)}
-            onOpenInvoice={() => setShowQuickInvoice(true)}
-            onOpenTodo={() => setShowQuickTodo(true)}
-            onOpenEvent={() => setShowQuickEvent(true)}
-            onOpenBlockDate={() => setShowQuickBlock(true)}
+            onAddClient={() => openAddClient()}
+            onOpenInvoice={() => openInvoice()}
+            onOpenTodo={() => openTodo()}
+            onOpenEvent={() => openEvent()}
+            onOpenBlockDate={() => openBlock()}
             onRefreshCalendar={() => {
               if (!session?.vendorId) return;
               fetch(`${API}/api/availability/${session.vendorId}`).then(r => r.json()).then(d => {
@@ -490,12 +561,11 @@ export default function VendorMobilePage() {
           active={activeTab}
           pending={pendingBookings.length}
           onChange={(t) => {
-            setActiveTab(t);
-            // Respect a pending sub-tool hint set by a Quick Action (e.g. "Expense")
+            switchTab(t);
             if (typeof window !== 'undefined') {
               const pending = localStorage.getItem('tdw_pwa_open_sub');
               if (t === 'Power' && pending) {
-                setActiveSubTool(pending);
+                openSubTool(pending);
                 localStorage.removeItem('tdw_pwa_open_sub');
               } else {
                 setActiveSubTool(null);
@@ -4050,6 +4120,15 @@ function TeamPanel({ session, vendorName, bookings, todos, clients }: {
   clients: any[];
 }) {
   const [active, setActive] = useState<TeamCard>('landing');
+
+  // Back-swipe for team sub-panels
+  useEffect(() => {
+    if (typeof window === 'undefined' || active === 'landing') return;
+    window.history.pushState({ tdw: 'team-panel' }, '');
+    const handlePop = () => { setActive('landing'); };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, [active]);
   const [members, setMembers] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
