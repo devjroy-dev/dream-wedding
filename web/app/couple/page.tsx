@@ -180,7 +180,7 @@ function getGreetingCopy(name: string, days: number): { line1: string; line2: st
 // ─────────────────────────────────────────────────────────────
 
 const TOOLS = [
-  { id: 'checklist', label: 'Checklist',   Icon: CheckSquare, tool: 'checklist', tagline: 'Tasks across all your events'       },
+  { id: 'checklist', label: 'Journey Checklist',   Icon: CheckSquare, tool: 'checklist', tagline: 'Tasks across all your events'       },
   { id: 'budget',    label: 'Budget',       Icon: PieChart,    tool: 'budget',    tagline: 'Envelopes, expenses, Payment Trail' },
   { id: 'guests',    label: 'Guest Ledger', Icon: Users,       tool: 'guests',    tagline: "Who's coming to what"               },
   { id: 'moodboard', label: 'Moodboard',    Icon: Heart,       tool: 'moodboard', tagline: 'Per-event inspiration boards'       },
@@ -1696,13 +1696,20 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     return (localStorage.getItem('tdw_discover_layer') as Layer) || 'feed';
   });
 
-  // ── Browse mode ──
-  type BrowseMode = 'scroll' | 'carousel' | 'swipe';
-  const [browseMode, setBrowseMode] = useState<BrowseMode>(() => {
-    if (typeof window === 'undefined') return 'scroll';
-    return (localStorage.getItem('tdw_discover_mode') as BrowseMode) || 'scroll';
+  // ── Browse mode (simplified) ──
+  // Blind mode OFF: vertical swipe between vendors + horizontal image carousel + double-tap save
+  // Blind mode ON:  right-swipe = save, left-swipe = pass, vertical between vendors (gamified)
+  const [blindMode, setBlindMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('tdw_discover_blind') === '1';
   });
-  const [blindMode, setBlindMode] = useState(false);
+
+  // Image carousel state — horizontal swipe cycles images of CURRENT vendor (only in Revealed mode)
+  const [imageIndex, setImageIndex] = useState(0);
+  const imageIndexRef = useRef(0);
+
+  // Heart animation on double-tap (Revealed mode)
+  const [heartPulse, setHeartPulse] = useState(false);
 
   // ── Feed filters (active session filters) ──
   const [feedCategory, setFeedCategory] = useState<string>('');
@@ -2115,31 +2122,28 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     }
   }, [currentIndex, vendors]);
 
-  // ── Mode switch ──
-  const cycleMode = () => {
-    const modes: BrowseMode[] = ['scroll', 'carousel', 'swipe'];
-    const next = modes[(modes.indexOf(browseMode) + 1) % 3];
-    setBrowseMode(next);
-    localStorage.setItem('tdw_discover_mode', next);
-    // Reset gesture state on mode change
+  // ── Blind mode toggle ──
+  const toggleBlindMode = () => {
+    const next = !blindMode;
+    setBlindMode(next);
+    localStorage.setItem('tdw_discover_blind', next ? '1' : '0');
     setGestureOffset({ x: 0, y: 0 });
     setIsGesturing(false);
+    setImageIndex(0);
+    imageIndexRef.current = 0;
   };
 
-  const modeIcon = browseMode === 'scroll' ? '↕' : browseMode === 'carousel' ? '↔' : '↗';
-  const modeLabel = browseMode === 'scroll' ? 'Scroll' : browseMode === 'carousel' ? 'Carousel' : 'Swipe';
-
-  // ── Save / skip ──
+  // ── Save to Muse (correct endpoint) ──
   const handleSave = (vendor: any) => {
     if (!vendor || savedIds.has(vendor.id)) return;
     setSavedIds(prev => new Set(prev).add(vendor.id));
     if (session?.id) {
-      fetch(`${API}/api/couple/moodboard`, {
+      fetch(`${API}/api/couple/muse/save`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ couple_id: session.id, vendor_id: vendor.id, vendor_name: vendor.name, vendor_category: vendor.category, vendor_image: vendor.portfolio_images?.[0] || '', event: 'general' }),
+        body: JSON.stringify({ couple_id: session.id, vendor_id: vendor.id, event: 'general' }),
       }).catch(() => {});
     }
-    showSaveToast(blindMode ? 'Saved to moodboard' : `${vendor.name} saved`);
+    showSaveToast(blindMode ? 'Saved' : `${vendor.name} saved to Muse`);
   };
 
   const handleSkip = (vendor: any) => {
@@ -2178,11 +2182,20 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     saveToastTimer.current = setTimeout(() => { setSaveToast(null); setUndoVendor(null); }, 3000);
   };
 
-  // ── Double-tap handler ──
+  // ── Double-tap handler — Revealed: save + heart pulse. Blind: reveals vendor.
   const handleCardTap = (vendor: any) => {
     const now = Date.now();
     if (now - lastTapTime.current < 300) {
-      handleSave(vendor);
+      // Double tap detected
+      if (blindMode) {
+        // In blind mode, double-tap reveals (handled elsewhere or just saves)
+        handleSave(vendor);
+      } else {
+        // Revealed mode: save + heart animation
+        handleSave(vendor);
+        setHeartPulse(true);
+        setTimeout(() => setHeartPulse(false), 700);
+      }
       lastTapTime.current = 0;
     } else {
       lastTapTime.current = now;
@@ -2200,19 +2213,22 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     const dy = e.touches[0].clientY - gestureStart.current.y;
     gestureDelta.current = { x: dx, y: dy };
 
-    if (browseMode === 'scroll') {
-      // Vertical only — ignore horizontal movement once vertical intent is clear
-      if (Math.abs(dy) > 10) {
+    if (blindMode) {
+      // Blind mode: horizontal swipe gestures (save/pass) — vertical falls through to page scroll
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+        setIsGesturing(true);
+        setGestureOffset({ x: dx, y: 0 });
+      } else if (Math.abs(dy) > 10) {
         setIsGesturing(true);
         setGestureOffset({ x: 0, y: dy });
       }
-    } else if (browseMode === 'carousel') {
-      if (Math.abs(dx) > 10) {
+    } else {
+      // Revealed mode: vertical swipe between vendors, horizontal cycles images of current vendor
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
         setIsGesturing(true);
-        setGestureOffset({ x: dx, y: 0 });
-      }
-    } else if (browseMode === 'swipe') {
-      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+        setGestureOffset({ x: 0, y: dy });
+      } else if (Math.abs(dx) > 10) {
+        // Horizontal = image carousel within current vendor (NOT between vendors)
         setIsGesturing(true);
         setGestureOffset({ x: dx, y: 0 });
       }
@@ -2222,16 +2238,33 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   const handleCardTouchEnd = () => {
     const { x: dx, y: dy } = gestureDelta.current;
     const threshold = 80;
+    const v = vendors[currentIndex];
 
-    if (browseMode === 'scroll') {
-      if (dy < -threshold) goNext();
-      else if (dy > threshold) goPrev();
-    } else if (browseMode === 'carousel') {
-      if (dx < -threshold) goNext();
-      else if (dx > threshold) goPrev();
-    } else if (browseMode === 'swipe') {
-      if (dx > threshold) { handleSave(vendors[currentIndex]); goNext(); }
-      else if (dx < -threshold) { handleSkip(vendors[currentIndex]); }
+    if (blindMode) {
+      // Blind: right-swipe = save + advance, left-swipe = pass + advance, vertical = prev/next
+      if (Math.abs(dx) > Math.abs(dy)) {
+        if (dx > threshold) { if (v) handleSave(v); goNext(); }
+        else if (dx < -threshold) { if (v) handleSkip(v); }
+      } else {
+        if (dy < -threshold) goNext();
+        else if (dy > threshold) goPrev();
+      }
+    } else {
+      // Revealed: vertical = prev/next vendor, horizontal = cycle images within current vendor
+      if (Math.abs(dy) > Math.abs(dx)) {
+        if (dy < -threshold) { goNext(); setImageIndex(0); imageIndexRef.current = 0; }
+        else if (dy > threshold) { goPrev(); setImageIndex(0); imageIndexRef.current = 0; }
+      } else if (Math.abs(dx) > threshold) {
+        const imgs = v?.featured_photos?.length > 0 ? v.featured_photos : v?.portfolio_images;
+        if (Array.isArray(imgs) && imgs.length > 1) {
+          const len = imgs.length;
+          const next = dx < 0
+            ? Math.min(len - 1, imageIndexRef.current + 1)  // swipe left → next image
+            : Math.max(0, imageIndexRef.current - 1);        // swipe right → prev image
+          setImageIndex(next);
+          imageIndexRef.current = next;
+        }
+      }
     }
 
     // Reset
@@ -2470,9 +2503,20 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ══════════════════════════════════════════════════════════════
   // HELPERS FOR FEED RENDER
   // ══════════════════════════════════════════════════════════════
-  const getHeroImage = (v: any) => {
+  const getHeroImage = (v: any, useImageIndex = false) => {
     const imgs = v?.featured_photos?.length > 0 ? v.featured_photos : v?.portfolio_images;
-    return imgs?.[0] || '';
+    if (!Array.isArray(imgs) || imgs.length === 0) return '';
+    if (useImageIndex) {
+      const idx = Math.min(imageIndex, imgs.length - 1);
+      return imgs[idx] || imgs[0];
+    }
+    return imgs[0];
+  };
+
+  // Get full image array of current vendor (for dot indicator)
+  const getImages = (v: any): string[] => {
+    const imgs = v?.featured_photos?.length > 0 ? v.featured_photos : v?.portfolio_images;
+    return Array.isArray(imgs) ? imgs : [];
   };
 
   const vendor = vendors[currentIndex];
@@ -2491,7 +2535,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
       <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
 
         {/* Hero / greeting */}
-        <div style={{ padding: '24px 20px 12px' }}>
+        <div style={{ padding: 'calc(max(24px, env(safe-area-inset-top)) + 56px) 20px 12px' }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
             Discover
           </p>
@@ -2679,7 +2723,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
 
     return (<>
       <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
-        <div style={{ padding: '24px 20px 12px' }}>
+        <div style={{ padding: 'calc(max(24px, env(safe-area-inset-top)) + 56px) 20px 12px' }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
             Your Muse
           </p>
@@ -2806,7 +2850,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   if (layer === 'messages') {
     return (<>
       <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
-        <div style={{ padding: '24px 20px 12px' }}>
+        <div style={{ padding: 'calc(max(24px, env(safe-area-inset-top)) + 56px) 20px 12px' }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
             Messages
           </p>
@@ -3030,7 +3074,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
 
     return (<>
       <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
-        <div style={{ padding: '24px 20px 12px' }}>
+        <div style={{ padding: 'calc(max(24px, env(safe-area-inset-top)) + 56px) 20px 12px' }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
             Customize
           </p>
@@ -3182,8 +3226,8 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     </>);
   }
 
-  // End of stack for swipe mode
-  if (currentIndex >= vendors.length && browseMode === 'swipe') {
+  // End of stack for blind mode
+  if (currentIndex >= vendors.length && blindMode) {
     return (
       <div style={{ height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 28px', textAlign: 'center' }}>
         <Check size={40} color={C.gold} />
@@ -3207,11 +3251,12 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
     const isSaved = savedIds.has(v.id);
     return (
       <>
-        <img src={cdnUrl(getHeroImage(v), "hero")} alt={blindMode ? '' : v.name}
+        <img src={cdnUrl(getHeroImage(v, isActive), "hero")} alt={blindMode ? '' : v.name}
           loading="eager" decoding="async"
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
             objectFit: 'cover', objectPosition: 'center',
+            transition: isActive && !blindMode ? 'opacity 0.2s' : 'none',
           }}
         />
         {/* Gradient overlay */}
@@ -3239,7 +3284,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
               </span>
 
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={e => { e.stopPropagation(); setBlindMode(!blindMode); }} style={{
+                <button onClick={e => { e.stopPropagation(); toggleBlindMode(); }} style={{
                   background: blindMode ? C.gold : 'rgba(0,0,0,0.45)', border: 'none',
                   borderRadius: 20, padding: '6px 11px', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 4,
@@ -3247,16 +3292,6 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 }}>
                   {blindMode ? <EyeOff size={12} color={C.dark} /> : <Eye size={12} color="#fff" />}
                   <span style={{ fontSize: 10, color: blindMode ? C.dark : '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Blind</span>
-                </button>
-
-                <button onClick={e => { e.stopPropagation(); cycleMode(); }} style={{
-                  background: 'rgba(0,0,0,0.45)', border: 'none',
-                  borderRadius: 20, padding: '6px 11px', cursor: 'pointer',
-                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-                  display: 'flex', alignItems: 'center', gap: 4,
-                }}>
-                  <span style={{ fontSize: 11, color: '#fff' }}>{modeIcon}</span>
-                  <span style={{ fontSize: 10, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{modeLabel}</span>
                 </button>
 
                 <button onClick={e => { e.stopPropagation(); setShowFilter(true); cNavPush('discover-filter'); }} style={{
@@ -3271,7 +3306,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
             </div>
 
             {/* Swipe mode overlays */}
-            {browseMode === 'swipe' && gestureOffset.x > 50 && (
+            {blindMode && gestureOffset.x > 50 && (
               <div style={{
                 position: 'absolute', top: '40%', left: 24, zIndex: 10,
                 background: 'rgba(201,168,76,0.9)', borderRadius: 12, padding: '8px 20px',
@@ -3280,7 +3315,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 <span style={{ fontSize: 22, fontWeight: 600, color: C.dark, fontFamily: 'Playfair Display, serif', letterSpacing: 2 }}>SAVE</span>
               </div>
             )}
-            {browseMode === 'swipe' && gestureOffset.x < -50 && (
+            {blindMode && gestureOffset.x < -50 && (
               <div style={{
                 position: 'absolute', top: '40%', right: 24, zIndex: 10,
                 background: 'rgba(198,87,87,0.9)', borderRadius: 12, padding: '8px 20px',
@@ -3356,13 +3391,58 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
             </button>
           )}
         </div>
+
+        {/* Image carousel dots — only in Revealed mode, only if vendor has >1 image */}
+        {isActive && !blindMode && (() => {
+          const imgs = getImages(v);
+          if (imgs.length <= 1) return null;
+          return (
+            <div style={{
+              position: 'absolute' as const, top: 'calc(max(12px, env(safe-area-inset-top)) + 20px)',
+              left: '50%', transform: 'translateX(-50%)',
+              display: 'flex' as const, gap: 4, zIndex: 6, pointerEvents: 'none' as const,
+            }}>
+              {imgs.map((_, i) => (
+                <div key={i} style={{
+                  width: i === imageIndex ? 16 : 4,
+                  height: 4, borderRadius: 2,
+                  background: i === imageIndex ? '#fff' : 'rgba(255,255,255,0.5)',
+                  transition: 'width 0.2s, background 0.2s',
+                }} />
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Heart pulse animation — appears briefly on double-tap save */}
+        {isActive && heartPulse && (
+          <div style={{
+            position: 'absolute' as const, inset: 0,
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            pointerEvents: 'none' as const, zIndex: 7,
+          }}>
+            <Heart size={120} fill={C.gold} color={C.gold}
+              style={{
+                filter: 'drop-shadow(0 4px 24px rgba(0,0,0,0.4))',
+                animation: 'heartPulse 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards',
+              }} />
+            <style>{`
+              @keyframes heartPulse {
+                0%   { transform: scale(0.3); opacity: 0; }
+                30%  { transform: scale(1.15); opacity: 1; }
+                60%  { transform: scale(1); opacity: 1; }
+                100% { transform: scale(1.2); opacity: 0; }
+              }
+            `}</style>
+          </div>
+        )}
       </>
     );
   };
 
   // ── Swipe mode action buttons ──
   const renderSwipeActions = () => {
-    if (browseMode !== 'swipe' || !vendor) return null;
+    if (!blindMode || !vendor) return null;
     return (
       <div style={{
         position: 'absolute', bottom: 'max(100px, calc(env(safe-area-inset-bottom) + 90px))',
@@ -3403,18 +3483,18 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   let nextTransform = 'translate3d(0,100%,0)';
   let prevTransform = 'translate3d(0,-100%,0)';
 
-  if (browseMode === 'scroll') {
-    currentTransform = `translate3d(0, ${gestureOffset.y}px, 0)`;
-    nextTransform = `translate3d(0, calc(100% + ${gestureOffset.y}px), 0)`;
-    prevTransform = `translate3d(0, calc(-100% + ${gestureOffset.y}px), 0)`;
-  } else if (browseMode === 'carousel') {
-    currentTransform = `translate3d(${gestureOffset.x}px, 0, 0)`;
-    nextTransform = `translate3d(calc(100% + ${gestureOffset.x}px), 0, 0)`;
-    prevTransform = `translate3d(calc(-100% + ${gestureOffset.x}px), 0, 0)`;
-  } else if (browseMode === 'swipe') {
+  if (blindMode) {
+    // Blind: horizontal swipe with rotation (Tinder-style)
     const rotate = gestureOffset.x * 0.03;
-    currentTransform = `translate3d(${gestureOffset.x}px, 0, 0) rotate(${rotate}deg)`;
+    currentTransform = `translate3d(${gestureOffset.x}px, ${gestureOffset.y}px, 0) rotate(${rotate}deg)`;
     nextTransform = 'scale(0.95) translate3d(0,0,0)';
+  } else {
+    // Revealed: vertical between vendors — horizontal gesture never moves the card (just the image carousel inside)
+    // Use gestureOffset.y only for vertical; horizontal doesn't translate the card
+    const usedY = Math.abs(gestureOffset.y) > Math.abs(gestureOffset.x) ? gestureOffset.y : 0;
+    currentTransform = `translate3d(0, ${usedY}px, 0)`;
+    nextTransform = `translate3d(0, calc(100% + ${usedY}px), 0)`;
+    prevTransform = `translate3d(0, calc(-100% + ${usedY}px), 0)`;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -3422,6 +3502,8 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
   // ══════════════════════════════════════════════════════════════
   // DISCOVER BOTTOM NAV — replaces global nav while in Discover mode
   function renderDiscoverNav() {
+    // Hide when profile is visible (bug #2: profile sticky bar was covered by nav)
+    if (profileVisible) return null;
     const activeTab: DiscoverTab =
       (layer === 'muse') ? 'muse'
       : (layer === 'messages' || layer === 'message-thread') ? 'messages'
@@ -3637,7 +3719,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
         onClick={() => vendor && handleCardTap(vendor)}
       >
         {/* Previous card (pre-rendered for back-gesture visual only — scroll/carousel) */}
-        {prevVendor && browseMode !== 'swipe' && (
+        {prevVendor && !blindMode && (
           <div style={{
             position: 'absolute', inset: 0,
             transform: prevTransform,
@@ -3654,7 +3736,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
             position: 'absolute', inset: 0,
             transform: nextTransform,
             transition: isGesturing ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
-            opacity: browseMode === 'swipe' ? 0.5 : 1,
+            opacity: blindMode ? 0.5 : 1,
             willChange: isGesturing ? 'transform' : 'auto',
           }}>
             {renderCardContent(nextVendor, false)}
@@ -3845,66 +3927,47 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                 position: 'absolute', bottom: 0, left: 0, right: 0,
                 maxWidth: 480, margin: '0 auto',
                 background: C.cream, borderRadius: '20px 20px 0 0',
-                height: '94vh',
+                height: '65vh',
                 transform: profileVisible ? `translateY(${profileOffset}px)` : 'translateY(100%)',
                 transition: profileOffset === 0 ? 'transform 0.3s ease' : 'none',
                 overflow: 'auto',
                 overscrollBehavior: 'contain' as const,
+                touchAction: 'pan-y' as const,
                 paddingBottom: 80,
+                boxShadow: '0 -8px 32px rgba(0,0,0,0.18)',
               }}>
               <div style={{ padding: '10px 0 4px', textAlign: 'center' as const, position: 'sticky' as const, top: 0, background: C.cream, borderRadius: '20px 20px 0 0', zIndex: 10 }}>
                 <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
               </div>
 
-              {/* 1. HERO */}
-              <div style={{ position: 'relative' as const, height: 420, background: C.dark }}>
-                {heroImages.length > 0 && (
-                  <img src={cdnUrl(heroImages[profileHeroIndex], 'portrait')} alt={v.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' as const, objectPosition: 'center' }} />
-                )}
-                <div style={{ position: 'absolute' as const, bottom: 0, left: 0, right: 0, height: '50%', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }} />
-                {heroImages.length > 1 && (
-                  <div style={{ position: 'absolute' as const, top: 16, left: 16, right: 16, display: 'flex', gap: 4 }}>
-                    {heroImages.slice(0, 8).map((_: any, i: number) => (
-                      <div key={i} style={{
-                        flex: 1, height: 2, borderRadius: 1,
-                        background: i === profileHeroIndex ? '#fff' : 'rgba(255,255,255,0.35)',
-                        transition: 'background 0.3s',
-                      }} />
-                    ))}
+              {/* 1. HEADER (info-only, no images — Feed already shows images) */}
+              <div style={{
+                position: 'relative' as const, padding: '8px 20px 16px',
+                background: C.cream, borderBottom: `1px solid ${C.border}`,
+              }}>
+                <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'flex-start' as const, gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h2 style={{ margin: '0 0 2px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, lineHeight: '28px' }}>{v.name}</h2>
+                    <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      {v.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} · {v.city}
+                    </p>
                   </div>
-                )}
-                {heroImages.length > 1 && (
-                  <>
-                    <button onClick={() => setProfileHeroIndex(i => Math.max(0, i - 1))}
-                      style={{ position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: '40%', background: 'transparent', border: 'none', cursor: 'pointer' }} />
-                    <button onClick={() => setProfileHeroIndex(i => Math.min(heroImages.length - 1, i + 1))}
-                      style={{ position: 'absolute' as const, right: 0, top: 0, bottom: 0, width: '40%', background: 'transparent', border: 'none', cursor: 'pointer' }} />
-                  </>
-                )}
-                <div style={{ position: 'absolute' as const, top: 28, right: 16, display: 'flex', gap: 6, flexDirection: 'column' as const, alignItems: 'flex-end' }}>
-                  {coutureEligible && (
-                    <div style={{
-                      background: 'rgba(44,36,32,0.85)', borderRadius: 6,
-                      padding: '4px 10px', fontSize: 10, color: C.gold,
-                      fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
-                      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-                    }}>COUTURE</div>
-                  )}
-                  {v.is_verified && (
-                    <div style={{
-                      background: 'rgba(201,168,76,0.92)', borderRadius: 6,
-                      padding: '4px 10px', fontSize: 10, color: C.dark,
-                      fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px',
-                      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-                    }}>VERIFIED</div>
-                  )}
-                </div>
-                <div style={{ position: 'absolute' as const, bottom: 18, left: 20, right: 20 }}>
-                  <h2 style={{ margin: '0 0 4px', fontSize: 26, color: '#fff', fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '32px' }}>{v.name}</h2>
-                  <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.75)', fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-                    {v.category?.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())} · {v.city}
-                  </p>
+                  <div style={{ display: 'flex' as const, gap: 4, flexDirection: 'column' as const, alignItems: 'flex-end' as const, flexShrink: 0 }}>
+                    {coutureEligible && (
+                      <div style={{
+                        background: C.dark, borderRadius: 4,
+                        padding: '3px 8px', fontSize: 9, color: C.gold,
+                        fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px',
+                      }}>COUTURE</div>
+                    )}
+                    {v.is_verified && (
+                      <div style={{
+                        background: C.gold, borderRadius: 4,
+                        padding: '3px 8px', fontSize: 9, color: C.dark,
+                        fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px',
+                      }}>VERIFIED</div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -4016,36 +4079,7 @@ function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSe
                   </div>
                 )}
 
-                {/* 6. PORTFOLIO */}
-                {profileAlbums.length > 0 ? (
-                  <div style={{ marginBottom: 22 }}>
-                    <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Past weddings</p>
-                    {profileAlbums.map((alb: any) => (
-                      <div key={alb.id} style={{ marginBottom: 16 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                          <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{alb.title}</p>
-                          {alb.city && <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>{alb.city}{alb.event_date ? ` · ${new Date(alb.event_date).getFullYear()}` : ''}</p>}
-                        </div>
-                        {alb.images && alb.images.length > 0 && (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
-                            {alb.images.slice(0, 9).map((img: string, i: number) => (
-                              <div key={i} style={{ aspectRatio: '1', background: `url(${cdnUrl(img, 'grid')}) center/cover` }} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : v.portfolio_images?.length > 0 && (
-                  <div style={{ marginBottom: 22 }}>
-                    <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Portfolio</p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
-                      {v.portfolio_images.slice(0, 12).map((img: string, i: number) => (
-                        <div key={i} style={{ aspectRatio: '1', background: `url(${cdnUrl(img, 'grid')}) center/cover` }} />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* 6. PORTFOLIO — REMOVED (images already shown in Feed horizontal carousel) */}
 
                 {/* 7. DETAILS */}
                 <div style={{ marginBottom: 22 }}>
@@ -4907,7 +4941,7 @@ function ChecklistTool({
             <ChevronRight size={16} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
           </button>
           <div>
-            <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>Checklist</p>
+            <p style={{ margin: 0, fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif' }}>Journey Checklist</p>
             <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
               {tasks.filter(t => t.is_complete).length} of {tasks.length} done
             </p>
@@ -12366,7 +12400,7 @@ export default function CoupleApp() {
             padding: 'max(8px, env(safe-area-inset-bottom)) 24px 8px',
             zIndex: 50, maxWidth: 480, margin: '0 auto',
           }}>
-            <button onClick={() => setActiveTool(null)} style={{
+            <button onClick={() => window.history.back()} style={{
               display: 'flex', alignItems: 'center', gap: 6,
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
             }}>
