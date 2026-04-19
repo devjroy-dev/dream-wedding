@@ -8284,6 +8284,9 @@ app.post('/api/lock-date/interest', async (req, res) => {
     }]).select().single();
     if (error) throw error;
     logActivity('lock_date_interest', `Lock Date tap — vendor ${vendor_id}`);
+    // Part D: bump vendor analytics + activity log
+    bumpVendorMetric(vendor_id, 'lock_interests').catch(() => {});
+    logVendorActivity(vendor_id, 'lock_date_interest', 'A couple tapped Lock Date on your profile').catch(() => {});
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -8392,6 +8395,9 @@ app.post('/api/couple/muse/save', async (req, res) => {
       event: event || 'general', source: 'discovery',
     }]).select().single();
     if (error) throw error;
+    // Part D: bump vendor analytics + activity log
+    bumpVendorMetric(vendor_id, 'saves').catch(() => {});
+    logVendorActivity(vendor_id, 'saved_to_muse', 'A couple saved you to their Muse').catch(() => {});
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -8554,6 +8560,11 @@ app.post('/api/enquiries', async (req, res) => {
     await supabase.from('vendor_enquiry_messages').insert([{
       enquiry_id: enquiry.id, from_role: 'couple', content: initial_message,
     }]);
+    // Part D: bump vendor analytics + activity log (only for NEW threads, not reopened)
+    if (!existing) {
+      bumpVendorMetric(vendor_id, 'enquiries').catch(() => {});
+      logVendorActivity(vendor_id, 'enquiry_received', 'New enquiry from a couple', { enquiry_id: enquiry.id }).catch(() => {});
+    }
     res.json({ success: true, data: enquiry });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -8671,5 +8682,480 @@ app.post('/api/lock-date/create-hold', async (req, res) => {
     }]);
     logActivity('lock_date_held', `Lock Date hold for vendor ${vendor_id} — Rs ${amount / 100}`);
     res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUILD 4 — Vendor Discovery mode: trial state, Image Hub, Offers, Boosts,
+//          Featured applications, Analytics, Activity feed
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Helper: compute trial deadline for a tier
+function computeTrialDeadline(startedAt, tier) {
+  if (!startedAt) return null;
+  const t = (tier || 'essential').toLowerCase();
+  if (t === 'prestige') return null; // no cap
+  const days = t === 'signature' ? 10 : 7;
+  const d = new Date(startedAt);
+  d.setDate(d.getDate() + days);
+  return d.toISOString();
+}
+
+// ── Discovery mode state ────────────────────────────────────────────────
+app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
+  try {
+    const { data: v } = await supabase.from('vendors')
+      .select('id, tier, discovery_basics_completed_at, discovery_trial_started_at, discovery_trial_deadline, discovery_trial_status, discover_completion_pct, discover_listed, starting_price, response_time_commitment, phone, email, category, city, instagram, about')
+      .eq('id', req.params.vendor_id).maybeSingle();
+    if (!v) return res.status(404).json({ success: false, error: 'vendor not found' });
+
+    // Determine what basics still need to be filled
+    const missingBasics = [];
+    if (!v.phone) missingBasics.push('phone');
+    if (!v.email) missingBasics.push('email');
+    if (!v.category) missingBasics.push('category');
+    if (!v.city) missingBasics.push('city');
+    if (!v.instagram) missingBasics.push('instagram');
+    if (!v.starting_price) missingBasics.push('starting_price');
+    if (!v.response_time_commitment) missingBasics.push('response_time_commitment');
+
+    const { count: imgCount } = await supabase.from('vendor_images')
+      .select('id', { count: 'exact', head: true }).eq('vendor_id', v.id);
+    if ((imgCount || 0) < 3) missingBasics.push('three_photos');
+
+    // Is trial expired?
+    const deadline = v.discovery_trial_deadline ? new Date(v.discovery_trial_deadline) : null;
+    const now = new Date();
+    let status = v.discovery_trial_status || 'not_started';
+    if (status === 'active' && deadline && deadline < now && (v.discover_completion_pct || 0) < 100) {
+      status = 'paused';
+      await supabase.from('vendors').update({ discovery_trial_status: 'paused' }).eq('id', v.id);
+    }
+
+    const daysLeft = deadline ? Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / 86400000)) : null;
+
+    res.json({
+      success: true,
+      data: {
+        vendor_id: v.id,
+        tier: v.tier,
+        basics_completed: !!v.discovery_basics_completed_at,
+        basics_completed_at: v.discovery_basics_completed_at,
+        missing_basics: missingBasics,
+        trial_started_at: v.discovery_trial_started_at,
+        trial_deadline: v.discovery_trial_deadline,
+        trial_status: status,
+        days_left: daysLeft,
+        completion_pct: v.discover_completion_pct || 0,
+        discover_listed: v.discover_listed,
+      },
+    });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Submit onboarding wall (first-time Discovery entry)
+app.post('/api/vendor-discover/onboard/:vendor_id', async (req, res) => {
+  try {
+    const { phone, email, category, city, instagram, starting_price, response_time_commitment } = req.body || {};
+    const { data: v } = await supabase.from('vendors').select('id, tier').eq('id', req.params.vendor_id).maybeSingle();
+    if (!v) return res.status(404).json({ success: false, error: 'vendor not found' });
+
+    const updates = { discovery_basics_completed_at: new Date().toISOString() };
+    if (phone) updates.phone = phone;
+    if (email) updates.email = email;
+    if (category) updates.category = category;
+    if (city) updates.city = city;
+    if (instagram) updates.instagram = instagram;
+    if (starting_price) updates.starting_price = starting_price;
+    if (response_time_commitment) updates.response_time_commitment = response_time_commitment;
+
+    // If trial not started, start it now
+    const { data: cur } = await supabase.from('vendors').select('discovery_trial_started_at, tier').eq('id', v.id).maybeSingle();
+    if (!cur?.discovery_trial_started_at) {
+      const now = new Date().toISOString();
+      updates.discovery_trial_started_at = now;
+      updates.discovery_trial_deadline = computeTrialDeadline(now, cur?.tier || v.tier);
+      updates.discovery_trial_status = (cur?.tier || v.tier || '').toLowerCase() === 'prestige' ? 'exempt' : 'active';
+    }
+
+    const { error } = await supabase.from('vendors').update(updates).eq('id', v.id);
+    if (error) throw error;
+
+    logActivity('vendor_discovery_onboarded', `Vendor ${v.id} completed Discovery onboarding`);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Vendor Images (Image Hub CRUD) ──────────────────────────────────────
+app.get('/api/vendor-images/:vendor_id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendor_images')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('order_index').order('uploaded_at', { ascending: false });
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/vendor-images', async (req, res) => {
+  try {
+    const { vendor_id, url, width, height, file_size, tags, album_title, album_city, album_date, caption } = req.body || {};
+    if (!vendor_id || !url) return res.status(400).json({ success: false, error: 'vendor_id and url required' });
+    const { data, error } = await supabase.from('vendor_images').insert([{
+      vendor_id, url,
+      width: width || null, height: height || null, file_size: file_size || null,
+      tags: tags || [],
+      album_title: album_title || null, album_city: album_city || null, album_date: album_date || null,
+      caption: caption || null,
+    }]).select().single();
+    if (error) throw error;
+    await syncVendorImagesToVendorColumns(vendor_id);
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.patch('/api/vendor-images/:id', async (req, res) => {
+  try {
+    const allowed = ['tags', 'album_title', 'album_city', 'album_date', 'caption', 'order_index'];
+    const updates = {};
+    for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
+    const { data, error } = await supabase.from('vendor_images').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    if (data?.vendor_id) await syncVendorImagesToVendorColumns(data.vendor_id);
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/vendor-images/:id', async (req, res) => {
+  try {
+    // Get vendor_id before delete for sync
+    const { data: img } = await supabase.from('vendor_images').select('vendor_id').eq('id', req.params.id).maybeSingle();
+    const { error } = await supabase.from('vendor_images').delete().eq('id', req.params.id);
+    if (error) throw error;
+    if (img?.vendor_id) await syncVendorImagesToVendorColumns(img.vendor_id);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Bulk tag update — for bulk-select-retag UX
+app.post('/api/vendor-images/bulk-tag', async (req, res) => {
+  try {
+    const { image_ids, add_tags, remove_tags } = req.body || {};
+    if (!Array.isArray(image_ids) || image_ids.length === 0) return res.status(400).json({ success: false, error: 'image_ids required' });
+    const { data: existing } = await supabase.from('vendor_images').select('id, vendor_id, tags').in('id', image_ids);
+    const vendorIds = new Set();
+    for (const img of (existing || [])) {
+      vendorIds.add(img.vendor_id);
+      const currentTags = Array.isArray(img.tags) ? img.tags : [];
+      let nextTags = [...currentTags];
+      if (Array.isArray(add_tags)) {
+        for (const t of add_tags) if (!nextTags.includes(t)) nextTags.push(t);
+      }
+      if (Array.isArray(remove_tags)) {
+        nextTags = nextTags.filter(t => !remove_tags.includes(t));
+      }
+      await supabase.from('vendor_images').update({ tags: nextTags }).eq('id', img.id);
+    }
+    // Sync all affected vendors
+    for (const vid of vendorIds) {
+      await syncVendorImagesToVendorColumns(vid);
+    }
+    res.json({ success: true, updated: (existing || []).length });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Vendor Offers CRUD ──────────────────────────────────────────────────
+app.get('/api/vendor-offers/:vendor_id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendor_offers')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('created_at', { ascending: false });
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/vendor-offers', async (req, res) => {
+  try {
+    const { vendor_id, title, description, discount_type, discount_value, freebie_text, applies_to, starts_at, ends_at, is_active } = req.body || {};
+    if (!vendor_id || !title) return res.status(400).json({ success: false, error: 'vendor_id and title required' });
+    const { data, error } = await supabase.from('vendor_offers').insert([{
+      vendor_id, title,
+      description: description || null,
+      discount_type: discount_type || null,
+      discount_value: discount_value || null,
+      freebie_text: freebie_text || null,
+      applies_to: applies_to || 'all',
+      starts_at: starts_at || null,
+      ends_at: ends_at || null,
+      is_active: is_active !== false,
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.patch('/api/vendor-offers/:id', async (req, res) => {
+  try {
+    const allowed = ['title', 'description', 'discount_type', 'discount_value', 'freebie_text', 'applies_to', 'starts_at', 'ends_at', 'is_active'];
+    const updates = { updated_at: new Date().toISOString() };
+    for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
+    const { data, error } = await supabase.from('vendor_offers').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/vendor-offers/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_offers').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Vendor Boosts CRUD ──────────────────────────────────────────────────
+app.get('/api/vendor-boosts/:vendor_id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendor_boosts')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('boost_date');
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/vendor-boosts', async (req, res) => {
+  try {
+    const { vendor_id, boost_date, rate_override, message, is_active } = req.body || {};
+    if (!vendor_id || !boost_date) return res.status(400).json({ success: false, error: 'vendor_id and boost_date required' });
+    const { data, error } = await supabase.from('vendor_boosts').upsert({
+      vendor_id, boost_date,
+      rate_override: rate_override || null,
+      message: message || null,
+      is_active: is_active !== false,
+    }, { onConflict: 'vendor_id,boost_date' }).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/vendor-boosts/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_boosts').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Featured Applications CRUD ──────────────────────────────────────────
+app.get('/api/vendor-featured/:vendor_id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendor_featured_applications')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('created_at', { ascending: false });
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/vendor-featured', async (req, res) => {
+  try {
+    const { vendor_id, board_type, pitch, proposed_images } = req.body || {};
+    if (!vendor_id || !board_type) return res.status(400).json({ success: false, error: 'vendor_id and board_type required' });
+    const { data, error } = await supabase.from('vendor_featured_applications').insert([{
+      vendor_id, board_type,
+      pitch: pitch || null,
+      proposed_images: proposed_images || [],
+    }]).select().single();
+    if (error) throw error;
+    logActivity('featured_app_submitted', `Vendor ${vendor_id} applied for ${board_type}`);
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Admin decides
+app.patch('/api/vendor-featured/:id/decide', async (req, res) => {
+  try {
+    const { status, admin_notes, approved_image_id, active_days } = req.body || {};
+    if (!status || !['approved', 'rejected'].includes(status)) return res.status(400).json({ success: false, error: 'status must be approved or rejected' });
+    const updates = { status, admin_notes: admin_notes || null, decided_at: new Date().toISOString() };
+    if (status === 'approved') {
+      updates.approved_image_id = approved_image_id || null;
+      updates.active_from = new Date().toISOString();
+      updates.active_until = new Date(Date.now() + (active_days || 14) * 86400000).toISOString();
+    }
+    const { data, error } = await supabase.from('vendor_featured_applications').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Analytics (read) + event ingest ──────────────────────────────────────
+app.get('/api/vendor-analytics/:vendor_id', async (req, res) => {
+  try {
+    const days = parseInt((req.query.days || '30')) || 30;
+    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+    const { data } = await supabase.from('vendor_analytics_daily')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .gte('day', since).order('day');
+    // Aggregate totals
+    const totals = (data || []).reduce((acc, r) => ({
+      impressions: acc.impressions + (r.impressions || 0),
+      profile_views: acc.profile_views + (r.profile_views || 0),
+      saves: acc.saves + (r.saves || 0),
+      enquiries: acc.enquiries + (r.enquiries || 0),
+      lock_interests: acc.lock_interests + (r.lock_interests || 0),
+    }), { impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+    res.json({ success: true, daily: data || [], totals });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Ingest event — increments today's rollup for a metric (called from couple-side actions)
+app.post('/api/vendor-analytics/ingest', async (req, res) => {
+  try {
+    const { vendor_id, metric } = req.body || {};
+    if (!vendor_id || !metric) return res.status(400).json({ success: false, error: 'vendor_id and metric required' });
+    const allowed = ['impressions', 'profile_views', 'saves', 'enquiries', 'lock_interests'];
+    if (!allowed.includes(metric)) return res.status(400).json({ success: false, error: 'invalid metric' });
+    const day = new Date().toISOString().split('T')[0];
+    // Upsert increment
+    const { data: existing } = await supabase.from('vendor_analytics_daily')
+      .select('*').eq('vendor_id', vendor_id).eq('day', day).maybeSingle();
+    if (existing) {
+      const updates = { [metric]: (existing[metric] || 0) + 1, updated_at: new Date().toISOString() };
+      await supabase.from('vendor_analytics_daily').update(updates).eq('id', existing.id);
+    } else {
+      const row = { vendor_id, day, impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 };
+      row[metric] = 1;
+      await supabase.from('vendor_analytics_daily').insert([row]);
+    }
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ── Vendor Activity Feed ────────────────────────────────────────────────
+app.get('/api/vendor-activity/:vendor_id', async (req, res) => {
+  try {
+    const limit = parseInt((req.query.limit || '20')) || 20;
+    const { data } = await supabase.from('vendor_activity_log')
+      .select('*').eq('vendor_id', req.params.vendor_id)
+      .order('created_at', { ascending: false }).limit(limit);
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/vendor-activity/mark-read', async (req, res) => {
+  try {
+    const { vendor_id } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
+    await supabase.from('vendor_activity_log').update({ is_read: true }).eq('vendor_id', vendor_id).eq('is_read', false);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// User (couple) lookup — used by vendor Leads tab to show couple names
+app.get('/api/user/:id', async (req, res) => {
+  try {
+    const { data } = await supabase.from('users')
+      .select('id, name, email, phone, wedding_date, partner_name')
+      .eq('id', req.params.id).maybeSingle();
+    if (!data) return res.status(404).json({ success: false, error: 'not found' });
+    res.json({ success: true, data });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part D: Sync vendor_images -> vendors.featured_photos + portfolio_images
+// Keeps the couple-facing Feed reading from the canonical Image Hub
+// ══════════════════════════════════════════════════════════════════════════════
+async function syncVendorImagesToVendorColumns(vendor_id) {
+  if (!vendor_id) return;
+  try {
+    const { data: imgs } = await supabase.from('vendor_images')
+      .select('url, tags, order_index, uploaded_at')
+      .eq('vendor_id', vendor_id)
+      .order('order_index')
+      .order('uploaded_at', { ascending: false });
+
+    if (!imgs) return;
+
+    const featured = imgs
+      .filter(i => Array.isArray(i.tags) && i.tags.includes('featured'))
+      .map(i => i.url)
+      .slice(0, 10);
+
+    const portfolio = imgs
+      .filter(i => Array.isArray(i.tags) && i.tags.includes('portfolio'))
+      .map(i => i.url)
+      .slice(0, 30);
+
+    await supabase.from('vendors').update({
+      featured_photos: featured,
+      portfolio_images: portfolio,
+    }).eq('id', vendor_id);
+  } catch (err) {
+    console.error('syncVendorImagesToVendorColumns error:', err.message);
+  }
+}
+
+// Public trigger endpoint — vendor-side can manually force a sync if needed
+app.post('/api/vendor-images/sync/:vendor_id', async (req, res) => {
+  try {
+    await syncVendorImagesToVendorColumns(req.params.vendor_id);
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part D: Activity log + analytics bump helpers
+// Called inline from existing couple-side endpoints (enquiries, muse, lock-date)
+// ══════════════════════════════════════════════════════════════════════════════
+async function bumpVendorMetric(vendor_id, metric) {
+  if (!vendor_id || !metric) return;
+  try {
+    const day = new Date().toISOString().split('T')[0];
+    const { data: existing } = await supabase.from('vendor_analytics_daily')
+      .select('*').eq('vendor_id', vendor_id).eq('day', day).maybeSingle();
+    if (existing) {
+      await supabase.from('vendor_analytics_daily').update({
+        [metric]: (existing[metric] || 0) + 1,
+        updated_at: new Date().toISOString(),
+      }).eq('id', existing.id);
+    } else {
+      const row = { vendor_id, day, impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 };
+      row[metric] = 1;
+      await supabase.from('vendor_analytics_daily').insert([row]);
+    }
+  } catch (err) {
+    console.error('bumpVendorMetric error:', err.message);
+  }
+}
+
+async function logVendorActivity(vendor_id, event_type, event_label, payload) {
+  if (!vendor_id) return;
+  try {
+    await supabase.from('vendor_activity_log').insert([{
+      vendor_id,
+      event_type,
+      event_label: event_label || null,
+      payload: payload || {},
+    }]);
+  } catch (err) {
+    console.error('logVendorActivity error:', err.message);
+  }
+}
+
+// Admin: list all featured applications (with vendor joined)
+app.get('/api/vendor-featured/admin/all', async (req, res) => {
+  try {
+    const { data: apps } = await supabase.from('vendor_featured_applications')
+      .select('*').order('created_at', { ascending: false });
+    const vendorIds = [...new Set((apps || []).map(a => a.vendor_id))];
+    let vmap = {};
+    if (vendorIds.length > 0) {
+      const { data: vendors } = await supabase.from('vendors')
+        .select('id, name, category, city, featured_photos, portfolio_images')
+        .in('id', vendorIds);
+      (vendors || []).forEach(v => { vmap[v.id] = v; });
+    }
+    const enriched = (apps || []).map(a => ({ ...a, vendor: vmap[a.vendor_id] || null }));
+    res.json({ success: true, data: enriched });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });

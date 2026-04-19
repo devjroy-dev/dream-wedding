@@ -232,8 +232,12 @@ export default function AdminPage() {
   const [discAudience, setDiscAudience] = useState<'couples' | 'vendors'>('couples');
   const [vendDiscRequests, setVendDiscRequests] = useState<any[]>([]);
   const [vendDiscGranted, setVendDiscGranted] = useState<any[]>([]);
+
+  // Build 4 Part D: Featured applications + Lock Date intent visibility
+  const [featuredApps, setFeaturedApps] = useState<any[]>([]);
+  const [lockIntentStats, setLockIntentStats] = useState<any>(null);
   const [vendSubmissions, setVendSubmissions] = useState<any[]>([]);
-  const [vendSubView, setVendSubView] = useState<'requests' | 'granted' | 'submissions'>('requests');
+  const [vendSubView, setVendSubView] = useState<'requests' | 'granted' | 'submissions' | 'featured' | 'intent'>('requests');
   const [reviewingSubmission, setReviewingSubmission] = useState<any>(null);
   const [reviewDetail, setReviewDetail] = useState<any>(null);
   const [rejectPhotoReason, setRejectPhotoReason] = useState<Record<string, string>>({});
@@ -293,14 +297,18 @@ export default function AdminPage() {
   const loadVendorDiscover = async () => {
     setDiscLoading(true);
     try {
-      const [reqRes, statsRes, subsRes] = await Promise.all([
+      const [reqRes, statsRes, subsRes, featRes, intentRes] = await Promise.all([
         fetch(`${API}/api/vendor-discover/admin/requests`).then(r => r.json()),
         fetch(`${API}/api/vendor-discover/admin/stats`).then(r => r.json()),
         fetch(`${API}/api/vendor-discover/admin/submissions`).then(r => r.json()),
+        fetch(`${API}/api/vendor-featured/admin/all`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API}/api/lock-date/admin/stats`).then(r => r.json()).catch(() => ({ success: false })),
       ]);
       if (reqRes.success) setVendDiscRequests(reqRes.data || []);
       if (statsRes.success) setVendDiscGranted(statsRes.granted_vendors || []);
       if (subsRes.success) setVendSubmissions(subsRes.data || []);
+      if (featRes.success) setFeaturedApps(featRes.data || []);
+      if (intentRes.success) setLockIntentStats(intentRes);
     } catch {}
     setDiscLoading(false);
   };
@@ -2355,7 +2363,7 @@ export default function AdminPage() {
 
                 {/* Vendor Sub-tab nav */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid #E8E0D5', paddingBottom: 0 }}>
-                  {(['requests', 'granted', 'submissions'] as const).map(v => (
+                  {(['requests', 'granted', 'submissions', 'featured', 'intent'] as const).map(v => (
                     <button
                       key={v}
                       onClick={() => setVendSubView(v)}
@@ -2369,7 +2377,9 @@ export default function AdminPage() {
                     >
                       {v === 'requests' ? `Access Requests (${vendDiscRequests.filter(r => r.status === 'pending').length})`
                         : v === 'granted' ? `Active Grants (${vendDiscGranted.length})`
-                        : `Pending Review (${vendSubmissions.filter(s => s.status === 'pending').length})`}
+                        : v === 'submissions' ? `Pending Review (${vendSubmissions.filter(s => s.status === 'pending').length})`
+                        : v === 'featured' ? `Featured Apps`
+                        : `Lock Date Intent`}
                     </button>
                   ))}
                 </div>
@@ -2524,6 +2534,136 @@ export default function AdminPage() {
                               </tbody>
                             </table>
                           </div>
+                        )}
+                      </>
+                    )}
+
+                    {vendSubView === 'featured' && (
+                      <>
+                        {featuredApps.length === 0 ? (
+                          <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>No featured applications yet.</div>
+                        ) : (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid #E8E0D5' }}>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Vendor</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Board</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Pitch</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Status</th>
+                                  <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {featuredApps.map(app => (
+                                  <tr key={app.id} style={{ borderBottom: '1px solid #F2EDE4' }}>
+                                    <td style={{ padding: '12px', fontSize: 13, color: '#2C2420', fontWeight: 500 }}>{app.vendor?.name || 'Unknown'}</td>
+                                    <td style={{ padding: '12px', fontSize: 12, color: '#8C7B6E', textTransform: 'capitalize' as const }}>{app.board_type?.replace(/_/g, ' ')}</td>
+                                    <td style={{ padding: '12px', fontSize: 12, color: '#8C7B6E', maxWidth: 240, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const, whiteSpace: 'nowrap' as const }}>
+                                      {app.pitch || <em>No pitch provided</em>}
+                                    </td>
+                                    <td style={{ padding: '12px', fontSize: 11 }}>
+                                      <span style={{
+                                        padding: '3px 8px', borderRadius: 4,
+                                        background: app.status === 'pending' ? '#FFF3DB' : app.status === 'approved' ? '#E8F5E9' : '#FFEBEE',
+                                        color: app.status === 'pending' ? '#B8963A' : app.status === 'approved' ? '#2E7D32' : '#C62828',
+                                      }}>{app.status}</span>
+                                    </td>
+                                    <td style={{ padding: '12px', textAlign: 'right' }}>
+                                      {app.status === 'pending' && (
+                                        <>
+                                          <button onClick={async () => {
+                                            const days = prompt('Active for how many days?', '14');
+                                            if (!days) return;
+                                            try {
+                                              await fetch(`${API}/api/vendor-featured/${app.id}/decide`, {
+                                                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ status: 'approved', active_days: parseInt(days) || 14 }),
+                                              });
+                                              loadVendorDiscover();
+                                            } catch {}
+                                          }} style={{ padding: '5px 10px', fontSize: 11, background: '#2E7D32', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 6 }}>Approve</button>
+                                          <button onClick={async () => {
+                                            const reason = prompt('Rejection note (optional)') || '';
+                                            try {
+                                              await fetch(`${API}/api/vendor-featured/${app.id}/decide`, {
+                                                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ status: 'rejected', admin_notes: reason }),
+                                              });
+                                              loadVendorDiscover();
+                                            } catch {}
+                                          }} style={{ padding: '5px 10px', fontSize: 11, background: 'transparent', color: '#C62828', border: '1px solid #FFCDD2', borderRadius: 4, cursor: 'pointer' }}>Reject</button>
+                                        </>
+                                      )}
+                                      {app.status !== 'pending' && (
+                                        <span style={{ fontSize: 10, color: '#B8ADA4' }}>
+                                          {app.decided_at ? new Date(app.decided_at).toLocaleDateString() : ''}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {vendSubView === 'intent' && (
+                      <>
+                        {!lockIntentStats ? (
+                          <div style={{ padding: 24, textAlign: 'center', color: '#8C7B6E', fontSize: 13 }}>No Lock Date intent data yet.</div>
+                        ) : (
+                          <>
+                            {/* Stats strip */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+                              <div style={{ padding: '14px 16px', background: '#FAF6F0', border: '1px solid #E8E0D5', borderRadius: 10 }}>
+                                <div style={{ fontSize: 10, color: '#8C7B6E', fontWeight: 500, letterSpacing: 1, textTransform: 'uppercase' as const, marginBottom: 4 }}>Total taps</div>
+                                <div style={{ fontSize: 22, color: '#2C2420', fontWeight: 500 }}>{lockIntentStats.total || 0}</div>
+                              </div>
+                              <div style={{ padding: '14px 16px', background: '#FAF6F0', border: '1px solid #E8E0D5', borderRadius: 10 }}>
+                                <div style={{ fontSize: 10, color: '#8C7B6E', fontWeight: 500, letterSpacing: 1, textTransform: 'uppercase' as const, marginBottom: 4 }}>Unique couples</div>
+                                <div style={{ fontSize: 22, color: '#2C2420', fontWeight: 500 }}>{lockIntentStats.unique_couples || 0}</div>
+                              </div>
+                              <div style={{ padding: '14px 16px', background: '#FAF6F0', border: '1px solid #E8E0D5', borderRadius: 10 }}>
+                                <div style={{ fontSize: 10, color: '#8C7B6E', fontWeight: 500, letterSpacing: 1, textTransform: 'uppercase' as const, marginBottom: 4 }}>Explored Couture</div>
+                                <div style={{ fontSize: 22, color: '#C9A84C', fontWeight: 500 }}>{lockIntentStats.explored_couture || 0}</div>
+                              </div>
+                            </div>
+                            {/* Top vendors by intent */}
+                            <div style={{ fontSize: 12, color: '#8C7B6E', fontWeight: 500, letterSpacing: 1, textTransform: 'uppercase' as const, marginBottom: 10 }}>Top vendors by intent</div>
+                            {(!lockIntentStats.top_vendors || lockIntentStats.top_vendors.length === 0) ? (
+                              <div style={{ padding: 20, textAlign: 'center' as const, color: '#B8ADA4', fontSize: 12 }}>No vendor-level data yet.</div>
+                            ) : (
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '1px solid #E8E0D5' }}>
+                                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Vendor</th>
+                                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Category</th>
+                                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Couture?</th>
+                                      <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 11, color: '#8C7B6E', fontWeight: 500 }}>Taps</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {lockIntentStats.top_vendors.map((row: any, i: number) => (
+                                      <tr key={i} style={{ borderBottom: '1px solid #F2EDE4' }}>
+                                        <td style={{ padding: '12px', fontSize: 13, color: '#2C2420', fontWeight: 500 }}>{row.vendor?.name || '—'}</td>
+                                        <td style={{ padding: '12px', fontSize: 12, color: '#8C7B6E' }}>{row.vendor?.category} · {row.vendor?.city}</td>
+                                        <td style={{ padding: '12px', fontSize: 11 }}>
+                                          {row.vendor?.couture_eligible ? (
+                                            <span style={{ padding: '3px 8px', borderRadius: 4, background: '#2C2420', color: '#C9A84C', fontWeight: 500, letterSpacing: 0.5 }}>COUTURE</span>
+                                          ) : <span style={{ color: '#B8ADA4' }}>—</span>}
+                                        </td>
+                                        <td style={{ padding: '12px', fontSize: 14, color: '#2C2420', fontWeight: 500, textAlign: 'right' as const }}>{row.count}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </>
                         )}
                       </>
                     )}

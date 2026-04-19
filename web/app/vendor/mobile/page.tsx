@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Grid, MessageCircle, Calendar, Tool, User, Plus, Phone, Send,
   FileText, CreditCard, Clock, Users, TrendingDown, Percent,
   Share2, BarChart2, Package, Gift, Globe, Award, ChevronRight, ChevronDown,
   LogOut, Settings as SettingsIcon, Lock, Briefcase, MapPin, Zap,
   CheckCircle, AlertCircle, X, Search, Mail, MoreHorizontal,
-  Minus, Edit2, DollarSign, Tag, Trash2, Camera, Upload,
+  Minus, Edit2, DollarSign, Tag, Trash2, Camera, Upload, Image as ImageIcon,
 } from 'react-feather';
 import { Sparkles } from 'lucide-react';
 
@@ -407,7 +407,7 @@ export default function VendorMobilePage() {
 
       {/* ── BODY ── */}
       <div style={{ padding: '8px 16px 24px' }}>
-        {mode === 'Discovery' && <DiscoveryComingSoon session={session} />}
+        {mode === 'Discovery' && <DiscoveryRouter session={session} />}
 
         {mode === 'Business' && activeTab === 'Overview' && (
           <DashboardTab
@@ -13229,3 +13229,2001 @@ function ProfileScreen({
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BUILD 4: DiscoveryRouter — handles access check, onboarding wall, 4-tab nav
+// ═══════════════════════════════════════════════════════════════════════════
+
+type DiscoveryTab = 'dash' | 'leads' | 'images' | 'power';
+
+interface ModeState {
+  vendor_id: string;
+  tier: string;
+  basics_completed: boolean;
+  basics_completed_at: string | null;
+  missing_basics: string[];
+  trial_started_at: string | null;
+  trial_deadline: string | null;
+  trial_status: 'not_started' | 'active' | 'paused' | 'complete' | 'exempt';
+  days_left: number | null;
+  completion_pct: number;
+  discover_listed: boolean;
+}
+
+function DiscoveryRouter({ session }: { session: VendorSession }) {
+  const [accessStatus, setAccessStatus] = useState<'loading' | 'granted' | 'pending' | 'denied' | 'expired'>('loading');
+  const [modeState, setModeState] = useState<ModeState | null>(null);
+  const [activeTab, setActiveTab] = useState<DiscoveryTab>('dash');
+  const [requestReason, setRequestReason] = useState('');
+  const [requestSent, setRequestSent] = useState(false);
+
+  // Check access
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/vendor-discover/access/${session.vendorId}`);
+        const d = await res.json();
+        if (!mounted) return;
+        if (d.success) setAccessStatus(d.status);
+        else setAccessStatus('denied');
+      } catch {
+        if (mounted) setAccessStatus('denied');
+      }
+    })();
+    return () => { mounted = false; };
+  }, [session.vendorId]);
+
+  // Load mode state whenever granted
+  const loadModeState = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/vendor-discover/mode-state/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) setModeState(d.data);
+    } catch {}
+  }, [session.vendorId]);
+
+  useEffect(() => {
+    if (accessStatus === 'granted') loadModeState();
+  }, [accessStatus, loadModeState]);
+
+  // Loading state
+  if (accessStatus === 'loading') {
+    return (
+      <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+        <div style={{ width: 32, height: 32, border: `2px solid ${C.goldBorder}`, borderTopColor: C.gold, borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Loading Discovery…</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Access not granted — show the request screen (similar to old DiscoveryComingSoon access wall)
+  if (accessStatus !== 'granted') {
+    return (
+      <div style={{ minHeight: 'calc(100vh - 200px)', padding: '28px 20px', background: C.cream }}>
+        <div style={{
+          background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 16,
+          padding: '24px 20px', textAlign: 'center' as const,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 16,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            margin: '0 auto 14px',
+          }}>
+            <Sparkles size={22} color={C.gold} />
+          </div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Discovery
+          </p>
+          <h2 style={{ margin: '0 0 10px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '28px' }}>
+            Get discovered by couples.
+          </h2>
+          <p style={{ margin: '0 0 18px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px' }}>
+            Invite-only during beta. Request access and our team will review your business.
+          </p>
+
+          {accessStatus === 'pending' || requestSent ? (
+            <div style={{ padding: '10px 14px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 10 }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                Access request received. We'll review soon.
+              </p>
+            </div>
+          ) : (
+            <>
+              <textarea value={requestReason} onChange={e => setRequestReason(e.target.value)}
+                placeholder="Briefly tell us about your business"
+                rows={4}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 10,
+                  border: `1px solid ${C.border}`, background: C.cream,
+                  fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+                  outline: 'none', resize: 'none' as const, marginBottom: 10,
+                  boxSizing: 'border-box' as const,
+                }} />
+              <button onClick={async () => {
+                try {
+                  await fetch(`${API}/api/vendor-discover/request`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vendor_id: session.vendorId, reason: requestReason }),
+                  });
+                  setRequestSent(true);
+                } catch {}
+              }} disabled={requestReason.trim().length < 10} style={{
+                width: '100%', padding: '12px', borderRadius: 10, background: C.dark,
+                border: 'none', color: C.gold, fontSize: 13,
+                fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+                opacity: requestReason.trim().length < 10 ? 0.5 : 1,
+              }}>Request access</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Access granted — check onboarding state
+  if (!modeState) {
+    return <div style={{ padding: 40, textAlign: 'center' as const, color: C.muted, fontSize: 12 }}>Loading…</div>;
+  }
+
+  // First-time or incomplete basics → Onboarding wall
+  if (!modeState.basics_completed || modeState.missing_basics.length > 0) {
+    return <DiscoveryOnboardingWall session={session} modeState={modeState} onDone={loadModeState} />;
+  }
+
+  // Trial paused → lock screen
+  if (modeState.trial_status === 'paused') {
+    return (
+      <div style={{ minHeight: 'calc(100vh - 200px)', padding: '28px 20px', background: C.cream }}>
+        <div style={{
+          background: C.ivory, border: `1px solid #F0A8A8`, borderRadius: 16,
+          padding: '24px 20px', textAlign: 'center' as const,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 16,
+            background: '#FFF0F0', border: `1px solid #F0A8A8`,
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            margin: '0 auto 14px',
+          }}>
+            <Lock size={22} color="#C65757" />
+          </div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 20, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+            Your Discovery trial has paused.
+          </h2>
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '20px' }}>
+            You didn't complete your profile within the {modeState.tier === 'signature' ? '10-day' : '7-day'} trial window. Complete your profile to resume Discovery, or contact us to upgrade manually.
+          </p>
+          <p style={{ margin: '0 0 16px', fontSize: 12, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+            Your profile is {modeState.completion_pct}% complete.
+          </p>
+          <button onClick={async () => {
+            // Unpause if vendor hits 100% — let them in
+            try {
+              await fetch(`${API}/api/vendor-discover/mode-state/${session.vendorId}`);
+              loadModeState();
+            } catch {}
+          }} style={{
+            width: '100%', padding: '12px', borderRadius: 10, background: C.dark,
+            border: 'none', color: C.gold, fontSize: 13,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+          }}>Check again</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Main 4-tab content
+  return (
+    <>
+      {activeTab === 'dash'   && <DiscoveryDash session={session} modeState={modeState} onReload={loadModeState} onGoTab={setActiveTab} />}
+      {activeTab === 'leads'  && <DiscoveryLeads session={session} />}
+      {activeTab === 'images' && <DiscoveryImageHub session={session} onReload={loadModeState} />}
+      {activeTab === 'power'  && <DiscoveryPower session={session} modeState={modeState} onReload={loadModeState} />}
+      <DiscoveryBottomNav active={activeTab} onTab={setActiveTab} />
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DiscoveryBottomNav — 4 tabs
+// ═══════════════════════════════════════════════════════════════════════════
+function DiscoveryBottomNav({ active, onTab }: { active: DiscoveryTab; onTab: (t: DiscoveryTab) => void }) {
+  const tabs: { id: DiscoveryTab; label: string; Icon: any }[] = [
+    { id: 'dash',   label: 'Dash',      Icon: Grid },
+    { id: 'leads',  label: 'Leads',     Icon: Mail },
+    { id: 'images', label: 'Image Hub', Icon: ImageIcon },
+    { id: 'power',  label: 'Power',     Icon: Zap },
+  ];
+  return (
+    <div style={{
+      position: 'fixed' as const, bottom: 0, left: 0, right: 0,
+      background: C.ivory, borderTop: `1px solid ${C.border}`,
+      display: 'flex' as const, justifyContent: 'space-around' as const,
+      padding: 'max(8px, env(safe-area-inset-bottom)) 0 8px',
+      zIndex: 50, maxWidth: 480, margin: '0 auto',
+    }}>
+      {tabs.map(t => {
+        const a = active === t.id;
+        return (
+          <button key={t.id} onClick={() => onTab(t.id)} style={{
+            display: 'flex' as const, flexDirection: 'column' as const,
+            alignItems: 'center' as const, gap: 2,
+            background: 'none', border: 'none', cursor: 'pointer', padding: '4px 16px',
+          }}>
+            <t.Icon size={20} color={a ? C.gold : C.muted} />
+            <span style={{
+              fontSize: 10, fontWeight: a ? 500 : 300,
+              color: a ? C.gold : C.muted, fontFamily: 'DM Sans, sans-serif',
+            }}>{t.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DiscoveryOnboardingWall — forced first-time entry
+// ═══════════════════════════════════════════════════════════════════════════
+function DiscoveryOnboardingWall({ session, modeState, onDone }: {
+  session: VendorSession; modeState: ModeState; onDone: () => void;
+}) {
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [category, setCategory] = useState('');
+  const [city, setCity] = useState('');
+  const [instagram, setInstagram] = useState('');
+  const [startingPrice, setStartingPrice] = useState('');
+  const [responseTime, setResponseTime] = useState<string>('');
+  const [images, setImages] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // Preload any existing values
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/vendors/${session.vendorId}`);
+        const d = await res.json();
+        if (!mounted) return;
+        const v = d.success ? d.data : {};
+        setPhone(v.phone || '');
+        setEmail(v.email || '');
+        setCategory(v.category || '');
+        setCity(v.city || '');
+        setInstagram(v.instagram || '');
+        setStartingPrice(v.starting_price ? String(v.starting_price / 100) : '');
+        setResponseTime(v.response_time_commitment || '');
+        // Load images
+        const imgRes = await fetch(`${API}/api/vendor-images/${session.vendorId}`);
+        const imgD = await imgRes.json();
+        if (imgD.success) setImages(imgD.data || []);
+      } catch {}
+      setLoaded(true);
+    })();
+    return () => { mounted = false; };
+  }, [session.vendorId]);
+
+  const missing = modeState.missing_basics;
+  const needsPhone    = missing.includes('phone');
+  const needsEmail    = missing.includes('email');
+  const needsCategory = missing.includes('category');
+  const needsCity     = missing.includes('city');
+  const needsIG       = missing.includes('instagram');
+  const needsPrice    = missing.includes('starting_price');
+  const needsRT       = missing.includes('response_time_commitment');
+  const needsPhotos   = missing.includes('three_photos');
+
+  const allOk = (!needsPhone || phone.trim().length >= 10)
+             && (!needsEmail || /.+@.+\..+/.test(email))
+             && (!needsCategory || category.trim().length > 0)
+             && (!needsCity || city.trim().length > 0)
+             && (!needsIG || instagram.trim().length > 0)
+             && (!needsPrice || parseInt(startingPrice) > 0)
+             && (!needsRT || responseTime.length > 0)
+             && (!needsPhotos || images.length >= 3);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    for (const f of files) {
+      // Simple inline check: 150KB min, 900x900 min
+      if (f.size < 150 * 1024) continue;
+      const url = await uploadToCloudinary(f);
+      if (!url) continue;
+      try {
+        await fetch(`${API}/api/vendor-images`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendor_id: session.vendorId, url, tags: ['portfolio'] }),
+        });
+      } catch {}
+    }
+    // Reload
+    try {
+      const imgRes = await fetch(`${API}/api/vendor-images/${session.vendorId}`);
+      const imgD = await imgRes.json();
+      if (imgD.success) setImages(imgD.data || []);
+    } catch {}
+    setUploading(false);
+    e.target.value = '';
+  };
+
+  const submit = async () => {
+    setSubmitting(true);
+    const payload: any = {};
+    if (needsPhone) payload.phone = phone.trim();
+    if (needsEmail) payload.email = email.trim();
+    if (needsCategory) payload.category = category.trim();
+    if (needsCity) payload.city = city.trim();
+    if (needsIG) payload.instagram = instagram.trim().replace(/^@/, '');
+    if (needsPrice) payload.starting_price = parseInt(startingPrice) * 100;
+    if (needsRT) payload.response_time_commitment = responseTime;
+    try {
+      const res = await fetch(`${API}/api/vendor-discover/onboard/${session.vendorId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json();
+      if (d.success) {
+        onDone();
+      }
+    } catch {}
+    setSubmitting(false);
+  };
+
+  if (!loaded) return <div style={{ padding: 40, textAlign: 'center' as const, color: C.muted, fontSize: 12 }}>Loading…</div>;
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 80px' }}>
+      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Discovery · Quick setup
+      </p>
+      <h2 style={{ margin: '0 0 8px', fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+        Let's get you on the feed.
+      </h2>
+      <p style={{ margin: '0 0 22px', fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '19px' }}>
+        A few essentials so couples can find you. You can polish the rest later.
+      </p>
+
+      {needsPhone && (
+        <Field label="Phone">
+          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210"
+            style={inputStyle} />
+        </Field>
+      )}
+      {needsEmail && (
+        <Field label="Email">
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"
+            style={inputStyle} />
+        </Field>
+      )}
+      {needsCategory && (
+        <Field label="Category">
+          <select value={category} onChange={e => setCategory(e.target.value)} style={inputStyle}>
+            <option value="">Choose</option>
+            {['photographers','venues','mua','designers','choreographers','dj','event-managers','bridal-wellness'].map(c => (
+              <option key={c} value={c}>{c.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {needsCity && (
+        <Field label="City">
+          <input value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Mumbai"
+            style={inputStyle} />
+        </Field>
+      )}
+      {needsIG && (
+        <Field label="Instagram handle">
+          <input value={instagram} onChange={e => setInstagram(e.target.value)} placeholder="@yourhandle"
+            style={inputStyle} />
+        </Field>
+      )}
+      {needsPrice && (
+        <Field label="Starting price (Rs)">
+          <input type="number" value={startingPrice} onChange={e => setStartingPrice(e.target.value)} placeholder="e.g. 50000"
+            style={inputStyle} />
+        </Field>
+      )}
+      {needsRT && (
+        <Field label="Response time commitment">
+          <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const }}>
+            {[
+              { id: 'under_1hr', label: 'Under 1 hr' },
+              { id: '1_to_4hr', label: '1-4 hrs' },
+              { id: 'same_day', label: 'Same day' },
+              { id: 'within_24hr', label: 'Within 24 hrs' },
+              { id: '1_to_2day', label: '1-2 days' },
+            ].map(o => (
+              <button key={o.id} onClick={() => setResponseTime(o.id)} style={{
+                padding: '7px 12px', borderRadius: 20,
+                background: responseTime === o.id ? C.dark : C.ivory,
+                color: responseTime === o.id ? C.gold : C.dark,
+                border: `1px solid ${responseTime === o.id ? C.dark : C.border}`,
+                fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+              }}>{o.label}</button>
+            ))}
+          </div>
+        </Field>
+      )}
+      {needsPhotos && (
+        <Field label={`Photos (${images.length}/3 minimum)`}>
+          <div style={{
+            background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: 10, marginBottom: 6,
+          }}>
+            {images.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
+                {images.slice(0, 9).map((img: any) => (
+                  <div key={img.id} style={{
+                    aspectRatio: '1', background: `url(${img.url}) center/cover`,
+                    borderRadius: 6, border: `1px solid ${C.border}`,
+                  }} />
+                ))}
+              </div>
+            )}
+            <label style={{
+              display: 'block' as const, padding: '10px 12px', borderRadius: 8,
+              background: C.dark, color: C.gold, fontSize: 12,
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+              textAlign: 'center' as const, cursor: uploading ? 'wait' : 'pointer',
+              opacity: uploading ? 0.7 : 1,
+            }}>
+              {uploading ? 'Uploading…' : '+ Add photos'}
+              <input type="file" multiple accept="image/*" onChange={handleImageUpload}
+                disabled={uploading} style={{ display: 'none' }} />
+            </label>
+            <p style={{ margin: '8px 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const, lineHeight: '14px' }}>
+              Vertical (3:4 or 4:5), high-res photos tend to keep couples engaged 3x longer.
+            </p>
+          </div>
+        </Field>
+      )}
+
+      <button onClick={submit} disabled={!allOk || submitting} style={{
+        width: '100%', padding: '14px', borderRadius: 10,
+        background: allOk ? C.dark : '#CFC5B8',
+        border: 'none', color: C.gold, fontSize: 14,
+        fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+        cursor: allOk ? 'pointer' : 'not-allowed', marginTop: 12,
+      }}>
+        {submitting ? 'Saving…' : 'Open Discovery'}
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DiscoveryDash — completion meter, trial countdown, activity feed, next action
+// ═══════════════════════════════════════════════════════════════════════════
+function DiscoveryDash({ session, modeState, onReload, onGoTab }: {
+  session: VendorSession; modeState: ModeState; onReload: () => void; onGoTab: (t: DiscoveryTab) => void;
+}) {
+  const [activity, setActivity] = useState<any[]>([]);
+  const [totals, setTotals] = useState<any>({ impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+  const [unreadLeads, setUnreadLeads] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [actRes, anRes, enqRes] = await Promise.all([
+          fetch(`${API}/api/vendor-activity/${session.vendorId}?limit=8`).then(r => r.json()),
+          fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=7`).then(r => r.json()),
+          fetch(`${API}/api/enquiries/vendor/${session.vendorId}`).then(r => r.json()),
+        ]);
+        if (!mounted) return;
+        if (actRes.success) setActivity(actRes.data || []);
+        if (anRes.success) setTotals(anRes.totals || {});
+        if (enqRes.success) {
+          const unread = (enqRes.data || []).filter((e: any) => (e.vendor_unread_count || 0) > 0).length;
+          setUnreadLeads(unread);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [session.vendorId]);
+
+  const pct = modeState.completion_pct || 0;
+  const listingStatus = modeState.discover_listed ? 'Live' : (pct >= 70 ? 'Under review' : 'Not listed');
+  const listingColor = modeState.discover_listed ? '#4CAF50' : (pct >= 70 ? '#E6B800' : C.muted);
+
+  // Trial pill
+  const daysLeft = modeState.days_left;
+  const isExempt = modeState.trial_status === 'exempt';
+  const trialUrgent = daysLeft !== null && daysLeft <= 2 && !isExempt;
+  const trialLabel = isExempt
+    ? 'No trial deadline · Prestige tier'
+    : daysLeft === null ? 'Trial not started'
+    : daysLeft === 0 ? 'Last day to complete'
+    : daysLeft === 1 ? '1 day left to complete'
+    : `${daysLeft} days left to complete`;
+
+  // Circle progress
+  const ringSize = 120, ringStroke = 10;
+  const radius = (ringSize - ringStroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - pct / 100);
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
+      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Discovery Dash
+      </p>
+      <h2 style={{ margin: '0 0 18px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+        {session.vendorName}
+      </h2>
+
+      {/* Trial countdown pill */}
+      <div style={{
+        padding: '10px 14px',
+        background: trialUrgent ? '#FFF0F0' : C.goldSoft,
+        border: `1px solid ${trialUrgent ? '#F0A8A8' : C.goldBorder}`,
+        borderRadius: 10, marginBottom: 16,
+        display: 'flex' as const, alignItems: 'center' as const, gap: 8,
+      }}>
+        <Clock size={14} color={trialUrgent ? '#C65757' : C.gold} />
+        <span style={{ fontSize: 12, color: trialUrgent ? '#B24646' : C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{trialLabel}</span>
+      </div>
+
+      {/* Completion ring */}
+      <div style={{
+        background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 16,
+        padding: '20px', marginBottom: 14,
+        display: 'flex' as const, alignItems: 'center' as const, gap: 18,
+      }}>
+        <div style={{ position: 'relative' as const, width: ringSize, height: ringSize, flexShrink: 0 }}>
+          <svg width={ringSize} height={ringSize} style={{ transform: 'rotate(-90deg)' }}>
+            <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke={C.border} strokeWidth={ringStroke} />
+            <circle cx={ringSize/2} cy={ringSize/2} r={radius} fill="none" stroke={C.gold} strokeWidth={ringStroke}
+              strokeDasharray={circumference} strokeDashoffset={dashOffset}
+              strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+          </svg>
+          <div style={{
+            position: 'absolute' as const, inset: 0,
+            display: 'flex' as const, flexDirection: 'column' as const,
+            alignItems: 'center' as const, justifyContent: 'center' as const,
+          }}>
+            <span style={{ fontSize: 28, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, lineHeight: 1 }}>
+              {pct}%
+            </span>
+            <span style={{ fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginTop: 2 }}>
+              Complete
+            </span>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: '0 0 4px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Listing status</p>
+          <p style={{ margin: '0 0 10px', fontSize: 15, color: listingColor, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{listingStatus}</p>
+          <button onClick={() => onGoTab('power')} style={{
+            padding: '8px 14px', borderRadius: 8,
+            background: C.dark, border: 'none', cursor: 'pointer',
+            color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          }}>Complete profile</button>
+        </div>
+      </div>
+
+      {/* Next action CTA — single biggest impact thing */}
+      {(() => {
+        const pct = modeState.completion_pct;
+        let next: { label: string; cta: string; onTap: () => void } | null = null;
+        if (pct < 100) {
+          next = { label: 'Complete your profile', cta: `Reach 100% · currently at ${pct}%`, onTap: () => onGoTab('power') };
+        } else if (unreadLeads > 0) {
+          next = { label: `${unreadLeads} unread ${unreadLeads === 1 ? 'enquiry' : 'enquiries'}`, cta: 'Reply now to keep couples engaged', onTap: () => onGoTab('leads') };
+        } else if (!modeState.discover_listed && pct >= 70) {
+          next = { label: "You're ready to go live", cta: 'Submit for admin review', onTap: () => onGoTab('power') };
+        }
+
+        if (!next) return null;
+        return (
+          <button onClick={next.onTap} style={{
+            display: 'block' as const, width: '100%',
+            padding: '14px 16px', borderRadius: 14,
+            background: C.dark, border: 'none' as const, cursor: 'pointer',
+            textAlign: 'left' as const, marginBottom: 14,
+          }}>
+            <p style={{ margin: '0 0 4px', fontSize: 9, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>
+              Next step
+            </p>
+            <p style={{ margin: '0 0 2px', fontSize: 15, color: C.gold, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{next.label}</p>
+            <p style={{ margin: 0, fontSize: 12, color: 'rgba(201,168,76,0.7)', fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{next.cta} →</p>
+          </button>
+        );
+      })()}
+
+      {/* Analytics snapshot — last 7 days */}
+      <p style={{ margin: '18px 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Last 7 days</p>
+      <div style={{
+        display: 'grid' as const, gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))',
+        gap: 8, marginBottom: 4,
+      }}>
+        {[
+          { label: 'Views', value: totals.profile_views || 0 },
+          { label: 'Saves', value: totals.saves || 0 },
+          { label: 'Enquiries', value: totals.enquiries || 0 },
+          { label: 'Lock taps', value: totals.lock_interests || 0 },
+        ].map(m => (
+          <div key={m.label} style={{
+            background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: '10px 8px', textAlign: 'center' as const,
+          }}>
+            <p style={{ margin: '0 0 2px', fontSize: 18, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{m.value}</p>
+            <p style={{ margin: 0, fontSize: 9, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>{m.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Activity feed */}
+      <p style={{ margin: '18px 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Recent activity</p>
+      <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden' as const }}>
+        {activity.length === 0 ? (
+          <p style={{ margin: 0, padding: '18px 16px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const }}>
+            Nothing yet. Couples' activity shows up here as it happens.
+          </p>
+        ) : activity.map((a, i) => (
+          <div key={a.id} style={{
+            padding: '12px 16px',
+            borderBottom: i === activity.length - 1 ? 'none' : `1px solid ${C.border}`,
+            display: 'flex' as const, justifyContent: 'space-between' as const, gap: 10,
+          }}>
+            <span style={{ fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, flex: 1 }}>{a.event_label || a.event_type}</span>
+            <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', flexShrink: 0 }}>
+              {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DiscoveryLeads / DiscoveryImageHub / DiscoveryPower — Placeholders for Parts B-E
+// ═══════════════════════════════════════════════════════════════════════════
+function DiscoveryLeads({ session }: { session: VendorSession }) {
+  const [enquiries, setEnquiries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeThread, setActiveThread] = useState<any>(null);
+  const [threadMessages, setThreadMessages] = useState<any[]>([]);
+  const [threadCouple, setThreadCouple] = useState<any>(null);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'unread' | 'locked'>('all');
+
+  const loadEnquiries = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/enquiries/vendor/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) {
+        // Hydrate with couple info for display
+        const list = d.data || [];
+        // Quick couple fetch (names)
+        const coupleIds = [...new Set(list.map((e: any) => e.couple_id).filter(Boolean))] as string[];
+        const coupleMap: Record<string, any> = {};
+        for (const cid of coupleIds) {
+          try {
+            const cRes = await fetch(`${API}/api/user/${cid}`);
+            const cD = await cRes.json();
+            if (cD.success) coupleMap[cid] = cD.data;
+          } catch {}
+        }
+        setEnquiries(list.map((e: any) => ({ ...e, couple: coupleMap[e.couple_id] || null })));
+      }
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadEnquiries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const openThread = async (enq: any) => {
+    setActiveThread(enq);
+    setThreadCouple(enq.couple || null);
+    try {
+      const res = await fetch(`${API}/api/enquiries/${enq.id}`);
+      const d = await res.json();
+      if (d.success) {
+        setThreadMessages(d.data.messages || []);
+        // Mark as read
+        fetch(`${API}/api/enquiries/${enq.id}/read`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'vendor' }),
+        }).catch(() => {});
+      }
+    } catch {}
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || !activeThread) return;
+    setSending(true);
+    try {
+      const res = await fetch(`${API}/api/enquiries/${activeThread.id}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_role: 'vendor', content: input.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setThreadMessages(prev => [...prev, d.data]);
+        setInput('');
+      }
+    } catch {}
+    setSending(false);
+  };
+
+  // Thread view
+  if (activeThread) {
+    const coupleName = threadCouple?.name || 'Couple';
+    const weddingDate = activeThread.wedding_date;
+    const isLocked = activeThread.lock_date_paid;
+
+    return (
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, display: 'flex' as const, flexDirection: 'column' as const, paddingBottom: 'max(120px, calc(env(safe-area-inset-bottom) + 100px))' }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.cream,
+          position: 'sticky' as const, top: 0, zIndex: 10,
+          display: 'flex' as const, alignItems: 'center' as const, gap: 12,
+        }}>
+          <button onClick={() => { setActiveThread(null); setThreadMessages([]); loadEnquiries(); }} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+          }}>
+            <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+          </button>
+          <div style={{
+            width: 36, height: 36, borderRadius: 18,
+            background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            flexShrink: 0,
+          }}>
+            <User size={16} color={C.gold} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{coupleName}</p>
+            {weddingDate && (
+              <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                Wedding · {new Date(weddingDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            )}
+          </div>
+          {isLocked && threadCouple?.phone && (
+            <button onClick={() => {
+              const phone = threadCouple.phone?.replace(/\D/g, '').slice(-10);
+              const prefill = `Hi ${coupleName}, reaching out from The Dream Wedding. Your Lock Date is confirmed — let's finalise the details for ${weddingDate ? new Date(weddingDate).toLocaleDateString('en-GB') : 'your wedding'}.`;
+              if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(prefill)}`, '_blank');
+            }} style={{
+              padding: '6px 12px', borderRadius: 20, background: '#25D366',
+              border: 'none', cursor: 'pointer',
+              display: 'flex' as const, alignItems: 'center' as const, gap: 4,
+            }}>
+              <Phone size={12} color="#fff" />
+              <span style={{ fontSize: 11, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>WhatsApp</span>
+            </button>
+          )}
+        </div>
+
+        {/* Locked banner */}
+        {isLocked && (
+          <div style={{
+            margin: '12px 20px 0',
+            padding: '10px 14px', background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+            borderRadius: 10, textAlign: 'center' as const,
+          }}>
+            <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+              🔒 Locked for {weddingDate ? new Date(weddingDate).toLocaleDateString('en-GB') : 'this wedding'}
+              {activeThread.lock_date_amount && ` · Rs ${(activeThread.lock_date_amount / 100).toLocaleString('en-IN')}`}
+            </p>
+            {activeThread.lock_date_expires_at && (
+              <p style={{ margin: '2px 0 0', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>
+                Respond by {new Date(activeThread.lock_date_expires_at).toLocaleDateString('en-GB')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Messages */}
+        <div style={{ flex: 1, padding: '16px 20px', overflow: 'auto' as const }}>
+          {threadMessages.map(m => {
+            const isVendor = m.from_role === 'vendor';
+            const isSystem = m.from_role === 'system';
+            if (isSystem) {
+              return (
+                <div key={m.id} style={{ margin: '12px 0', textAlign: 'center' as const }}>
+                  <span style={{
+                    background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12,
+                    padding: '6px 12px', fontSize: 11, color: C.dark,
+                    fontFamily: 'DM Sans, sans-serif', fontWeight: 400, fontStyle: 'italic' as const,
+                  }}>{m.content}</span>
+                </div>
+              );
+            }
+            return (
+              <div key={m.id} style={{ display: 'flex' as const, justifyContent: isVendor ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+                <div style={{
+                  maxWidth: '78%', padding: '10px 14px', borderRadius: 14,
+                  background: isVendor ? C.dark : C.ivory,
+                  color: isVendor ? C.gold : C.dark,
+                  border: isVendor ? 'none' : `1px solid ${C.border}`,
+                  fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '19px',
+                }}>
+                  {m.content}
+                  <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4, textAlign: 'right' as const }}>
+                    {new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Input */}
+        <div style={{
+          position: 'fixed' as const, bottom: 'max(60px, env(safe-area-inset-bottom))',
+          left: 0, right: 0, maxWidth: 480, margin: '0 auto',
+          padding: '10px 14px', background: C.cream,
+          borderTop: `1px solid ${C.border}`,
+          display: 'flex' as const, gap: 8, zIndex: 15,
+        }}>
+          <input value={input} onChange={e => setInput(e.target.value)}
+            placeholder="Reply to couple..." disabled={sending}
+            onKeyDown={e => { if (e.key === 'Enter' && input.trim()) sendMessage(); }}
+            style={{
+              flex: 1, padding: '10px 14px', borderRadius: 22,
+              border: `1px solid ${C.border}`, background: C.ivory,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+              outline: 'none',
+            }} />
+          <button onClick={sendMessage} disabled={!input.trim() || sending} style={{
+            width: 40, height: 40, borderRadius: 20, background: C.dark,
+            border: 'none', cursor: 'pointer',
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            opacity: input.trim() ? 1 : 0.4,
+          }}>
+            <Send size={14} color={C.gold} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Filter logic
+  const filtered = enquiries.filter(e => {
+    if (filter === 'unread') return (e.vendor_unread_count || 0) > 0;
+    if (filter === 'locked') return !!e.lock_date_paid;
+    return true;
+  });
+  const unreadCount = enquiries.filter(e => (e.vendor_unread_count || 0) > 0).length;
+  const lockedCount = enquiries.filter(e => !!e.lock_date_paid).length;
+
+  // List view
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
+      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Leads
+      </p>
+      <h2 style={{ margin: '0 0 18px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+        Messages & enquiries
+      </h2>
+
+      {/* Filter chips */}
+      <div style={{ display: 'flex' as const, gap: 8, marginBottom: 16, overflow: 'auto' as const, scrollbarWidth: 'none' as const }}>
+        {[
+          { id: 'all', label: `All (${enquiries.length})` },
+          { id: 'unread', label: `Unread (${unreadCount})` },
+          { id: 'locked', label: `🔒 Locked (${lockedCount})` },
+        ].map(opt => (
+          <button key={opt.id} onClick={() => setFilter(opt.id as any)} style={{
+            padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+            background: filter === opt.id ? C.dark : C.ivory,
+            color: filter === opt.id ? C.gold : C.dark,
+            border: `1px solid ${filter === opt.id ? C.dark : C.border}`,
+            fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+          }}>{opt.label}</button>
+        ))}
+      </div>
+
+      {loading ? (
+        <p style={{ textAlign: 'center' as const, padding: '40px 0', color: C.muted, fontSize: 13, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
+          <Mail size={28} color={C.goldBorder} />
+          <p style={{ margin: '12px 0 6px', fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+            {enquiries.length === 0 ? 'No enquiries yet' : 'No matching enquiries'}
+          </p>
+          <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            {enquiries.length === 0 ? 'Couples who enquire will show up here.' : 'Change filter to see others.'}
+          </p>
+        </div>
+      ) : (
+        <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden' as const }}>
+          {filtered.map((e, i) => {
+            const coupleName = e.couple?.name || 'Couple';
+            const unread = e.vendor_unread_count || 0;
+            return (
+              <button key={e.id} onClick={() => openThread(e)} style={{
+                display: 'flex' as const, alignItems: 'center' as const, gap: 12,
+                width: '100%', padding: '14px 16px',
+                background: 'transparent' as const, border: 'none' as const,
+                borderBottom: i === filtered.length - 1 ? 'none' : `1px solid ${C.border}`,
+                cursor: 'pointer', textAlign: 'left' as const,
+              }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 22,
+                  background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                  display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+                  flexShrink: 0,
+                }}>
+                  <User size={18} color={C.gold} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, marginBottom: 2 }}>
+                    <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: unread > 0 ? 600 : 500 }}>
+                      {coupleName}
+                    </p>
+                    {e.last_message_at && (
+                      <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', flexShrink: 0, marginLeft: 8 }}>
+                        {new Date(e.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: unread > 0 ? 500 : 300, whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>
+                    {e.last_message_preview || e.initial_message}
+                  </p>
+                  {e.lock_date_paid && (
+                    <div style={{ marginTop: 4, display: 'inline-flex' as const, alignItems: 'center' as const, gap: 4 }}>
+                      <span style={{
+                        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+                        borderRadius: 4, padding: '2px 6px', fontSize: 9,
+                        color: C.dark, fontFamily: 'DM Sans, sans-serif',
+                        fontWeight: 500, letterSpacing: '0.5px',
+                      }}>🔒 LOCKED {e.lock_date_amount ? `· Rs ${(e.lock_date_amount / 100).toLocaleString('en-IN')}` : ''}</span>
+                    </div>
+                  )}
+                </div>
+                {unread > 0 && (
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 10, background: C.gold,
+                    display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+                    fontSize: 10, color: C.dark, fontWeight: 600, flexShrink: 0,
+                  }}>{unread > 9 ? '9+' : unread}</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onReload: () => void }) {
+  const [images, setImages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [filter, setFilter] = useState<string>('all');        // 'all' | 'featured' | 'portfolio' | 'album:XYZ'
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkTagSheet, setShowBulkTagSheet] = useState(false);
+  const [editingImage, setEditingImage] = useState<any>(null);
+
+  const loadImages = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/vendor-images/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) setImages(d.data || []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { loadImages(); /* eslint-disable-next-line */ }, []);
+
+  // Pre-upload quality check
+  const inspectFile = (file: File): Promise<{ ok: boolean; reason?: string; width?: number; height?: number }> => new Promise(resolve => {
+    if (file.size < 150 * 1024) {
+      resolve({ ok: false, reason: 'Image looks compressed — try a fresh copy' });
+      return;
+    }
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { width, height } = img;
+      if (width < 900 || height < 900) {
+        resolve({ ok: false, reason: `${width}×${height} — need at least 900×900`, width, height });
+        return;
+      }
+      resolve({ ok: true, width, height });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ ok: false, reason: 'Cannot read file' }); };
+    img.src = url;
+  });
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    let uploaded = 0, skipped = 0;
+    for (const f of files) {
+      const check = await inspectFile(f);
+      if (!check.ok) { skipped++; continue; }
+      const url = await uploadToCloudinary(f);
+      if (!url) continue;
+      try {
+        await fetch(`${API}/api/vendor-images`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vendor_id: session.vendorId, url,
+            width: check.width, height: check.height, file_size: f.size,
+            tags: ['portfolio'],
+          }),
+        });
+        uploaded++;
+      } catch {}
+    }
+    await loadImages();
+    onReload();
+    setUploading(false);
+    e.target.value = '';
+    if (skipped > 0) alert(`${uploaded} uploaded · ${skipped} skipped (low quality)`);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const applyBulkTag = async (addTags: string[], removeTags: string[]) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    try {
+      await fetch(`${API}/api/vendor-images/bulk-tag`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: ids, add_tags: addTags, remove_tags: removeTags }),
+      });
+      await loadImages();
+      onReload();
+      setShowBulkTagSheet(false);
+      setSelectMode(false);
+      setSelected(new Set());
+    } catch {}
+  };
+
+  const deleteImage = async (id: string) => {
+    if (!confirm('Delete this photo? This removes it everywhere.')) return;
+    try {
+      await fetch(`${API}/api/vendor-images/${id}`, { method: 'DELETE' });
+      await loadImages();
+      onReload();
+      setEditingImage(null);
+    } catch {}
+  };
+
+  // Unique albums derived from tags (tags starting with 'album:')
+  const allAlbums = new Set<string>();
+  images.forEach(img => {
+    const tags = Array.isArray(img.tags) ? img.tags : [];
+    tags.forEach((t: string) => { if (t.startsWith('album:')) allAlbums.add(t); });
+  });
+
+  // Apply filter
+  const filtered = images.filter(img => {
+    const tags = Array.isArray(img.tags) ? img.tags : [];
+    if (filter === 'all') return true;
+    return tags.includes(filter);
+  });
+
+  const taggedCounts = {
+    featured: images.filter(i => (i.tags || []).includes('featured')).length,
+    portfolio: images.filter(i => (i.tags || []).includes('portfolio')).length,
+    profile_pic: images.filter(i => (i.tags || []).includes('profile_pic')).length,
+  };
+
+  // Detail sheet for single image edit
+  if (editingImage) {
+    const tags = Array.isArray(editingImage.tags) ? editingImage.tags : [];
+    const toggle = (t: string) => {
+      const next = tags.includes(t) ? tags.filter((x: string) => x !== t) : [...tags, t];
+      setEditingImage({ ...editingImage, tags: next });
+    };
+    const save = async () => {
+      try {
+        await fetch(`${API}/api/vendor-images/${editingImage.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tags: editingImage.tags,
+            album_title: editingImage.album_title || null,
+            album_city: editingImage.album_city || null,
+            album_date: editingImage.album_date || null,
+            caption: editingImage.caption || null,
+          }),
+        });
+        await loadImages();
+        onReload();
+        setEditingImage(null);
+      } catch {}
+    };
+    return (
+      <div style={{
+        position: 'fixed' as const, inset: 0, zIndex: 70,
+        background: 'rgba(0,0,0,0.9)', overflow: 'auto' as const,
+      }} onClick={() => setEditingImage(null)}>
+        <div onClick={e => e.stopPropagation()} style={{
+          maxWidth: 480, margin: '0 auto',
+          background: C.cream, minHeight: '100vh',
+          padding: '20px 20px 100px',
+        }}>
+          <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, marginBottom: 16 }}>
+            <button onClick={() => setEditingImage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              <X size={20} color={C.dark} />
+            </button>
+            <button onClick={() => deleteImage(editingImage.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              <Trash2 size={18} color="#C65757" />
+            </button>
+          </div>
+
+          <img src={editingImage.url} style={{ width: '100%', borderRadius: 12, marginBottom: 16 }} />
+
+          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Tags</p>
+          <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
+            {['featured', 'portfolio', 'profile_pic'].map(t => {
+              const active = tags.includes(t);
+              return (
+                <button key={t} onClick={() => toggle(t)} style={{
+                  padding: '7px 12px', borderRadius: 20,
+                  background: active ? C.dark : C.ivory,
+                  color: active ? C.gold : C.dark,
+                  border: `1px solid ${active ? C.dark : C.border}`,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                }}>{t.replace('_', ' ')}</button>
+              );
+            })}
+          </div>
+
+          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Album (optional)</p>
+          <input value={editingImage.album_title || ''} onChange={e => setEditingImage({ ...editingImage, album_title: e.target.value })}
+            placeholder="e.g. Mumbai Wedding 2024" style={inputStyle} />
+          <div style={{ display: 'flex' as const, gap: 8, marginTop: 8 }}>
+            <input value={editingImage.album_city || ''} onChange={e => setEditingImage({ ...editingImage, album_city: e.target.value })}
+              placeholder="City" style={{ ...inputStyle, flex: 1 }} />
+            <input type="date" value={editingImage.album_date || ''} onChange={e => setEditingImage({ ...editingImage, album_date: e.target.value })}
+              style={{ ...inputStyle, flex: 1 }} />
+          </div>
+
+          <p style={{ margin: '16px 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Caption (optional)</p>
+          <input value={editingImage.caption || ''} onChange={e => setEditingImage({ ...editingImage, caption: e.target.value })}
+            placeholder="A short note for couples" style={inputStyle} />
+
+          <button onClick={save} style={{
+            width: '100%', padding: '14px', borderRadius: 10,
+            background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', marginTop: 20,
+          }}>Save</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Main grid view
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
+      <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'flex-start' as const, marginBottom: 14 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Image Hub
+          </p>
+          <h2 style={{ margin: 0, fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+            All your media.
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            Upload once, tag for where it shows.
+          </p>
+        </div>
+        {images.length > 0 && (
+          <button onClick={() => { setSelectMode(!selectMode); setSelected(new Set()); }} style={{
+            padding: '6px 12px', borderRadius: 20,
+            background: selectMode ? C.dark : C.ivory,
+            color: selectMode ? C.gold : C.dark,
+            border: `1px solid ${selectMode ? C.dark : C.border}`,
+            fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+          }}>{selectMode ? 'Done' : 'Select'}</button>
+        )}
+      </div>
+
+      {/* Coaching pill */}
+      <div style={{
+        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
+        borderRadius: 10, padding: '10px 14px', marginBottom: 14,
+        display: 'flex' as const, gap: 8, alignItems: 'flex-start' as const,
+      }}>
+        <Sparkles size={12} color={C.gold} style={{ marginTop: 2, flexShrink: 0 }} />
+        <p style={{ margin: 0, fontSize: 11, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, lineHeight: '16px' }}>
+          Couples tend to spend 3x longer on profiles with vertical, high-resolution photos.
+        </p>
+      </div>
+
+      {/* Filter chips */}
+      <div style={{ display: 'flex' as const, gap: 6, marginBottom: 12, overflow: 'auto' as const, scrollbarWidth: 'none' as const }}>
+        <button onClick={() => setFilter('all')} style={{
+          padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+          background: filter === 'all' ? C.dark : C.ivory,
+          color: filter === 'all' ? C.gold : C.dark,
+          border: `1px solid ${filter === 'all' ? C.dark : C.border}`,
+          fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+        }}>All ({images.length})</button>
+        {(['featured', 'portfolio', 'profile_pic'] as const).map(t => (
+          <button key={t} onClick={() => setFilter(t)} style={{
+            padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+            background: filter === t ? C.dark : C.ivory,
+            color: filter === t ? C.gold : C.dark,
+            border: `1px solid ${filter === t ? C.dark : C.border}`,
+            fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+          }}>{t.replace('_', ' ')} ({taggedCounts[t]})</button>
+        ))}
+        {Array.from(allAlbums).map(a => (
+          <button key={a} onClick={() => setFilter(a)} style={{
+            padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
+            background: filter === a ? C.dark : C.ivory,
+            color: filter === a ? C.gold : C.dark,
+            border: `1px solid ${filter === a ? C.dark : C.border}`,
+            fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+          }}>{a.replace('album:', '')}</button>
+        ))}
+      </div>
+
+      {/* Upload button */}
+      <label style={{
+        display: 'block' as const, padding: '12px 16px', borderRadius: 10,
+        background: C.dark, color: C.gold, fontSize: 13,
+        fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+        textAlign: 'center' as const, cursor: uploading ? 'wait' : 'pointer',
+        opacity: uploading ? 0.7 : 1, marginBottom: 14,
+      }}>
+        {uploading ? 'Uploading…' : '+ Upload photos'}
+        <input type="file" multiple accept="image/*" onChange={handleUpload}
+          disabled={uploading} style={{ display: 'none' }} />
+      </label>
+
+      {/* Grid */}
+      {loading ? (
+        <p style={{ textAlign: 'center' as const, padding: '40px 0', color: C.muted, fontSize: 13, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: '40px 20px', textAlign: 'center' as const }}>
+          <ImageIcon size={28} color={C.goldBorder} />
+          <p style={{ margin: '10px 0 4px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+            {images.length === 0 ? 'No photos yet' : 'No photos with this tag'}
+          </p>
+          <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            {images.length === 0 ? 'Upload to get started.' : 'Change filter to see others.'}
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid' as const, gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+          {filtered.map(img => {
+            const tags = Array.isArray(img.tags) ? img.tags : [];
+            const isSel = selected.has(img.id);
+            return (
+              <div key={img.id} onClick={() => selectMode ? toggleSelect(img.id) : setEditingImage(img)} style={{
+                aspectRatio: '1', position: 'relative' as const, cursor: 'pointer' as const,
+                background: `url(${img.url}) center/cover`,
+                border: isSel ? `3px solid ${C.gold}` : `1px solid ${C.border}`,
+                borderRadius: 8, overflow: 'hidden' as const,
+              }}>
+                {/* Tag indicators */}
+                <div style={{ position: 'absolute' as const, top: 4, left: 4, display: 'flex' as const, gap: 3, flexDirection: 'column' as const }}>
+                  {tags.includes('featured') && (
+                    <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' }}>FEATURED</div>
+                  )}
+                  {tags.includes('profile_pic') && (
+                    <div style={{ background: 'rgba(201,168,76,0.92)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px' }}>PROFILE</div>
+                  )}
+                </div>
+                {/* Select indicator */}
+                {selectMode && (
+                  <div style={{
+                    position: 'absolute' as const, top: 6, right: 6,
+                    width: 22, height: 22, borderRadius: 11,
+                    background: isSel ? C.gold : 'rgba(255,255,255,0.9)',
+                    border: `2px solid ${isSel ? C.gold : '#fff'}`,
+                    display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+                  }}>
+                    {isSel && <CheckCircle size={14} color={C.dark} />}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bulk-action bar (fixed bottom) */}
+      {selectMode && selected.size > 0 && (
+        <div style={{
+          position: 'fixed' as const, bottom: 'max(60px, env(safe-area-inset-bottom))',
+          left: 0, right: 0, maxWidth: 480, margin: '0 auto',
+          padding: '12px 16px', background: C.dark,
+          borderTop: `1px solid ${C.gold}`,
+          display: 'flex' as const, gap: 10, zIndex: 15,
+        }}>
+          <span style={{ color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, alignSelf: 'center' as const, flex: 1 }}>
+            {selected.size} selected
+          </span>
+          <button onClick={() => setShowBulkTagSheet(true)} style={{
+            padding: '8px 14px', borderRadius: 8, background: C.gold,
+            border: 'none' as const, color: C.dark, fontSize: 12,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer' as const,
+          }}>Tag</button>
+          <button onClick={async () => {
+            if (!confirm(`Delete ${selected.size} photos?`)) return;
+            for (const id of Array.from(selected)) {
+              try { await fetch(`${API}/api/vendor-images/${id}`, { method: 'DELETE' }); } catch {}
+            }
+            await loadImages(); onReload();
+            setSelected(new Set()); setSelectMode(false);
+          }} style={{
+            padding: '8px 14px', borderRadius: 8, background: 'transparent' as const,
+            border: `1px solid ${C.gold}`, color: C.gold, fontSize: 12,
+            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer' as const,
+          }}>Delete</button>
+        </div>
+      )}
+
+      {/* Bulk tag sheet */}
+      {showBulkTagSheet && (
+        <div style={{
+          position: 'fixed' as const, inset: 0, zIndex: 80,
+          background: 'rgba(0,0,0,0.6)', display: 'flex' as const, alignItems: 'flex-end' as const,
+        }} onClick={() => setShowBulkTagSheet(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 480, margin: '0 auto',
+            background: C.cream, borderRadius: '20px 20px 0 0',
+            padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
+          }}>
+            <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+            </div>
+            <h3 style={{ margin: '0 0 16px', fontSize: 18, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
+              Tag {selected.size} photo{selected.size > 1 ? 's' : ''}
+            </h3>
+            <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Add tag:</p>
+            <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 18 }}>
+              {['featured', 'portfolio', 'profile_pic'].map(t => (
+                <button key={t} onClick={() => applyBulkTag([t], [])} style={{
+                  padding: '8px 14px', borderRadius: 20,
+                  background: C.ivory, color: C.dark,
+                  border: `1px solid ${C.border}`,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                }}>+ {t.replace('_', ' ')}</button>
+              ))}
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Remove tag:</p>
+            <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 18 }}>
+              {['featured', 'portfolio', 'profile_pic'].map(t => (
+                <button key={t} onClick={() => applyBulkTag([], [t])} style={{
+                  padding: '8px 14px', borderRadius: 20,
+                  background: C.ivory, color: C.dark,
+                  border: `1px solid ${C.border}`,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                }}>− {t.replace('_', ' ')}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveryPower({ session, modeState, onReload }: { session: VendorSession; modeState: ModeState; onReload: () => void }) {
+  const [activeSection, setActiveSection] = useState<'none' | 'profile' | 'offers' | 'featured' | 'boost' | 'insights'>('none');
+
+  // Counts for card subtitles
+  const [offersCount, setOffersCount] = useState(0);
+  const [featuredCount, setFeaturedCount] = useState(0);
+  const [boostsCount, setBoostsCount] = useState(0);
+  const [analyticsTotal, setAnalyticsTotal] = useState<any>({ impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+
+  const loadCounts = async () => {
+    try {
+      const [oRes, fRes, bRes, anRes] = await Promise.all([
+        fetch(`${API}/api/vendor-offers/${session.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/vendor-featured/${session.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/vendor-boosts/${session.vendorId}`).then(r => r.json()),
+        fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=30`).then(r => r.json()),
+      ]);
+      if (oRes.success) setOffersCount((oRes.data || []).filter((x: any) => x.is_active).length);
+      if (fRes.success) setFeaturedCount((fRes.data || []).filter((x: any) => x.status === 'approved' || x.status === 'pending').length);
+      if (bRes.success) setBoostsCount((bRes.data || []).filter((x: any) => x.is_active).length);
+      if (anRes.success) setAnalyticsTotal(anRes.totals || {});
+    } catch {}
+  };
+
+  useEffect(() => { loadCounts(); /* eslint-disable-next-line */ }, [session.vendorId]);
+
+  // Sections render
+  if (activeSection === 'profile') return <PowerEditProfile session={session} onClose={() => { setActiveSection('none'); onReload(); loadCounts(); }} />;
+  if (activeSection === 'offers')  return <PowerOffers session={session} onClose={() => { setActiveSection('none'); loadCounts(); }} />;
+  if (activeSection === 'featured') return <PowerFeatured session={session} onClose={() => { setActiveSection('none'); loadCounts(); }} />;
+  if (activeSection === 'boost')   return <PowerBoosts session={session} onClose={() => { setActiveSection('none'); loadCounts(); }} />;
+  if (activeSection === 'insights') return <PowerInsights session={session} onClose={() => setActiveSection('none')} />;
+
+  const sections: { id: 'profile' | 'offers' | 'featured' | 'boost' | 'insights'; title: string; subtitle: string; Icon: any; accent?: boolean }[] = [
+    { id: 'profile',  title: 'Edit Profile',           subtitle: `${modeState.completion_pct}% complete`,      Icon: Edit2, accent: modeState.completion_pct < 100 },
+    { id: 'offers',   title: 'Offers',                 subtitle: offersCount > 0 ? `${offersCount} active` : 'Create a limited-time offer', Icon: Percent },
+    { id: 'featured', title: 'Featured placements',    subtitle: featuredCount > 0 ? `${featuredCount} submitted` : 'Apply for Spotlight, Look Book, more', Icon: Award },
+    { id: 'boost',    title: 'Boost unbooked dates',   subtitle: boostsCount > 0 ? `${boostsCount} boosted dates` : 'Highlight your open dates', Icon: TrendingDown },
+    { id: 'insights', title: 'Insights',               subtitle: `${analyticsTotal.profile_views || 0} views in 30 days`, Icon: BarChart2 },
+  ];
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
+      <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+        Power
+      </p>
+      <h2 style={{ margin: '0 0 6px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+        Your storefront controls.
+      </h2>
+      <p style={{ margin: '0 0 20px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+        Edit profile, run offers, apply for featured spots — all in one place.
+      </p>
+
+      {sections.map(s => (
+        <button key={s.id} onClick={() => setActiveSection(s.id)} style={{
+          display: 'flex' as const, width: '100%', alignItems: 'center' as const, gap: 14,
+          padding: '16px 18px', borderRadius: 14,
+          background: s.accent ? C.dark : C.ivory,
+          border: `1px solid ${s.accent ? C.dark : C.border}`,
+          cursor: 'pointer' as const, marginBottom: 10, textAlign: 'left' as const,
+        }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: s.accent ? C.gold : C.goldSoft,
+            border: `1px solid ${s.accent ? C.gold : C.goldBorder}`,
+            display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
+            flexShrink: 0,
+          }}>
+            <s.Icon size={18} color={s.accent ? C.dark : C.gold} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: '0 0 2px', fontSize: 14, fontFamily: 'Playfair Display, serif', fontWeight: 500, color: s.accent ? C.gold : C.dark }}>{s.title}</p>
+            <p style={{ margin: 0, fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, color: s.accent ? 'rgba(201,168,76,0.7)' : C.muted }}>{s.subtitle}</p>
+          </div>
+          <ChevronRight size={16} color={s.accent ? C.gold : C.muted} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PowerEditProfile — wraps existing DiscoveryComingSoon as a full sheet
+// ═══════════════════════════════════════════════════════════════════════════
+function PowerEditProfile({ session, onClose }: { session: VendorSession; onClose: () => void }) {
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, paddingBottom: 100 }}>
+      <div style={{
+        position: 'sticky' as const, top: 0, zIndex: 10,
+        background: C.cream, padding: '14px 16px',
+        borderBottom: `1px solid ${C.border}`,
+        display: 'flex' as const, alignItems: 'center' as const, gap: 12,
+      }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>Edit Profile</p>
+          <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>All your profile sections</p>
+        </div>
+      </div>
+      <DiscoveryComingSoon session={session} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PowerOffers — create/manage limited-time offers
+// ═══════════════════════════════════════════════════════════════════════════
+function PowerOffers({ session, onClose }: { session: VendorSession; onClose: () => void }) {
+  const [offers, setOffers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<any>({ title: '', description: '', discount_type: 'percent', discount_value: 10, ends_at: '' });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/vendor-offers/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) setOffers(d.data || []);
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const createOffer = async () => {
+    if (!form.title.trim()) return;
+    try {
+      await fetch(`${API}/api/vendor-offers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: session.vendorId,
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          discount_type: form.discount_type,
+          discount_value: form.discount_type === 'freebie' ? null : parseInt(form.discount_value),
+          freebie_text: form.discount_type === 'freebie' ? form.description.trim() : null,
+          ends_at: form.ends_at || null,
+          is_active: true,
+        }),
+      });
+      setCreating(false);
+      setForm({ title: '', description: '', discount_type: 'percent', discount_value: 10, ends_at: '' });
+      load();
+    } catch {}
+  };
+
+  const toggleActive = async (o: any) => {
+    try {
+      await fetch(`${API}/api/vendor-offers/${o.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !o.is_active }),
+      });
+      load();
+    } catch {}
+  };
+
+  const deleteOffer = async (id: string) => {
+    if (!confirm('Delete this offer?')) return;
+    try {
+      await fetch(`${API}/api/vendor-offers/${id}`, { method: 'DELETE' });
+      load();
+    } catch {}
+  };
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, paddingBottom: 100 }}>
+      <div style={{ position: 'sticky' as const, top: 0, zIndex: 10, background: C.cream, padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <p style={{ margin: 0, fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, flex: 1 }}>Offers</p>
+        {!creating && (
+          <button onClick={() => setCreating(true)} style={{
+            padding: '6px 12px', borderRadius: 8, background: C.dark, border: 'none' as const,
+            color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+          }}>+ New</button>
+        )}
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        {creating && (
+          <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+            <p style={{ margin: '0 0 12px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>New offer</p>
+            <Field label="Title">
+              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. 15% off until Dec 31" style={inputStyle} />
+            </Field>
+            <Field label="Type">
+              <div style={{ display: 'flex' as const, gap: 6 }}>
+                {['percent', 'flat', 'freebie'].map(t => (
+                  <button key={t} onClick={() => setForm({ ...form, discount_type: t })} style={{
+                    padding: '7px 12px', borderRadius: 20,
+                    background: form.discount_type === t ? C.dark : C.cream,
+                    color: form.discount_type === t ? C.gold : C.dark,
+                    border: `1px solid ${form.discount_type === t ? C.dark : C.border}`,
+                    fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+                  }}>{t}</button>
+                ))}
+              </div>
+            </Field>
+            {form.discount_type !== 'freebie' && (
+              <Field label={form.discount_type === 'percent' ? 'Percent off' : 'Amount (Rs)'}>
+                <input type="number" value={form.discount_value} onChange={e => setForm({ ...form, discount_value: e.target.value })} style={inputStyle} />
+              </Field>
+            )}
+            <Field label={form.discount_type === 'freebie' ? 'Freebie description' : 'Description (optional)'}>
+              <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={form.discount_type === 'freebie' ? 'e.g. Free highlight reel with Premium' : 'Optional'} style={inputStyle} />
+            </Field>
+            <Field label="Ends on (optional)">
+              <input type="date" value={form.ends_at} onChange={e => setForm({ ...form, ends_at: e.target.value })} style={inputStyle} />
+            </Field>
+            <div style={{ display: 'flex' as const, gap: 8, marginTop: 12 }}>
+              <button onClick={() => setCreating(false)} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={createOffer} disabled={!form.title.trim()} style={{ flex: 2, padding: 12, borderRadius: 10, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', opacity: form.title.trim() ? 1 : 0.5 }}>Publish</button>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <p style={{ textAlign: 'center' as const, padding: 40, color: C.muted, fontSize: 13 }}>Loading…</p>
+        ) : offers.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center' as const }}>
+            <Percent size={28} color={C.goldBorder} />
+            <p style={{ margin: '10px 0 4px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>No offers yet</p>
+            <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Create limited-time offers to attract more enquiries.</p>
+          </div>
+        ) : offers.map(o => (
+          <div key={o.id} style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+            <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'flex-start' as const }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{o.title}</p>
+                {o.description && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{o.description}</p>}
+                <div style={{ display: 'flex' as const, gap: 8, marginTop: 6 }}>
+                  <span style={{ fontSize: 10, color: o.is_active ? '#2E7D32' : C.muted, fontWeight: 500 }}>{o.is_active ? '● Active' : '○ Inactive'}</span>
+                  {o.ends_at && <span style={{ fontSize: 10, color: C.muted }}>Ends {new Date(o.ends_at).toLocaleDateString('en-GB')}</span>}
+                </div>
+              </div>
+              <div style={{ display: 'flex' as const, flexDirection: 'column' as const, gap: 6 }}>
+                <button onClick={() => toggleActive(o)} style={{ padding: '4px 10px', fontSize: 10, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', color: C.dark }}>{o.is_active ? 'Pause' : 'Activate'}</button>
+                <button onClick={() => deleteOffer(o.id)} style={{ padding: '4px 10px', fontSize: 10, background: 'transparent', border: '1px solid #FFCDD2', borderRadius: 4, cursor: 'pointer', color: '#C65757' }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PowerFeatured — apply for featured placements
+// ═══════════════════════════════════════════════════════════════════════════
+function PowerFeatured({ session, onClose }: { session: VendorSession; onClose: () => void }) {
+  const [apps, setApps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [pitch, setPitch] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/vendor-featured/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) setApps(d.data || []);
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const submitApp = async () => {
+    if (!applying || !pitch.trim()) return;
+    try {
+      await fetch(`${API}/api/vendor-featured`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: session.vendorId,
+          board_type: applying,
+          pitch: pitch.trim(),
+        }),
+      });
+      setApplying(null); setPitch('');
+      load();
+    } catch {}
+  };
+
+  const BOARDS = [
+    { id: 'spotlight', label: 'Spotlight', desc: 'Top of home screen hero slot' },
+    { id: 'get_inspired', label: 'Get Inspired', desc: 'Editorial inspiration row' },
+    { id: 'look_book', label: 'Look Book', desc: 'Curated style collection' },
+    { id: 'special_offers', label: 'Special Offers', desc: 'Offer-focused featured row' },
+  ];
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, paddingBottom: 100 }}>
+      <div style={{ position: 'sticky' as const, top: 0, zIndex: 10, background: C.cream, padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <p style={{ margin: 0, fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, flex: 1 }}>Featured placements</p>
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+          Apply for a featured spot. Our team reviews every application. Approvals typically last 2 weeks.
+        </p>
+
+        {applying && (
+          <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+            <p style={{ margin: '0 0 6px', fontSize: 13, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
+              Apply for {BOARDS.find(b => b.id === applying)?.label}
+            </p>
+            <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>
+              Why should we feature you? One to three sentences.
+            </p>
+            <textarea value={pitch} onChange={e => setPitch(e.target.value)} rows={4}
+              placeholder="e.g. I've shot 30+ weddings this year. My signature style is warm, unposed, cinematic."
+              style={{ ...inputStyle, resize: 'none' as const }} />
+            <div style={{ display: 'flex' as const, gap: 8, marginTop: 12 }}>
+              <button onClick={() => { setApplying(null); setPitch(''); }} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={submitApp} disabled={!pitch.trim()} style={{ flex: 2, padding: 12, borderRadius: 10, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', opacity: pitch.trim() ? 1 : 0.5 }}>Submit</button>
+            </div>
+          </div>
+        )}
+
+        <p style={{ margin: '10px 0', fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Apply for</p>
+        {BOARDS.map(b => {
+          const existing = apps.find(a => a.board_type === b.id);
+          return (
+            <div key={b.id} style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 8, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 13, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{b.label}</p>
+                <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>{b.desc}</p>
+              </div>
+              {existing ? (
+                <span style={{ padding: '4px 8px', fontSize: 10, borderRadius: 4,
+                  background: existing.status === 'approved' ? '#E8F5E9' : existing.status === 'pending' ? '#FFF3DB' : '#FFEBEE',
+                  color: existing.status === 'approved' ? '#2E7D32' : existing.status === 'pending' ? '#B8963A' : '#C65757',
+                  fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase' as const,
+                }}>{existing.status}</span>
+              ) : (
+                <button onClick={() => setApplying(b.id)} style={{ padding: '6px 12px', fontSize: 11, background: C.dark, border: 'none' as const, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, borderRadius: 6, cursor: 'pointer' }}>Apply</button>
+              )}
+            </div>
+          );
+        })}
+
+        {apps.length > 0 && (
+          <>
+            <p style={{ margin: '20px 0 10px', fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Recent applications</p>
+            {apps.map(a => (
+              <div key={a.id} style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 6 }}>
+                <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                  {BOARDS.find(b => b.id === a.board_type)?.label || a.board_type} — <span style={{ color: a.status === 'approved' ? '#2E7D32' : a.status === 'rejected' ? '#C65757' : C.muted }}>{a.status}</span>
+                </p>
+                {a.admin_notes && <p style={{ margin: '4px 0 0', fontSize: 10, color: C.muted, fontStyle: 'italic' as const }}>{a.admin_notes}</p>}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PowerBoosts — highlight unbooked dates
+// ═══════════════════════════════════════════════════════════════════════════
+function PowerBoosts({ session, onClose }: { session: VendorSession; onClose: () => void }) {
+  const [boosts, setBoosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<any>({ boost_date: '', rate_override: '', message: '' });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/vendor-boosts/${session.vendorId}`);
+      const d = await res.json();
+      if (d.success) setBoosts(d.data || []);
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const create = async () => {
+    if (!form.boost_date) return;
+    try {
+      await fetch(`${API}/api/vendor-boosts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: session.vendorId,
+          boost_date: form.boost_date,
+          rate_override: form.rate_override ? parseInt(form.rate_override) * 100 : null,
+          message: form.message.trim() || null,
+          is_active: true,
+        }),
+      });
+      setCreating(false); setForm({ boost_date: '', rate_override: '', message: '' });
+      load();
+    } catch {}
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Remove this boost?')) return;
+    try {
+      await fetch(`${API}/api/vendor-boosts/${id}`, { method: 'DELETE' });
+      load();
+    } catch {}
+  };
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, paddingBottom: 100 }}>
+      <div style={{ position: 'sticky' as const, top: 0, zIndex: 10, background: C.cream, padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <p style={{ margin: 0, fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, flex: 1 }}>Boost unbooked dates</p>
+        {!creating && (
+          <button onClick={() => setCreating(true)} style={{ padding: '6px 12px', borderRadius: 8, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>+ Add</button>
+        )}
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '18px' }}>
+          Highlight your available dates to couples. You can offer special rates or add a short message.
+        </p>
+
+        {creating && (
+          <div style={{ background: C.ivory, border: `1px solid ${C.goldBorder}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+            <Field label="Date"><input type="date" value={form.boost_date} onChange={e => setForm({ ...form, boost_date: e.target.value })} style={inputStyle} /></Field>
+            <Field label="Special rate (Rs, optional)"><input type="number" value={form.rate_override} onChange={e => setForm({ ...form, rate_override: e.target.value })} placeholder="Leave blank to show current rate" style={inputStyle} /></Field>
+            <Field label="Message (optional)"><input value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="e.g. Last slot in Q4" style={inputStyle} /></Field>
+            <div style={{ display: 'flex' as const, gap: 8, marginTop: 10 }}>
+              <button onClick={() => setCreating(false)} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.cream, border: `1px solid ${C.border}`, color: C.dark, fontSize: 13, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={create} disabled={!form.boost_date} style={{ flex: 2, padding: 12, borderRadius: 10, background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', opacity: form.boost_date ? 1 : 0.5 }}>Boost</button>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <p style={{ textAlign: 'center' as const, padding: 40, color: C.muted, fontSize: 13 }}>Loading…</p>
+        ) : boosts.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center' as const }}>
+            <TrendingDown size={28} color={C.goldBorder} />
+            <p style={{ margin: '10px 0 4px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif' }}>No boosted dates</p>
+            <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Highlight open dates to create urgency.</p>
+          </div>
+        ) : boosts.map(b => (
+          <div key={b.id} style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 8, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>
+                {new Date(b.boost_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
+              {b.rate_override && <p style={{ margin: '2px 0 0', fontSize: 12, color: C.gold, fontWeight: 500 }}>Rs {(b.rate_override / 100).toLocaleString('en-IN')}</p>}
+              {b.message && <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted, fontStyle: 'italic' as const }}>{b.message}</p>}
+            </div>
+            <button onClick={() => remove(b.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><Trash2 size={14} color="#C65757" /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PowerInsights — analytics dashboard
+// ═══════════════════════════════════════════════════════════════════════════
+function PowerInsights({ session, onClose }: { session: VendorSession; onClose: () => void }) {
+  const [days, setDays] = useState(30);
+  const [totals, setTotals] = useState<any>({ impressions: 0, profile_views: 0, saves: 0, enquiries: 0, lock_interests: 0 });
+  const [daily, setDaily] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/vendor-analytics/${session.vendorId}?days=${days}`);
+      const d = await res.json();
+      if (d.success) { setTotals(d.totals || {}); setDaily(d.daily || []); }
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [days]);
+
+  // Funnel computations
+  const conversionRate = totals.profile_views > 0 ? Math.round((totals.enquiries / totals.profile_views) * 100) : 0;
+  const saveRate = totals.profile_views > 0 ? Math.round((totals.saves / totals.profile_views) * 100) : 0;
+
+  return (
+    <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, paddingBottom: 100 }}>
+      <div style={{ position: 'sticky' as const, top: 0, zIndex: 10, background: C.cream, padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex' as const, alignItems: 'center' as const, gap: 12 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <ChevronRight size={18} color={C.dark} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+        <p style={{ margin: 0, fontSize: 15, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500, flex: 1 }}>Insights</p>
+      </div>
+
+      <div style={{ padding: '16px 20px' }}>
+        {/* Range selector */}
+        <div style={{ display: 'flex' as const, gap: 6, marginBottom: 18 }}>
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)} style={{
+              padding: '6px 14px', borderRadius: 20,
+              background: days === d ? C.dark : C.ivory,
+              color: days === d ? C.gold : C.dark,
+              border: `1px solid ${days === d ? C.dark : C.border}`,
+              fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
+            }}>Last {d} days</button>
+          ))}
+        </div>
+
+        {/* Totals grid */}
+        <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Totals</p>
+        <div style={{ display: 'grid' as const, gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8, marginBottom: 18 }}>
+          {[
+            { label: 'Feed impressions', value: totals.impressions || 0 },
+            { label: 'Profile views', value: totals.profile_views || 0 },
+            { label: 'Saves to Muse', value: totals.saves || 0 },
+            { label: 'Enquiries', value: totals.enquiries || 0 },
+            { label: 'Lock Date taps', value: totals.lock_interests || 0 },
+          ].map(m => (
+            <div key={m.label} style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 10px', textAlign: 'center' as const }}>
+              <p style={{ margin: '0 0 4px', fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{m.value}</p>
+              <p style={{ margin: 0, fontSize: 9, color: C.muted, fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase' as const }}>{m.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Funnel */}
+        <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Conversion funnel</p>
+        <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 18 }}>
+          <FunnelStep label="Feed impressions" value={totals.impressions || 0} pctOfTop={100} color={C.muted} />
+          <FunnelStep label="Profile views" value={totals.profile_views || 0} pctOfTop={totals.impressions > 0 ? Math.round((totals.profile_views / totals.impressions) * 100) : 0} color={C.dark} />
+          <FunnelStep label="Saves to Muse" value={totals.saves || 0} pctOfTop={saveRate} color={C.gold} sub={`${saveRate}% of viewers`} />
+          <FunnelStep label="Enquiries" value={totals.enquiries || 0} pctOfTop={conversionRate} color={C.gold} sub={`${conversionRate}% of viewers`} last />
+        </div>
+
+        {/* Daily chart (simple bar list) */}
+        {daily.length > 0 && (
+          <>
+            <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Daily views</p>
+            <div style={{ background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 14, padding: '12px 14px' }}>
+              {(() => {
+                const max = Math.max(1, ...daily.map(d => d.profile_views || 0));
+                return daily.map(d => (
+                  <div key={d.day} style={{ display: 'flex' as const, alignItems: 'center' as const, gap: 8, marginBottom: 6 }}>
+                    <span style={{ width: 60, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>
+                      {new Date(d.day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                    </span>
+                    <div style={{ flex: 1, height: 10, background: C.cream, borderRadius: 5, overflow: 'hidden' as const }}>
+                      <div style={{
+                        width: `${((d.profile_views || 0) / max) * 100}%`, height: '100%',
+                        background: C.gold, transition: 'width 0.3s',
+                      }} />
+                    </div>
+                    <span style={{ width: 30, fontSize: 11, color: C.dark, fontWeight: 500, textAlign: 'right' as const }}>{d.profile_views || 0}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </>
+        )}
+
+        {loading && <p style={{ textAlign: 'center' as const, padding: 20, color: C.muted, fontSize: 12 }}>Loading…</p>}
+      </div>
+    </div>
+  );
+}
+
+function FunnelStep({ label, value, pctOfTop, color, sub, last }: { label: string; value: number; pctOfTop: number; color: string; sub?: string; last?: boolean }) {
+  return (
+    <div style={{ marginBottom: last ? 0 : 14 }}>
+      <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'baseline' as const, marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 14, color, fontFamily: 'Playfair Display, serif', fontWeight: 500 }}>{value}</span>
+      </div>
+      <div style={{ height: 8, background: C.cream, borderRadius: 4, overflow: 'hidden' as const, marginBottom: 2 }}>
+        <div style={{ width: `${Math.min(100, pctOfTop)}%`, height: '100%', background: color, transition: 'width 0.3s' }} />
+      </div>
+      {sub && <p style={{ margin: 0, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const }}>{sub}</p>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared field-style helpers for onboarding
+// ═══════════════════════════════════════════════════════════════════════════
+function Field({ label, children }: { label: string; children: any }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block' as const, fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const, marginBottom: 6 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+const inputStyle: any = {
+  width: '100%', padding: '10px 12px', borderRadius: 8,
+  border: `1px solid ${C.border}`, background: C.ivory,
+  fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark,
+  outline: 'none', boxSizing: 'border-box',
+};
