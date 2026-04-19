@@ -1674,11 +1674,18 @@ function TopBar({ mode, onSwitch, session, onProfileTap }: {
 // DISCOVER TEASER
 // ─────────────────────────────────────────────────────────────
 
-function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; cNavPush: (layer: string) => void }) {
+function DiscoverTeaser({ session, cNavPush, onBackToPlan }: { session: CoupleSession | null; cNavPush: (layer: string) => void; onBackToPlan: () => void }) {
   // ── Access gating ──
   const [accessStatus, setAccessStatus] = useState<'loading' | 'granted' | 'pending' | 'denied' | 'expired'>('loading');
   const [requestSent, setRequestSent] = useState(false);
   const [requestReason, setRequestReason] = useState('');
+
+  // ── Layer: feed (default landing) or dash (back-swipe from feed) ──
+  type Layer = 'feed' | 'dash';
+  const [layer, setLayer] = useState<Layer>(() => {
+    if (typeof window === 'undefined') return 'feed';
+    return (localStorage.getItem('tdw_discover_layer') as Layer) || 'feed';
+  });
 
   // ── Browse mode ──
   type BrowseMode = 'scroll' | 'carousel' | 'swipe';
@@ -1688,20 +1695,30 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   });
   const [blindMode, setBlindMode] = useState(false);
 
+  // ── Feed filters (active session filters) ──
+  const [feedCategory, setFeedCategory] = useState<string>('');
+  const [feedCategories, setFeedCategories] = useState<string[]>([]); // for multi-select from dash layover
+  const [feedBudgetMin, setFeedBudgetMin] = useState(0);
+  const [feedBudgetMax, setFeedBudgetMax] = useState(5000000);
+  const [feedCity, setFeedCity] = useState('');
+  const [feedDate, setFeedDate] = useState('');
+
   // ── Vendors ──
   const [vendors, setVendors] = useState<any[]>([]);
-  const [vendorsLoading, setVendorsLoading] = useState(true);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentIndexRef = useRef(0);
 
-  // ── Filters ──
+  // ── Category layover (Dash → Feed) ──
+  const [showCategoryLayover, setShowCategoryLayover] = useState(false);
+  const [layoverCategories, setLayoverCategories] = useState<string[]>([]);
+  const [layoverBudgetMin, setLayoverBudgetMin] = useState(0);
+  const [layoverBudgetMax, setLayoverBudgetMax] = useState(5000000);
+  const [layoverCity, setLayoverCity] = useState('');
+  const [layoverDate, setLayoverDate] = useState('');
+
+  // ── Filter sheet (from Feed via filter button) ──
   const [showFilter, setShowFilter] = useState(false);
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterCity, setFilterCity] = useState('');
-  const [filterBudgetMin, setFilterBudgetMin] = useState(0);
-  const [filterBudgetMax, setFilterBudgetMax] = useState(5000000);
-  const [filterDate, setFilterDate] = useState('');
-  const [filtersApplied, setFiltersApplied] = useState(false);
 
   // ── Moodboard saves ──
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
@@ -1712,20 +1729,42 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   // ── Vendor profile slide-up ──
   const [profileVendor, setProfileVendor] = useState<any>(null);
   const [profileVisible, setProfileVisible] = useState(false);
+  const profileContentRef = useRef<HTMLDivElement>(null);
+  const profileStartY = useRef(0);
+  const profileDeltaY = useRef(0);
+  const [profileOffset, setProfileOffset] = useState(0);
 
-  // ── Swipe state ──
-  const swipeContainerRef = useRef<HTMLDivElement>(null);
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
-  const touchDeltaX = useRef(0);
-  const [swipeOffset, setSwipeOffset] = useState(0);
-  const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
-
-  // ── Double-tap detection ──
+  // ── Gesture state for Feed card transitions ──
+  const [gestureOffset, setGestureOffset] = useState({ x: 0, y: 0 });
+  const [isGesturing, setIsGesturing] = useState(false);
+  const gestureStart = useRef({ x: 0, y: 0 });
+  const gestureDelta = useRef({ x: 0, y: 0 });
   const lastTapTime = useRef(0);
 
   // ── Featured boards ──
   const [boardItems, setBoardItems] = useState<any[]>([]);
+
+  // ── Sticky per-category filter state ──
+  type CategoryFilter = { budget_min: number; budget_max: number; city: string; date: string };
+  const getStickyFilters = (): Record<string, CategoryFilter> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      return JSON.parse(localStorage.getItem('tdw_discover_category_filters') || '{}');
+    } catch { return {}; }
+  };
+  const setStickyFilters = (next: Record<string, CategoryFilter>) => {
+    try { localStorage.setItem('tdw_discover_category_filters', JSON.stringify(next)); } catch {}
+  };
+  const saveToSticky = (categories: string[], filter: CategoryFilter) => {
+    if (categories.length === 0) return;
+    const all = getStickyFilters();
+    for (const cat of categories) { all[cat] = { ...filter }; }
+    setStickyFilters(all);
+  };
+  const readFromSticky = (category: string): CategoryFilter | null => {
+    const all = getStickyFilters();
+    return all[category] || null;
+  };
 
   const CATEGORIES = [
     { id: 'venues', label: 'Venues' },
@@ -1756,37 +1795,38 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
       .catch(() => setAccessStatus('denied'));
   }, [session?.id]);
 
-  // ── Load vendors when access granted ──
+  // Persist layer
+  useEffect(() => {
+    try { localStorage.setItem('tdw_discover_layer', layer); } catch {}
+  }, [layer]);
+
+  // ── Load vendors when filters change ──
   useEffect(() => {
     if (accessStatus !== 'granted') return;
     loadVendors();
-    loadBoards();
-  }, [accessStatus, filterCategory, filterCity, filterBudgetMin, filterBudgetMax]);
+  }, [accessStatus, feedCategory, feedCategories, feedCity, feedBudgetMin, feedBudgetMax]);
 
-  // ── Back-swipe event listener ──
+  // Load featured boards once
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail === 'discover-profile') closeProfile();
-      else if (detail === 'discover-filter') setShowFilter(false);
-    };
-    window.addEventListener('tdw-discover-back', handler);
-    return () => window.removeEventListener('tdw-discover-back', handler);
-  }, []);
-
-
+    if (accessStatus !== 'granted') return;
+    loadBoards();
+  }, [accessStatus]);
 
   const loadVendors = async () => {
     setVendorsLoading(true);
     try {
       let url = `${API}/api/vendors?`;
-      if (filterCategory) url += `category=${filterCategory}&`;
-      if (filterCity) url += `city=${encodeURIComponent(filterCity)}&`;
+      if (feedCategory) url += `category=${feedCategory}&`;
+      if (feedCity) url += `city=${encodeURIComponent(feedCity)}&`;
       const res = await fetch(url);
       const d = await res.json();
       let list = d.data || [];
-      if (filterBudgetMin > 0) list = list.filter((v: any) => (v.starting_price || 0) >= filterBudgetMin);
-      if (filterBudgetMax < 5000000) list = list.filter((v: any) => (v.starting_price || 0) <= filterBudgetMax);
+      // Multi-category filter (applied client-side)
+      if (feedCategories.length > 0 && !feedCategory) {
+        list = list.filter((v: any) => feedCategories.includes(v.category));
+      }
+      if (feedBudgetMin > 0) list = list.filter((v: any) => (v.starting_price || 0) >= feedBudgetMin);
+      if (feedBudgetMax < 5000000) list = list.filter((v: any) => (v.starting_price || 0) <= feedBudgetMax);
       // Shuffle for freshness
       list.sort(() => Math.random() - 0.5);
       setVendors(list);
@@ -1804,12 +1844,37 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     } catch {}
   };
 
+  // ── Back-swipe handler ──
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail === 'discover-profile') closeProfile();
+      else if (detail === 'discover-filter') setShowFilter(false);
+      else if (detail === 'discover-layover') setShowCategoryLayover(false);
+      else if (detail === 'discover-feed-to-dash') setLayer('dash');
+    };
+    window.addEventListener('tdw-discover-back', handler);
+    return () => window.removeEventListener('tdw-discover-back', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When entering Feed layer, push history so back-swipe goes to Dash (not Plan)
+  useEffect(() => {
+    if (accessStatus === 'granted' && layer === 'feed') {
+      cNavPush('discover-feed-to-dash');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessStatus, layer === 'feed']);
+
   // ── Mode switch ──
   const cycleMode = () => {
     const modes: BrowseMode[] = ['scroll', 'carousel', 'swipe'];
     const next = modes[(modes.indexOf(browseMode) + 1) % 3];
     setBrowseMode(next);
     localStorage.setItem('tdw_discover_mode', next);
+    // Reset gesture state on mode change
+    setGestureOffset({ x: 0, y: 0 });
+    setIsGesturing(false);
   };
 
   const modeIcon = browseMode === 'scroll' ? '↕' : browseMode === 'carousel' ? '↔' : '↗';
@@ -1819,7 +1884,6 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   const handleSave = (vendor: any) => {
     if (!vendor || savedIds.has(vendor.id)) return;
     setSavedIds(prev => new Set(prev).add(vendor.id));
-    // Save to moodboard API
     if (session?.id) {
       fetch(`${API}/api/couple/moodboard`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1844,17 +1908,19 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   };
 
   const goNext = () => {
-    if (currentIndex < vendors.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      currentIndexRef.current += 1;
-    }
+    setCurrentIndex(prev => {
+      const n = Math.min(vendors.length - 1, prev + 1);
+      currentIndexRef.current = n;
+      return n;
+    });
   };
 
   const goPrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      currentIndexRef.current -= 1;
-    }
+    setCurrentIndex(prev => {
+      const n = Math.max(0, prev - 1);
+      currentIndexRef.current = n;
+      return n;
+    });
   };
 
   const showSaveToast = (msg: string) => {
@@ -1864,7 +1930,7 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   };
 
   // ── Double-tap handler ──
-  const handleDoubleTap = (vendor: any) => {
+  const handleCardTap = (vendor: any) => {
     const now = Date.now();
     if (now - lastTapTime.current < 300) {
       handleSave(vendor);
@@ -1874,38 +1940,85 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     }
   };
 
-  // ── Touch handlers for swipe mode ──
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-    touchDeltaX.current = 0;
+  // ── Unified gesture handling for Feed ──
+  const handleCardTouchStart = (e: React.TouchEvent) => {
+    gestureStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    gestureDelta.current = { x: 0, y: 0 };
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (browseMode !== 'swipe') return;
-    const dx = e.touches[0].clientX - touchStartX.current;
-    const dy = e.touches[0].clientY - touchStartY.current;
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
-      touchDeltaX.current = dx;
-      setSwipeOffset(dx);
-      setSwipeDirection(dx > 0 ? 'right' : 'left');
+  const handleCardTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - gestureStart.current.x;
+    const dy = e.touches[0].clientY - gestureStart.current.y;
+    gestureDelta.current = { x: dx, y: dy };
+
+    if (browseMode === 'scroll') {
+      // Vertical only — ignore horizontal movement once vertical intent is clear
+      if (Math.abs(dy) > 10) {
+        setIsGesturing(true);
+        setGestureOffset({ x: 0, y: dy });
+      }
+    } else if (browseMode === 'carousel') {
+      if (Math.abs(dx) > 10) {
+        setIsGesturing(true);
+        setGestureOffset({ x: dx, y: 0 });
+      }
+    } else if (browseMode === 'swipe') {
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+        setIsGesturing(true);
+        setGestureOffset({ x: dx, y: 0 });
+      }
     }
   };
 
-  const handleTouchEnd = () => {
-    if (browseMode !== 'swipe') return;
-    const threshold = 100;
-    if (Math.abs(touchDeltaX.current) > threshold) {
-      const vendor = vendors[currentIndex];
-      if (touchDeltaX.current > 0) { handleSave(vendor); goNext(); }
-      else { handleSkip(vendor); }
+  const handleCardTouchEnd = () => {
+    const { x: dx, y: dy } = gestureDelta.current;
+    const threshold = 80;
+
+    if (browseMode === 'scroll') {
+      if (dy < -threshold) goNext();
+      else if (dy > threshold) goPrev();
+    } else if (browseMode === 'carousel') {
+      if (dx < -threshold) goNext();
+      else if (dx > threshold) goPrev();
+    } else if (browseMode === 'swipe') {
+      if (dx > threshold) { handleSave(vendors[currentIndex]); goNext(); }
+      else if (dx < -threshold) { handleSkip(vendors[currentIndex]); }
     }
-    setSwipeOffset(0);
-    setSwipeDirection(null);
-    touchDeltaX.current = 0;
+
+    // Reset
+    setGestureOffset({ x: 0, y: 0 });
+    setIsGesturing(false);
+    gestureDelta.current = { x: 0, y: 0 };
   };
 
-  // ── Open vendor profile slide-up ──
+  // ── Profile slide-down dismissal ──
+  const handleProfileTouchStart = (e: React.TouchEvent) => {
+    // Only listen near top of profile content (the handle area or when at scroll 0)
+    const scrollTop = profileContentRef.current?.scrollTop || 0;
+    if (scrollTop > 5) return;
+    profileStartY.current = e.touches[0].clientY;
+    profileDeltaY.current = 0;
+  };
+
+  const handleProfileTouchMove = (e: React.TouchEvent) => {
+    if (profileStartY.current === 0) return;
+    const dy = e.touches[0].clientY - profileStartY.current;
+    if (dy > 0) {
+      profileDeltaY.current = dy;
+      setProfileOffset(dy);
+    }
+  };
+
+  const handleProfileTouchEnd = () => {
+    if (profileDeltaY.current > 100) {
+      closeProfile();
+    }
+    setProfileOffset(0);
+    profileStartY.current = 0;
+    profileDeltaY.current = 0;
+  };
+
+  // ── Open / close profile ──
   const openProfile = (vendor: any) => {
     setProfileVendor(vendor);
     setProfileVisible(true);
@@ -1916,6 +2029,99 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     setProfileVisible(false);
     setTimeout(() => setProfileVendor(null), 300);
   };
+
+  // ── Category tap from Dash → layover ──
+  const openCategoryLayover = (category: string) => {
+    const sticky = readFromSticky(category);
+    setLayoverCategories([category]);
+    setLayoverBudgetMin(sticky?.budget_min ?? 0);
+    setLayoverBudgetMax(sticky?.budget_max ?? 5000000);
+    setLayoverCity(sticky?.city ?? '');
+    setLayoverDate(sticky?.date ?? '');
+    setShowCategoryLayover(true);
+    cNavPush('discover-layover');
+  };
+
+  // ── Multi-category layover from Dash "Start browsing" ──
+  const openMultiLayover = () => {
+    setLayoverCategories([]);
+    setLayoverBudgetMin(0);
+    setLayoverBudgetMax(5000000);
+    setLayoverCity('');
+    setLayoverDate('');
+    setShowCategoryLayover(true);
+    cNavPush('discover-layover');
+  };
+
+  const applyLayoverFilters = () => {
+    // Save to sticky
+    saveToSticky(layoverCategories, {
+      budget_min: layoverBudgetMin,
+      budget_max: layoverBudgetMax,
+      city: layoverCity,
+      date: layoverDate,
+    });
+    // Apply to feed
+    if (layoverCategories.length === 1) {
+      setFeedCategory(layoverCategories[0]);
+      setFeedCategories([]);
+    } else {
+      setFeedCategory('');
+      setFeedCategories(layoverCategories);
+    }
+    setFeedBudgetMin(layoverBudgetMin);
+    setFeedBudgetMax(layoverBudgetMax);
+    setFeedCity(layoverCity);
+    setFeedDate(layoverDate);
+    setShowCategoryLayover(false);
+    setLayer('feed');
+  };
+
+  const browseAllFromLayover = () => {
+    // Apply categories only, no other filters
+    if (layoverCategories.length === 1) {
+      setFeedCategory(layoverCategories[0]);
+      setFeedCategories([]);
+    } else if (layoverCategories.length > 1) {
+      setFeedCategory('');
+      setFeedCategories(layoverCategories);
+    } else {
+      // No category picked → all vendors
+      setFeedCategory('');
+      setFeedCategories([]);
+    }
+    setFeedBudgetMin(0);
+    setFeedBudgetMax(5000000);
+    setFeedCity('');
+    setFeedDate('');
+    setShowCategoryLayover(false);
+    setLayer('feed');
+  };
+
+  // ── Feed filter sheet apply (saves to sticky if single category active) ──
+  const applyFeedFilters = () => {
+    if (feedCategory) {
+      saveToSticky([feedCategory], {
+        budget_min: feedBudgetMin,
+        budget_max: feedBudgetMax,
+        city: feedCity,
+        date: feedDate,
+      });
+    }
+    setShowFilter(false);
+  };
+
+  const clearFeedFilters = () => {
+    setFeedCategory('');
+    setFeedCategories([]);
+    setFeedBudgetMin(0);
+    setFeedBudgetMax(5000000);
+    setFeedCity('');
+    setFeedDate('');
+    setShowFilter(false);
+  };
+
+  const hasActiveFilters = feedCategory || feedCategories.length > 0 || feedBudgetMin > 0 || feedBudgetMax < 5000000 || feedCity;
 
   // ── Request access ──
   const submitAccessRequest = async () => {
@@ -1936,22 +2142,6 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     if (p >= 100000) return `₹${(p / 100000).toFixed(p % 100000 === 0 ? 0 : 1)}L`;
     if (p >= 1000) return `₹${(p / 1000).toFixed(0)}K`;
     return `₹${p}`;
-  };
-
-  // ── Apply filters ──
-  const applyFilters = () => {
-    setFiltersApplied(!!(filterCategory || filterCity || filterBudgetMin > 0 || filterBudgetMax < 5000000));
-    setShowFilter(false);
-  };
-
-  const clearFilters = () => {
-    setFilterCategory('');
-    setFilterCity('');
-    setFilterBudgetMin(0);
-    setFilterBudgetMax(5000000);
-    setFilterDate('');
-    setFiltersApplied(false);
-    setShowFilter(false);
   };
 
   // ══════════════════════════════════════════════════════════════
@@ -2029,31 +2219,275 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
   }
 
   // ══════════════════════════════════════════════════════════════
-  // MAIN DISCOVER FEED
+  // HELPERS FOR FEED RENDER
   // ══════════════════════════════════════════════════════════════
-  const vendor = vendors[currentIndex];
-  const nextVendor = vendors[currentIndex + 1];
-
   const getHeroImage = (v: any) => {
     const imgs = v?.featured_photos?.length > 0 ? v.featured_photos : v?.portfolio_images;
     return imgs?.[0] || '';
   };
 
-  // ── Vendor card (shared across all modes) ──
-  const renderCard = (v: any, style?: React.CSSProperties) => {
+  const vendor = vendors[currentIndex];
+  const nextVendor = vendors[currentIndex + 1];
+  const prevVendor = currentIndex > 0 ? vendors[currentIndex - 1] : null;
+
+  // Preload next vendor image
+  useEffect(() => {
+    if (nextVendor && typeof window !== 'undefined') {
+      const img = new Image();
+      img.src = getHeroImage(nextVendor);
+    }
+  }, [currentIndex, nextVendor]);
+
+  // ══════════════════════════════════════════════════════════════
+  // DISCOVER DASH — landing after back-swipe from Feed
+  // ══════════════════════════════════════════════════════════════
+  if (layer === 'dash') {
+    const editorPicks = boardItems.filter(b => b.board_type === 'spotlight' || b.board_type === 'look_book');
+    const offers = boardItems.filter(b => b.board_type === 'special_offers');
+    const savedVendorsList = vendors.filter(v => savedIds.has(v.id)).slice(0, 10);
+
+    return (
+      <div style={{ minHeight: 'calc(100vh - 60px)', background: C.cream, paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
+
+        {/* Hero / greeting */}
+        <div style={{ padding: '24px 20px 12px' }}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Discover
+          </p>
+          <h2 style={{ margin: 0, fontSize: 24, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400, lineHeight: '30px' }}>
+            Find the people behind your perfect day.
+          </h2>
+        </div>
+
+        {/* Start browsing CTA */}
+        <div style={{ padding: '8px 20px 20px' }}>
+          <button onClick={openMultiLayover} style={{
+            width: '100%', padding: '16px 20px', borderRadius: 14,
+            background: C.dark, border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            color: C.gold, fontSize: 14, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Compass size={16} color={C.gold} />
+              Start browsing
+            </span>
+            <ChevronRight size={16} color={C.gold} />
+          </button>
+        </div>
+
+        {/* Categories */}
+        <div style={{ padding: '0 20px 24px' }}>
+          <p style={{ margin: '0 0 12px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+            Browse by category
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {CATEGORIES.map(cat => {
+              const sticky = readFromSticky(cat.id);
+              const hasSticky = sticky && (sticky.budget_max < 5000000 || sticky.budget_min > 0 || sticky.city || sticky.date);
+              return (
+                <button key={cat.id} onClick={() => openCategoryLayover(cat.id)} style={{
+                  padding: '16px 14px', borderRadius: 12,
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  textAlign: 'left' as const, position: 'relative' as const,
+                }}>
+                  <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                    {cat.label}
+                  </p>
+                  {hasSticky && (
+                    <p style={{ margin: 0, fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 400 }}>
+                      ● Saved filters
+                    </p>
+                  )}
+                  {!hasSticky && (
+                    <p style={{ margin: 0, fontSize: 10, color: C.mutedLight, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      Tap to browse
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Editor's Picks */}
+        {editorPicks.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+              Editor's picks
+            </p>
+            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
+              {editorPicks.map(item => (
+                <div key={item.id} onClick={() => {
+                  if (item.vendor_id) {
+                    const v = vendors.find(vv => vv.id === item.vendor_id);
+                    if (v) { setLayer('feed'); setTimeout(() => openProfile(v), 100); }
+                  }
+                }} style={{
+                  minWidth: 240, maxWidth: 240, borderRadius: 14, overflow: 'hidden',
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  flexShrink: 0,
+                }}>
+                  <div style={{
+                    height: 150, background: item.image_url ? `url(${item.image_url}) center/cover` : C.goldSoft,
+                  }} />
+                  <div style={{ padding: '12px 14px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+                      {item.vendor_name || item.title}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+                      {item.subtitle || item.category}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Special Offers */}
+        {offers.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+              Special offers
+            </p>
+            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
+              {offers.map(item => (
+                <div key={item.id} onClick={() => {
+                  if (item.vendor_id) {
+                    const v = vendors.find(vv => vv.id === item.vendor_id);
+                    if (v) { setLayer('feed'); setTimeout(() => openProfile(v), 100); }
+                  }
+                }} style={{
+                  minWidth: 240, maxWidth: 240, borderRadius: 14, overflow: 'hidden',
+                  background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
+                  flexShrink: 0,
+                }}>
+                  <div style={{
+                    height: 150, background: item.image_url ? `url(${item.image_url}) center/cover` : C.goldSoft,
+                    position: 'relative' as const,
+                  }}>
+                    {item.promo_text && (
+                      <div style={{
+                        position: 'absolute', bottom: 8, left: 8, background: C.gold,
+                        borderRadius: 6, padding: '3px 8px', fontSize: 10, color: C.dark,
+                        fontWeight: 500, fontFamily: 'DM Sans, sans-serif',
+                      }}>{item.promo_text}</div>
+                    )}
+                  </div>
+                  <div style={{ padding: '12px 14px' }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
+                      {item.vendor_name || item.title}
+                    </p>
+                    {item.promo_price && (
+                      <p style={{ margin: 0, fontSize: 12, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                        {item.promo_price}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Recently saved */}
+        {savedVendorsList.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+              Recently saved
+            </p>
+            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
+              {savedVendorsList.map(v => (
+                <div key={v.id} onClick={() => { setLayer('feed'); setTimeout(() => openProfile(v), 100); }} style={{
+                  minWidth: 140, maxWidth: 140, cursor: 'pointer', flexShrink: 0,
+                }}>
+                  <div style={{
+                    width: '100%', aspectRatio: '3/4', borderRadius: 12,
+                    background: `url(${getHeroImage(v)}) center/cover`,
+                    marginBottom: 8, border: `1px solid ${C.border}`,
+                  }} />
+                  <p style={{ margin: 0, fontSize: 12, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {v.name}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* CATEGORY LAYOVER (also appears here) */}
+        {showCategoryLayover && renderCategoryLayover()}
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // FEED — full-screen immersive browse
+  // ══════════════════════════════════════════════════════════════
+  if (vendorsLoading) {
+    return (
+      <div style={{ height: 'calc(100vh - 60px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.cream }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 32, height: 32, border: `2px solid ${C.goldBorder}`, borderTopColor: C.gold, borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
+          <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Finding vendors for you...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (vendors.length === 0) {
+    return (
+      <div style={{ height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 28px', textAlign: 'center' }}>
+        <Compass size={40} color={C.goldBorder} />
+        <h3 style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, margin: '16px 0 8px', fontWeight: 400 }}>No vendors match your filters</h3>
+        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, marginBottom: 20 }}>Try widening your search or go back to browse more</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={clearFeedFilters} style={{
+            background: C.ivory, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 20px',
+            color: C.dark, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+          }}>Clear filters</button>
+          <button onClick={() => setLayer('dash')} style={{
+            background: C.dark, border: 'none', borderRadius: 10, padding: '12px 20px',
+            color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+          }}>Go to Dash</button>
+        </div>
+      </div>
+    );
+  }
+
+  // End of stack for swipe mode
+  if (currentIndex >= vendors.length && browseMode === 'swipe') {
+    return (
+      <div style={{ height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 28px', textAlign: 'center' }}>
+        <Check size={40} color={C.gold} />
+        <h3 style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, margin: '16px 0 8px', fontWeight: 400 }}>
+          You've seen everyone
+        </h3>
+        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, marginBottom: 20 }}>
+          {savedIds.size > 0 ? `${savedIds.size} vendor${savedIds.size !== 1 ? 's' : ''} saved to your Moodboard` : 'Try adjusting your filters for more options'}
+        </p>
+        <button onClick={() => { setCurrentIndex(0); currentIndexRef.current = 0; }} style={{
+          background: C.dark, border: 'none', borderRadius: 10, padding: '12px 24px',
+          color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+        }}>Start over</button>
+      </div>
+    );
+  }
+
+  // ── Render card content (shared between current/next/prev) ──
+  const renderCardContent = (v: any, isActive: boolean) => {
     if (!v) return null;
     const isSaved = savedIds.has(v.id);
     return (
-      <div
-        key={v.id}
-        style={{
-          width: '100%', height: '100%', position: 'relative',
-          background: `url(${getHeroImage(v)}) center/cover no-repeat`,
-          borderRadius: 0, overflow: 'hidden',
-          ...style,
-        }}
-        onClick={() => handleDoubleTap(v)}
-      >
+      <>
+        <img src={getHeroImage(v)} alt={blindMode ? '' : v.name}
+          loading="eager" decoding="async"
+          style={{
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover', objectPosition: 'center',
+          }}
+        />
         {/* Gradient overlay */}
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%',
@@ -2061,83 +2495,85 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
           pointerEvents: 'none',
         }} />
 
-        {/* Top controls row */}
-        <div style={{
-          position: 'absolute', top: 'max(16px, env(safe-area-inset-top))', left: 16, right: 16,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 5,
-        }}>
-          {/* Counter */}
-          <span style={{
-            background: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: '4px 10px',
-            fontSize: 11, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 400,
-            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-          }}>
-            {currentIndex + 1} / {vendors.length}
-          </span>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            {/* Blind mode toggle */}
-            <button onClick={e => { e.stopPropagation(); setBlindMode(!blindMode); }} style={{
-              background: blindMode ? C.gold : 'rgba(0,0,0,0.35)', border: 'none',
-              borderRadius: 20, padding: '5px 10px', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4,
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        {isActive && (
+          <>
+            {/* Top overlay row — counter + controls */}
+            <div style={{
+              position: 'absolute',
+              top: 'max(12px, env(safe-area-inset-top))',
+              left: 12, right: 12,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 5,
             }}>
-              {blindMode ? <EyeOff size={12} color={C.dark} /> : <Eye size={12} color="#fff" />}
-              <span style={{ fontSize: 10, color: blindMode ? C.dark : '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Blind</span>
-            </button>
+              <span style={{
+                background: 'rgba(0,0,0,0.45)', borderRadius: 20, padding: '5px 11px',
+                fontSize: 11, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
+                backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+              }}>
+                {currentIndex + 1} / {vendors.length}
+              </span>
 
-            {/* Mode switcher */}
-            <button onClick={e => { e.stopPropagation(); cycleMode(); }} style={{
-              background: 'rgba(0,0,0,0.35)', border: 'none',
-              borderRadius: 20, padding: '5px 10px', cursor: 'pointer',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              <span style={{ fontSize: 12, color: '#fff' }}>{modeIcon}</span>
-              <span style={{ fontSize: 10, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{modeLabel}</span>
-            </button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={e => { e.stopPropagation(); setBlindMode(!blindMode); }} style={{
+                  background: blindMode ? C.gold : 'rgba(0,0,0,0.45)', border: 'none',
+                  borderRadius: 20, padding: '6px 11px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                }}>
+                  {blindMode ? <EyeOff size={12} color={C.dark} /> : <Eye size={12} color="#fff" />}
+                  <span style={{ fontSize: 10, color: blindMode ? C.dark : '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Blind</span>
+                </button>
 
-            {/* Filter */}
-            <button onClick={e => { e.stopPropagation(); setShowFilter(true); cNavPush('discover-filter'); }} style={{
-              background: filtersApplied ? C.gold : 'rgba(0,0,0,0.35)', border: 'none',
-              borderRadius: 20, width: 32, height: 32, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-            }}>
-              <Zap size={13} color={filtersApplied ? C.dark : '#fff'} />
-            </button>
-          </div>
-        </div>
+                <button onClick={e => { e.stopPropagation(); cycleMode(); }} style={{
+                  background: 'rgba(0,0,0,0.45)', border: 'none',
+                  borderRadius: 20, padding: '6px 11px', cursor: 'pointer',
+                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  <span style={{ fontSize: 11, color: '#fff' }}>{modeIcon}</span>
+                  <span style={{ fontSize: 10, color: '#fff', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>{modeLabel}</span>
+                </button>
 
-        {/* Swipe overlays */}
-        {browseMode === 'swipe' && swipeDirection === 'right' && (
-          <div style={{
-            position: 'absolute', top: '40%', left: 24, zIndex: 10,
-            background: 'rgba(201,168,76,0.9)', borderRadius: 12, padding: '8px 20px',
-            transform: 'rotate(-12deg)',
-          }}>
-            <span style={{ fontSize: 22, fontWeight: 600, color: C.dark, fontFamily: 'Playfair Display, serif', letterSpacing: 2 }}>SAVE</span>
-          </div>
-        )}
-        {browseMode === 'swipe' && swipeDirection === 'left' && (
-          <div style={{
-            position: 'absolute', top: '40%', right: 24, zIndex: 10,
-            background: 'rgba(198,87,87,0.9)', borderRadius: 12, padding: '8px 20px',
-            transform: 'rotate(12deg)',
-          }}>
-            <span style={{ fontSize: 22, fontWeight: 600, color: '#fff', fontFamily: 'Playfair Display, serif', letterSpacing: 2 }}>SKIP</span>
-          </div>
-        )}
-
-        {/* Saved indicator */}
-        {isSaved && (
-          <div style={{ position: 'absolute', top: 'max(16px, env(safe-area-inset-top))', left: '50%', transform: 'translateX(-50%)', zIndex: 6 }}>
-            <div style={{ background: C.gold, borderRadius: 20, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Heart size={10} color={C.dark} fill={C.dark} />
-              <span style={{ fontSize: 10, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Saved</span>
+                <button onClick={e => { e.stopPropagation(); setShowFilter(true); cNavPush('discover-filter'); }} style={{
+                  background: hasActiveFilters ? C.gold : 'rgba(0,0,0,0.45)', border: 'none',
+                  borderRadius: 20, width: 30, height: 28, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                }}>
+                  <Zap size={12} color={hasActiveFilters ? C.dark : '#fff'} />
+                </button>
+              </div>
             </div>
-          </div>
+
+            {/* Swipe mode overlays */}
+            {browseMode === 'swipe' && gestureOffset.x > 50 && (
+              <div style={{
+                position: 'absolute', top: '40%', left: 24, zIndex: 10,
+                background: 'rgba(201,168,76,0.9)', borderRadius: 12, padding: '8px 20px',
+                transform: 'rotate(-12deg)',
+              }}>
+                <span style={{ fontSize: 22, fontWeight: 600, color: C.dark, fontFamily: 'Playfair Display, serif', letterSpacing: 2 }}>SAVE</span>
+              </div>
+            )}
+            {browseMode === 'swipe' && gestureOffset.x < -50 && (
+              <div style={{
+                position: 'absolute', top: '40%', right: 24, zIndex: 10,
+                background: 'rgba(198,87,87,0.9)', borderRadius: 12, padding: '8px 20px',
+                transform: 'rotate(12deg)',
+              }}>
+                <span style={{ fontSize: 22, fontWeight: 600, color: '#fff', fontFamily: 'Playfair Display, serif', letterSpacing: 2 }}>SKIP</span>
+              </div>
+            )}
+
+            {/* Saved indicator */}
+            {isSaved && (
+              <div style={{ position: 'absolute', top: 'max(52px, calc(env(safe-area-inset-top) + 44px))', left: '50%', transform: 'translateX(-50%)', zIndex: 6 }}>
+                <div style={{ background: C.gold, borderRadius: 20, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Heart size={10} color={C.dark} fill={C.dark} />
+                  <span style={{ fontSize: 10, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Saved</span>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Bottom info */}
@@ -2182,47 +2618,23 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
             </div>
           )}
 
-          {/* Tap to view profile hint */}
-          <button onClick={e => { e.stopPropagation(); openProfile(v); }} style={{
-            marginTop: 14, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 10, padding: '10px 16px', cursor: 'pointer', width: '100%',
-            color: '#fff', fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400,
-            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-            letterSpacing: '0.3px',
-          }}>
-            View profile
-          </button>
+          {isActive && (
+            <button onClick={e => { e.stopPropagation(); openProfile(v); }} style={{
+              marginTop: 14, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 10, padding: '10px 16px', cursor: 'pointer', width: '100%',
+              color: '#fff', fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400,
+              backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+              letterSpacing: '0.3px',
+            }}>
+              View profile
+            </button>
+          )}
         </div>
-      </div>
+      </>
     );
   };
 
-  // ── Category pills ──
-  const renderCategoryPills = () => (
-    <div style={{
-      position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top) + 44px))', left: 0, right: 0,
-      zIndex: 4, overflow: 'auto', whiteSpace: 'nowrap' as const,
-      padding: '0 16px', scrollbarWidth: 'none' as const,
-    }}>
-      <div style={{ display: 'inline-flex', gap: 6 }}>
-        {CATEGORIES.map(cat => (
-          <button key={cat.id} onClick={e => {
-            e.stopPropagation();
-            setFilterCategory(filterCategory === cat.id ? '' : cat.id);
-          }} style={{
-            background: filterCategory === cat.id ? C.gold : 'rgba(0,0,0,0.3)',
-            border: 'none', borderRadius: 20, padding: '5px 12px', cursor: 'pointer',
-            fontSize: 11, color: filterCategory === cat.id ? C.dark : '#fff',
-            fontFamily: 'DM Sans, sans-serif', fontWeight: filterCategory === cat.id ? 500 : 400,
-            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-            whiteSpace: 'nowrap' as const,
-          }}>{cat.label}</button>
-        ))}
-      </div>
-    </div>
-  );
-
-  // ── Swipe action buttons (swipe mode only) ──
+  // ── Swipe mode action buttons ──
   const renderSwipeActions = () => {
     if (browseMode !== 'swipe' || !vendor) return null;
     return (
@@ -2257,193 +2669,218 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     );
   };
 
-  // ── Featured boards inline ──
-  const renderFeaturedBoards = () => {
-    const editorPicks = boardItems.filter(b => b.board_type === 'spotlight' || b.board_type === 'look_book');
-    const offers = boardItems.filter(b => b.board_type === 'special_offers');
-    if (editorPicks.length === 0 && offers.length === 0) return null;
+  // ── Compute transforms for card stack (manual gesture transitions) ──
+  const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 400;
 
-    const renderBoardCard = (item: any) => (
-      <div key={item.id} onClick={() => {
-        if (item.vendor_id) {
-          const v = vendors.find(vv => vv.id === item.vendor_id);
-          if (v) openProfile(v);
-        }
-      }} style={{
-        minWidth: 260, maxWidth: 260, borderRadius: 14, overflow: 'hidden',
-        background: C.ivory, border: `1px solid ${C.border}`, cursor: 'pointer',
-        flexShrink: 0,
-      }}>
-        <div style={{
-          height: 160, background: item.image_url ? `url(${item.image_url}) center/cover` : C.goldSoft,
-          position: 'relative',
+  let currentTransform = 'translate3d(0,0,0)';
+  let nextTransform = 'translate3d(0,100%,0)';
+  let prevTransform = 'translate3d(0,-100%,0)';
+
+  if (browseMode === 'scroll') {
+    currentTransform = `translate3d(0, ${gestureOffset.y}px, 0)`;
+    nextTransform = `translate3d(0, calc(100% + ${gestureOffset.y}px), 0)`;
+    prevTransform = `translate3d(0, calc(-100% + ${gestureOffset.y}px), 0)`;
+  } else if (browseMode === 'carousel') {
+    currentTransform = `translate3d(${gestureOffset.x}px, 0, 0)`;
+    nextTransform = `translate3d(calc(100% + ${gestureOffset.x}px), 0, 0)`;
+    prevTransform = `translate3d(calc(-100% + ${gestureOffset.x}px), 0, 0)`;
+  } else if (browseMode === 'swipe') {
+    const rotate = gestureOffset.x * 0.03;
+    currentTransform = `translate3d(${gestureOffset.x}px, 0, 0) rotate(${rotate}deg)`;
+    nextTransform = 'scale(0.95) translate3d(0,0,0)';
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // CATEGORY LAYOVER — shared render function
+  // ══════════════════════════════════════════════════════════════
+  function renderCategoryLayover() {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 60,
+        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end',
+      }} onClick={() => setShowCategoryLayover(false)}>
+        <div onClick={e => e.stopPropagation()} style={{
+          width: '100%', maxWidth: 480, margin: '0 auto',
+          background: C.cream, borderRadius: '20px 20px 0 0',
+          padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
+          maxHeight: '85vh', overflow: 'auto',
+          overscrollBehavior: 'contain' as const,
         }}>
-          {item.promo_text && (
-            <div style={{
-              position: 'absolute', bottom: 8, left: 8, background: C.gold,
-              borderRadius: 6, padding: '3px 8px', fontSize: 10, color: C.dark,
-              fontWeight: 500, fontFamily: 'DM Sans, sans-serif',
-            }}>{item.promo_text}</div>
-          )}
-        </div>
-        <div style={{ padding: '12px 14px' }}>
-          <p style={{ margin: '0 0 2px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
-            {item.vendor_name || item.title}
-          </p>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-            {item.subtitle || item.category}
-          </p>
-          {item.promo_price && (
-            <p style={{ margin: 0, fontSize: 12, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
-              {item.promo_price}
-            </p>
-          )}
-        </div>
-      </div>
-    );
+          <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+          </div>
 
-    return (
-      <div style={{ background: C.cream, padding: '24px 0' }}>
-        {editorPicks.length > 0 && (
-          <div style={{ marginBottom: offers.length > 0 ? 24 : 0 }}>
-            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-              Editor's picks
-            </p>
-            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
-              {editorPicks.map(renderBoardCard)}
+          <h3 style={{ margin: '0 0 4px', fontSize: 20, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
+            Tell us what you're looking for
+          </h3>
+          <p style={{ margin: '0 0 20px', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+            All optional. We'll remember your choices.
+          </p>
+
+          {/* Categories */}
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Categories</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
+              <button onClick={() => setLayoverCategories([])} style={{
+                padding: '7px 14px', borderRadius: 20,
+                background: layoverCategories.length === 0 ? C.dark : C.ivory,
+                border: `1px solid ${layoverCategories.length === 0 ? C.dark : C.border}`,
+                color: layoverCategories.length === 0 ? C.gold : C.dark,
+                fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+              }}>All</button>
+              {CATEGORIES.map(cat => {
+                const active = layoverCategories.includes(cat.id);
+                return (
+                  <button key={cat.id} onClick={() => {
+                    setLayoverCategories(prev =>
+                      active ? prev.filter(c => c !== cat.id) : [...prev, cat.id]
+                    );
+                  }} style={{
+                    padding: '7px 14px', borderRadius: 20,
+                    background: active ? C.dark : C.ivory,
+                    border: `1px solid ${active ? C.dark : C.border}`,
+                    color: active ? C.gold : C.dark,
+                    fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+                  }}>{cat.label}</button>
+                );
+              })}
             </div>
           </div>
-        )}
-        {offers.length > 0 && (
-          <div>
-            <p style={{ margin: '0 0 12px', padding: '0 20px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-              Special offers
-            </p>
-            <div style={{ display: 'flex', gap: 12, overflow: 'auto', padding: '0 20px', scrollbarWidth: 'none' as const }}>
-              {offers.map(renderBoardCard)}
+
+          {/* Budget */}
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Budget range</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(layoverBudgetMin)}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>to</span>
+              <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(layoverBudgetMax)}</span>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Min</label>
+              <input type="range" min={0} max={5000000} step={50000} value={layoverBudgetMin}
+                onChange={e => setLayoverBudgetMin(Math.min(parseInt(e.target.value), layoverBudgetMax - 50000))}
+                style={{ width: '100%', accentColor: C.gold }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Max</label>
+              <input type="range" min={0} max={5000000} step={50000} value={layoverBudgetMax}
+                onChange={e => setLayoverBudgetMax(Math.max(parseInt(e.target.value), layoverBudgetMin + 50000))}
+                style={{ width: '100%', accentColor: C.gold }} />
             </div>
           </div>
-        )}
-      </div>
-    );
-  };
 
-  // ── Loading state ──
-  if (vendorsLoading) {
-    return (
-      <div style={{ height: 'calc(100vh - 60px)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.cream }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ width: 32, height: 32, border: `2px solid ${C.goldBorder}`, borderTopColor: C.gold, borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
-          <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Finding vendors for you...</p>
+          {/* Destination */}
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Destination</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
+              <button onClick={() => setLayoverCity('')} style={{
+                padding: '7px 14px', borderRadius: 20,
+                background: layoverCity === '' ? C.dark : C.ivory,
+                border: `1px solid ${layoverCity === '' ? C.dark : C.border}`,
+                color: layoverCity === '' ? C.gold : C.dark,
+                fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+              }}>Any</button>
+              {CITIES.map(city => (
+                <button key={city} onClick={() => setLayoverCity(layoverCity === city ? '' : city)} style={{
+                  padding: '7px 14px', borderRadius: 20,
+                  background: layoverCity === city ? C.dark : C.ivory,
+                  border: `1px solid ${layoverCity === city ? C.dark : C.border}`,
+                  color: layoverCity === city ? C.gold : C.dark,
+                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+                }}>{city}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Date */}
+          <div style={{ marginBottom: 24 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Wedding date</p>
+            <input type="date" value={layoverDate} onChange={e => setLayoverDate(e.target.value)} style={{
+              width: '100%', padding: '12px 14px', borderRadius: 10,
+              border: `1px solid ${C.border}`, background: C.ivory,
+              fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none',
+              boxSizing: 'border-box' as const,
+            }} />
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={browseAllFromLayover} style={{
+              flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
+              border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
+            }}>Just browsing</button>
+            <button onClick={applyLayoverFilters} style={{
+              flex: 2, padding: '14px', borderRadius: 10, background: C.dark,
+              border: 'none', color: C.gold, fontSize: 13,
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
+            }}>Apply filters</button>
+          </div>
         </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  // ── Empty state ──
-  if (vendors.length === 0) {
-    return (
-      <div style={{ padding: '80px 28px', textAlign: 'center' }}>
-        <Compass size={40} color={C.goldBorder} />
-        <h3 style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, margin: '16px 0 8px', fontWeight: 400 }}>No vendors found</h3>
-        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, marginBottom: 20 }}>Try adjusting your filters</p>
-        <button onClick={clearFilters} style={{
-          background: C.dark, border: 'none', borderRadius: 10, padding: '12px 24px',
-          color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-        }}>Clear all filters</button>
-      </div>
-    );
-  }
-
-  // ── End of stack (swipe/carousel/scroll exhausted) ──
-  if (currentIndex >= vendors.length && browseMode !== 'scroll') {
-    return (
-      <div style={{ padding: '80px 28px', textAlign: 'center' }}>
-        <Check size={40} color={C.gold} />
-        <h3 style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, color: C.dark, margin: '16px 0 8px', fontWeight: 400 }}>
-          You've seen everyone
-        </h3>
-        <p style={{ fontSize: 13, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, marginBottom: 20 }}>
-          {savedIds.size > 0 ? `${savedIds.size} vendor${savedIds.size !== 1 ? 's' : ''} saved to your Moodboard` : 'Try adjusting your filters for more options'}
-        </p>
-        <button onClick={() => { setCurrentIndex(0); currentIndexRef.current = 0; }} style={{
-          background: C.dark, border: 'none', borderRadius: 10, padding: '12px 24px',
-          color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-        }}>Start over</button>
-      </div>
-    );
-  }
-
+  // ══════════════════════════════════════════════════════════════
+  // FEED RENDER
+  // ══════════════════════════════════════════════════════════════
   return (
     <div style={{ position: 'relative' }}>
 
-      {/* ══════════════════════════════════════════════════════════
-          SCROLL MODE — vertical full-screen cards
-         ══════════════════════════════════════════════════════════ */}
-      {browseMode === 'scroll' && (
-        <div style={{
-          height: 'calc(100vh - 60px)', overflowY: 'auto', scrollSnapType: 'y mandatory',
-          scrollbarWidth: 'none' as const,
-        }}>
-          {vendors.map((v, i) => (
-            <div key={v.id} style={{ height: 'calc(100vh - 60px)', scrollSnapAlign: 'start', position: 'relative' }}
-              onClick={() => { setCurrentIndex(i); currentIndexRef.current = i; handleDoubleTap(v); }}>
-              {renderCard(v)}
-            </div>
-          ))}
-          {/* Featured boards at the end of scroll */}
-          {renderFeaturedBoards()}
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════
-          CAROUSEL MODE — horizontal full-screen cards
-         ══════════════════════════════════════════════════════════ */}
-      {browseMode === 'carousel' && (
-        <div style={{
-          height: 'calc(100vh - 60px)', overflowX: 'auto', scrollSnapType: 'x mandatory',
-          display: 'flex', scrollbarWidth: 'none' as const,
-        }}>
-          {vendors.map((v, i) => (
-            <div key={v.id} style={{ minWidth: '100%', height: '100%', scrollSnapAlign: 'start', position: 'relative', flexShrink: 0 }}
-              onClick={() => { setCurrentIndex(i); currentIndexRef.current = i; handleDoubleTap(v); }}>
-              {renderCard(v)}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════
-          SWIPE MODE — one card at a time with L/R swipe
-         ══════════════════════════════════════════════════════════ */}
-      {browseMode === 'swipe' && vendor && (
-        <div ref={swipeContainerRef} style={{ height: 'calc(100vh - 60px)', position: 'relative', overflow: 'hidden', touchAction: 'pan-y' }}
-          onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-          {/* Next card behind */}
-          {nextVendor && (
-            <div style={{ position: 'absolute', inset: 0, transform: 'scale(0.95)', opacity: 0.5 }}>
-              {renderCard(nextVendor)}
-            </div>
-          )}
-          {/* Active card */}
+      {/* Card viewport — fixed height, manual gesture */}
+      <div
+        style={{
+          height: 'calc(100vh - 60px)',
+          position: 'relative', overflow: 'hidden',
+          background: C.dark,
+          touchAction: 'none',
+          overscrollBehavior: 'contain' as const,
+        }}
+        onTouchStart={handleCardTouchStart}
+        onTouchMove={handleCardTouchMove}
+        onTouchEnd={handleCardTouchEnd}
+        onClick={() => vendor && handleCardTap(vendor)}
+      >
+        {/* Previous card (pre-rendered for back-gesture visual only — scroll/carousel) */}
+        {prevVendor && browseMode !== 'swipe' && (
           <div style={{
             position: 'absolute', inset: 0,
-            transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.03}deg)`,
-            transition: swipeOffset === 0 ? 'transform 0.3s ease' : 'none',
+            transform: prevTransform,
+            transition: isGesturing ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+            willChange: isGesturing ? 'transform' : 'auto',
           }}>
-            {renderCard(vendor)}
+            {renderCardContent(prevVendor, false)}
           </div>
-          {renderSwipeActions()}
+        )}
+
+        {/* Next card (behind current) */}
+        {nextVendor && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            transform: nextTransform,
+            transition: isGesturing ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+            opacity: browseMode === 'swipe' ? 0.5 : 1,
+            willChange: isGesturing ? 'transform' : 'auto',
+          }}>
+            {renderCardContent(nextVendor, false)}
+          </div>
+        )}
+
+        {/* Current card */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          transform: currentTransform,
+          transition: isGesturing ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          willChange: isGesturing ? 'transform' : 'auto',
+        }}>
+          {renderCardContent(vendor, true)}
         </div>
-      )}
 
-      {/* Category pills overlay */}
-      {renderCategoryPills()}
+        {renderSwipeActions()}
+      </div>
 
-      {/* ══════════════════════════════════════════════════════════
-          SAVE TOAST / UNDO
-         ══════════════════════════════════════════════════════════ */}
+      {/* SAVE TOAST / UNDO */}
       {saveToast && (
         <div style={{
           position: 'fixed', bottom: 'max(90px, calc(env(safe-area-inset-bottom) + 80px))',
@@ -2462,9 +2899,10 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════
-          FILTER SHEET
-         ══════════════════════════════════════════════════════════ */}
+      {/* CATEGORY LAYOVER */}
+      {showCategoryLayover && renderCategoryLayover()}
+
+      {/* FILTER SHEET (from filter button in Feed) */}
       {showFilter && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 60,
@@ -2473,26 +2911,31 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
           <div onClick={e => e.stopPropagation()} style={{
             width: '100%', maxWidth: 480, margin: '0 auto',
             background: C.cream, borderRadius: '20px 20px 0 0',
-            padding: '24px 20px max(24px, env(safe-area-inset-bottom))',
-            maxHeight: '80vh', overflow: 'auto',
+            padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
+            maxHeight: '85vh', overflow: 'auto',
+            overscrollBehavior: 'contain' as const,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>Refine your search</h3>
+            <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>Refine your search</h3>
               <button onClick={() => setShowFilter(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
                 <X size={18} color={C.muted} />
               </button>
             </div>
 
             {/* Category */}
-            <div style={{ marginBottom: 24 }}>
-              <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Category</p>
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Category</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
                 {CATEGORIES.map(cat => (
-                  <button key={cat.id} onClick={() => setFilterCategory(filterCategory === cat.id ? '' : cat.id)} style={{
+                  <button key={cat.id} onClick={() => setFeedCategory(feedCategory === cat.id ? '' : cat.id)} style={{
                     padding: '7px 14px', borderRadius: 20,
-                    background: filterCategory === cat.id ? C.dark : C.ivory,
-                    border: `1px solid ${filterCategory === cat.id ? C.dark : C.border}`,
-                    color: filterCategory === cat.id ? C.gold : C.dark,
+                    background: feedCategory === cat.id ? C.dark : C.ivory,
+                    border: `1px solid ${feedCategory === cat.id ? C.dark : C.border}`,
+                    color: feedCategory === cat.id ? C.gold : C.dark,
                     fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
                   }}>{cat.label}</button>
                 ))}
@@ -2500,47 +2943,47 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
             </div>
 
             {/* City */}
-            <div style={{ marginBottom: 24 }}>
-              <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>City</p>
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>City</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
                 {CITIES.map(city => (
-                  <button key={city} onClick={() => setFilterCity(filterCity === city ? '' : city)} style={{
+                  <button key={city} onClick={() => setFeedCity(feedCity === city ? '' : city)} style={{
                     padding: '7px 14px', borderRadius: 20,
-                    background: filterCity === city ? C.dark : C.ivory,
-                    border: `1px solid ${filterCity === city ? C.dark : C.border}`,
-                    color: filterCity === city ? C.gold : C.dark,
+                    background: feedCity === city ? C.dark : C.ivory,
+                    border: `1px solid ${feedCity === city ? C.dark : C.border}`,
+                    color: feedCity === city ? C.gold : C.dark,
                     fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
                   }}>{city}</button>
                 ))}
               </div>
             </div>
 
-            {/* Budget range slider */}
-            <div style={{ marginBottom: 24 }}>
-              <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Budget range</p>
+            {/* Budget range */}
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Budget range</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(filterBudgetMin)}</span>
+                <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(feedBudgetMin)}</span>
                 <span style={{ fontSize: 11, color: C.muted }}>to</span>
-                <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(filterBudgetMax)}</span>
+                <span style={{ fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, minWidth: 50 }}>{fmtPrice(feedBudgetMax)}</span>
               </div>
               <div style={{ marginBottom: 8 }}>
                 <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Min</label>
-                <input type="range" min={0} max={5000000} step={50000} value={filterBudgetMin}
-                  onChange={e => setFilterBudgetMin(Math.min(parseInt(e.target.value), filterBudgetMax - 50000))}
+                <input type="range" min={0} max={5000000} step={50000} value={feedBudgetMin}
+                  onChange={e => setFeedBudgetMin(Math.min(parseInt(e.target.value), feedBudgetMax - 50000))}
                   style={{ width: '100%', accentColor: C.gold }} />
               </div>
               <div>
                 <label style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Max</label>
-                <input type="range" min={0} max={5000000} step={50000} value={filterBudgetMax}
-                  onChange={e => setFilterBudgetMax(Math.max(parseInt(e.target.value), filterBudgetMin + 50000))}
+                <input type="range" min={0} max={5000000} step={50000} value={feedBudgetMax}
+                  onChange={e => setFeedBudgetMax(Math.max(parseInt(e.target.value), feedBudgetMin + 50000))}
                   style={{ width: '100%', accentColor: C.gold }} />
               </div>
             </div>
 
-            {/* Wedding date */}
-            <div style={{ marginBottom: 28 }}>
-              <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Wedding date</p>
-              <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{
+            {/* Date */}
+            <div style={{ marginBottom: 24 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Wedding date</p>
+              <input type="date" value={feedDate} onChange={e => setFeedDate(e.target.value)} style={{
                 width: '100%', padding: '12px 14px', borderRadius: 10,
                 border: `1px solid ${C.border}`, background: C.ivory,
                 fontFamily: 'DM Sans, sans-serif', fontSize: 13, color: C.dark, outline: 'none',
@@ -2548,14 +2991,13 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
               }} />
             </div>
 
-            {/* Actions */}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={clearFilters} style={{
+              <button onClick={clearFeedFilters} style={{
                 flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
                 border: `1px solid ${C.border}`, color: C.dark, fontSize: 13,
                 fontFamily: 'DM Sans, sans-serif', fontWeight: 400, cursor: 'pointer',
               }}>Clear all</button>
-              <button onClick={applyFilters} style={{
+              <button onClick={applyFeedFilters} style={{
                 flex: 2, padding: '14px', borderRadius: 10, background: C.dark,
                 border: 'none', color: C.gold, fontSize: 13,
                 fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
@@ -2565,9 +3007,7 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════
-          VENDOR PROFILE SLIDE-UP PANEL
-         ══════════════════════════════════════════════════════════ */}
+      {/* VENDOR PROFILE SLIDE-UP */}
       {profileVendor && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 55,
@@ -2575,21 +3015,26 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
           transition: 'background 0.3s',
           pointerEvents: profileVisible ? 'auto' : 'none',
         }} onClick={closeProfile}>
-          <div onClick={e => e.stopPropagation()} style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0,
-            maxWidth: 480, margin: '0 auto',
-            background: C.cream, borderRadius: '20px 20px 0 0',
-            height: '92vh',
-            transform: profileVisible ? 'translateY(0)' : 'translateY(100%)',
-            transition: 'transform 0.3s ease',
-            overflow: 'auto',
-          }}>
-            {/* Pull indicator */}
+          <div
+            ref={profileContentRef}
+            onClick={e => e.stopPropagation()}
+            onTouchStart={handleProfileTouchStart}
+            onTouchMove={handleProfileTouchMove}
+            onTouchEnd={handleProfileTouchEnd}
+            style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              maxWidth: 480, margin: '0 auto',
+              background: C.cream, borderRadius: '20px 20px 0 0',
+              height: '92vh',
+              transform: profileVisible ? `translateY(${profileOffset}px)` : 'translateY(100%)',
+              transition: profileOffset === 0 ? 'transform 0.3s ease' : 'none',
+              overflow: 'auto',
+              overscrollBehavior: 'contain' as const,
+            }}>
             <div style={{ padding: '10px 0 4px', textAlign: 'center', position: 'sticky', top: 0, background: C.cream, borderRadius: '20px 20px 0 0', zIndex: 2 }}>
               <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
             </div>
 
-            {/* Hero image */}
             <div style={{
               height: 300,
               background: `url(${getHeroImage(profileVendor)}) center/cover`,
@@ -2607,10 +3052,7 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
               </div>
             </div>
 
-            {/* Content */}
             <div style={{ padding: '20px 20px max(24px, env(safe-area-inset-bottom))' }}>
-
-              {/* Price + Rating row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div>
                   <p style={{ margin: '0 0 2px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Starting from</p>
@@ -2624,7 +3066,6 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
                 )}
               </div>
 
-              {/* Vibe tags */}
               {profileVendor.vibe_tags?.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 20 }}>
                   {profileVendor.vibe_tags.map((t: string) => (
@@ -2633,7 +3074,6 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
                 </div>
               )}
 
-              {/* About */}
               {profileVendor.about && (
                 <div style={{ marginBottom: 20 }}>
                   <p style={{ margin: '0 0 8px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>About</p>
@@ -2641,19 +3081,17 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
                 </div>
               )}
 
-              {/* Portfolio gallery */}
               {profileVendor.portfolio_images?.length > 0 && (
                 <div style={{ marginBottom: 20 }}>
                   <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Portfolio</p>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, borderRadius: 10, overflow: 'hidden' }}>
                     {profileVendor.portfolio_images.slice(0, 9).map((img: string, i: number) => (
-                      <div key={i} style={{ aspectRatio: '1', background: `url(${img}) center/cover`, borderRadius: i === 0 ? '10px 0 0 0' : i === 2 ? '0 10px 0 0' : 0 }} />
+                      <div key={i} style={{ aspectRatio: '1', background: `url(${img}) center/cover` }} />
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Details */}
               <div style={{ marginBottom: 20 }}>
                 <p style={{ margin: '0 0 10px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Details</p>
                 <div style={{ background: C.ivory, borderRadius: 12, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
@@ -2671,17 +3109,13 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
                 </div>
               </div>
 
-              {/* Packages placeholder */}
               <div style={{ background: C.goldSoft, border: `1px solid ${C.goldBorder}`, borderRadius: 12, padding: '16px 20px', marginBottom: 24, textAlign: 'center' }}>
                 <p style={{ margin: '0 0 4px', fontSize: 13, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>Packages coming soon</p>
                 <p style={{ margin: 0, fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>Detailed pricing and deliverables will be available here</p>
               </div>
 
-              {/* Action buttons */}
               <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => {
-                  handleSave(profileVendor);
-                }} style={{
+                <button onClick={() => handleSave(profileVendor)} style={{
                   flex: 1, padding: '14px', borderRadius: 10, background: C.ivory,
                   border: `1px solid ${C.border}`, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -2707,6 +3141,7 @@ function DiscoverTeaser({ session, cNavPush }: { session: CoupleSession | null; 
     </div>
   );
 }
+
 
 
 // ─────────────────────────────────────────────────────────────
@@ -10429,7 +10864,13 @@ function OnboardingFlow({ prefillCode, onComplete }: {
 export default function CoupleApp() {
   const [session, setSession] = useState<CoupleSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [appMode, setAppMode] = useState<AppMode>('plan');
+  const [appMode, setAppMode] = useState<AppMode>(() => {
+    if (typeof window === 'undefined') return 'plan';
+    return (localStorage.getItem('tdw_app_mode') as AppMode) || 'plan';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tdw_app_mode', appMode); } catch {}
+  }, [appMode]);
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
@@ -10470,7 +10911,7 @@ export default function CoupleApp() {
       else if (layer === 'dreamai') setShowDreamAi(false);
       else if (layer === 'feedback') setShowFeedback(false);
       else if (layer === 'tool') setActiveTool(null);
-      else if (layer === 'discover-profile' || layer === 'discover-filter') {
+      else if (layer === 'discover-profile' || layer === 'discover-filter' || layer === 'discover-layover' || layer === 'discover-feed-to-dash') {
         window.dispatchEvent(new CustomEvent('tdw-discover-back', { detail: layer }));
       }
     };
@@ -10547,7 +10988,7 @@ export default function CoupleApp() {
           onProfileTap={() => { setShowProfile(true); cNavPush('profile'); }}
         />
 
-        {appMode === 'discover' && <DiscoverTeaser session={session} cNavPush={cNavPush} />}
+        {appMode === 'discover' && <DiscoverTeaser session={session} cNavPush={cNavPush} onBackToPlan={() => setAppMode('plan')} />}
 
         {appMode === 'plan' && (
           <>
