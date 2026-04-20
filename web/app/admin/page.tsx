@@ -804,15 +804,51 @@ export default function AdminPage() {
 
   const updateTier = async (vendorId: string, tier: string) => {
     try {
-      await fetch(`${API}/api/subscriptions/${vendorId}/tier`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tier }) });
-      alert(`Tier updated to ${tier}`);
-    } catch(e) { alert('Failed to update tier'); }
+      const r = await fetch(`${API}/api/subscriptions/${vendorId}/tier`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        alert(`Tier updated to ${tier}`);
+        loadAll();
+      } else {
+        alert(`Failed to update tier: ${d.error || 'unknown error'}`);
+      }
+    } catch (e: any) { alert('Failed to update tier: ' + (e?.message || 'network error')); }
+  };
+  const updateCoupleTier = async (userId: string, dbTier: string) => {
+    // dbTier: 'free' (Basic) | 'premium' (Gold) | 'elite' (Platinum)
+    const tokenMap: any = { free: 3, premium: 15, elite: 999 };
+    const labelMap: any = { free: 'Basic', premium: 'Gold', elite: 'Platinum' };
+    try {
+      const r = await fetch(`${API}/api/admin/users/${userId}/tier`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ couple_tier: dbTier, token_balance: tokenMap[dbTier] }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        alert(`Tier updated to ${labelMap[dbTier]}`);
+        loadUsers();
+      } else {
+        alert(`Failed to update tier: ${d.error || 'unknown error'}`);
+      }
+    } catch (e: any) { alert('Failed to update tier: ' + (e?.message || 'network error')); }
   };
   const toggleFoundingBadge = async (vendorId: string, current: boolean) => {
     try {
-      await fetch(`${API}/api/subscriptions/${vendorId}/founding`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ founding_badge: !current }) });
-      alert(current ? 'Founding badge removed' : 'Founding badge granted');
-    } catch(e) { alert('Failed to update badge'); }
+      const r = await fetch(`${API}/api/subscriptions/${vendorId}/founding`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ founding_badge: !current }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        alert(current ? 'Founding badge removed' : 'Founding badge granted');
+        loadAll();
+      } else {
+        alert(`Failed: ${d.error || 'unknown error'}`);
+      }
+    } catch (e: any) { alert('Failed to update badge: ' + (e?.message || 'network error')); }
   };
   const updateVendor = async (id: string, payload: any) => {
     await fetch(`${API}/api/vendors/${id}`, {
@@ -1267,9 +1303,21 @@ export default function AdminPage() {
                       <td style={{ ...s.td, color: '#8C7B6E', fontSize: 12 }}>{u.email || '—'}</td>
                       <td style={{ ...s.td, color: '#8C7B6E', fontSize: 12 }}>{u.instagram || '—'}</td>
                       <td style={s.td}>
-                        <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 50, background: u.couple_tier === 'platinum' ? '#C9A84C15' : u.couple_tier === 'gold' ? '#E8D9B515' : '#F5F0E8', color: u.couple_tier === 'platinum' ? '#C9A84C' : u.couple_tier === 'gold' ? '#B8963A' : '#8C7B6E', textTransform: 'capitalize' }}>
-                          {u.couple_tier || 'basic'}
-                        </span>
+                        <select
+                          value={u.couple_tier || 'free'}
+                          onChange={e => updateCoupleTier(u.id, e.target.value)}
+                          style={{
+                            fontSize: 11, padding: '4px 8px', borderRadius: 6,
+                            border: '1px solid ' + (u.couple_tier === 'elite' ? '#C9A84C' : u.couple_tier === 'premium' ? '#E8D9B5' : '#E8E0D5'),
+                            background: u.couple_tier === 'elite' ? '#2C2420' : u.couple_tier === 'premium' ? '#FFF8EC' : '#fff',
+                            color: u.couple_tier === 'elite' ? '#C9A84C' : u.couple_tier === 'premium' ? '#B8963A' : '#8C7B6E',
+                            cursor: 'pointer' as const, fontWeight: 500,
+                          }}
+                        >
+                          <option value="free">Basic</option>
+                          <option value="premium">Gold</option>
+                          <option value="elite">Platinum</option>
+                        </select>
                       </td>
                       <td style={{ ...s.td, color: '#C9A84C', fontSize: 13 }}>{u.token_balance ?? 0}</td>
                       <td style={{ ...s.td, color: '#8C7B6E', fontSize: 11 }}>{u.created_at ? new Date(u.created_at).toLocaleDateString('en-IN') : '—'}</td>

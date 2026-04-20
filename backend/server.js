@@ -5295,42 +5295,6 @@ app.post('/api/subscriptions/check-expiry', async (req, res) => {
 });
 
 // ── Update vendor tier from admin ──
-app.put('/api/subscriptions/:vendorId/tier', async (req, res) => {
-  try {
-    const { tier } = req.body;
-    const vendorId = req.params.vendorId;
-
-    // Check if subscription exists
-    const { data: existing } = await supabase.from('vendor_subscriptions').select('*').eq('vendor_id', vendorId).limit(1);
-
-    if (existing && existing.length > 0) {
-      // Update existing
-      const aug1 = new Date('2026-08-01');
-      const thirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const trialEnd = new Date() < aug1 ? aug1.toISOString().split('T')[0] : thirtyDays.toISOString().split('T')[0];
-
-      const { data, error } = await supabase.from('vendor_subscriptions')
-        .update({ tier, status: 'trial', trial_end: trialEnd })
-        .eq('vendor_id', vendorId)
-        .select().single();
-      if (error) throw error;
-      res.json({ success: true, data });
-    } else {
-      // Create new
-      const aug1 = new Date('2026-08-01');
-      const thirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const trialEnd = new Date() < aug1 ? aug1.toISOString().split('T')[0] : thirtyDays.toISOString().split('T')[0];
-
-      const { data, error } = await supabase.from('vendor_subscriptions')
-        .insert([{ vendor_id: vendorId, tier, status: 'trial', trial_end: trialEnd }])
-        .select().single();
-      if (error) throw error;
-      res.json({ success: true, data });
-    }
-  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
-});
-
-
 // Get pending featured photos for admin approval
 // Log when featured photo is submitted
 app.post('/api/ds/photos', async (req, res) => {
@@ -7756,21 +7720,33 @@ app.post('/api/signup/login', async (req, res) => {
     let vendorCred = null;
     if (isPhone) {
       const { data } = await supabase.from('vendor_credentials')
-        .select('*').eq('phone_number', '+91' + clean.replace(/\D/g, '')).single();
+        .select('*').eq('phone_number', '+91' + clean.replace(/\D/g, '')).maybeSingle();
       vendorCred = data;
     }
     if (!vendorCred) {
       const { data } = await supabase.from('vendor_credentials')
-        .select('*').eq('username', clean).single();
+        .select('*').eq('username', clean).maybeSingle();
       vendorCred = data;
     }
 
     if (vendorCred) {
       const vendorMatch = await bcrypt.compare(password, vendorCred.password_hash);
       if (!vendorMatch) return res.json({ success: false, error: 'Invalid password' });
-      const { data: vendor } = await supabase.from('vendors').select('*').eq('id', vendorCred.vendor_id).single();
+      const { data: vendor } = await supabase.from('vendors').select('*').eq('id', vendorCred.vendor_id).maybeSingle();
+
+      // CRITICAL: if vendor row was deleted but credentials remain, treat as deleted account.
+      // Auto-clean the orphan credentials so subsequent signup with same phone works.
+      if (!vendor) {
+        try {
+          await supabase.from('vendor_credentials').delete().eq('id', vendorCred.id);
+          await supabase.from('vendor_logins').delete().eq('vendor_id', vendorCred.vendor_id);
+          await supabase.from('vendor_subscriptions').delete().eq('vendor_id', vendorCred.vendor_id);
+        } catch {}
+        return res.status(401).json({ success: false, error: 'Account no longer exists' });
+      }
+
       const { data: sub } = await supabase.from('vendor_subscriptions').select('tier, status, trial_end_date')
-        .eq('vendor_id', vendorCred.vendor_id).order('created_at', { ascending: false }).limit(1).single();
+        .eq('vendor_id', vendorCred.vendor_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
       
       // Check if this is a team member login
       const isTeam = vendorCred.is_team_member === true;
@@ -7778,13 +7754,13 @@ app.post('/api/signup/login', async (req, res) => {
       let teamMemberName = vendor?.name;
       if (isTeam && vendorCred.team_member_id) {
         const { data: member } = await supabase.from('vendor_team_members')
-          .select('name, role').eq('id', vendorCred.team_member_id).single();
+          .select('name, role').eq('id', vendorCred.team_member_id).maybeSingle();
         if (member) { teamRole = member.role || 'staff'; teamMemberName = member.name; }
       }
       
       return res.json({ success: true, data: {
-        type: 'vendor', id: vendor?.id, name: vendor?.name, category: vendor?.category,
-        city: vendor?.city, tier: sub?.tier || 'essential',
+        type: 'vendor', id: vendor.id, name: vendor.name, category: vendor.category,
+        city: vendor.city, tier: sub?.tier || 'essential',
         team_role: teamRole,
         team_member_name: isTeam ? teamMemberName : null,
         is_team_member: isTeam,
@@ -7795,18 +7771,19 @@ app.post('/api/signup/login', async (req, res) => {
     let user = null;
     if (isPhone) {
       const { data } = await supabase.from('users')
-        .select('*').eq('phone', '+91' + clean.replace(/\D/g, '')).single();
+        .select('*').eq('phone', '+91' + clean.replace(/\D/g, '')).maybeSingle();
       user = data;
     }
     if (!user) {
       const { data } = await supabase.from('users')
-        .select('*').eq('email', clean).single();
+        .select('*').eq('email', clean).maybeSingle();
       user = data;
     }
 
-    if (!user) return res.json({ success: false, error: 'Account not found. Please sign up first.' });
+    if (!user) return res.status(401).json({ success: false, error: 'Account not found. Please sign up first.' });
+    if (!user.password_hash) return res.status(401).json({ success: false, error: 'Account not found. Please sign up first.' });
     const coupleMatch = await bcrypt.compare(password, user.password_hash);
-    if (!coupleMatch) return res.json({ success: false, error: 'Invalid password' });
+    if (!coupleMatch) return res.status(401).json({ success: false, error: 'Invalid password' });
 
     const tierLabelMap = { free: 'basic', premium: 'gold', elite: 'platinum' };
 
