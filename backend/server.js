@@ -5034,10 +5034,10 @@ app.put('/api/ds/photos/:id', async (req, res) => {
         try {
           // Check if already on board to avoid duplicates
           const { data: existing } = await supabase.from('featured_boards')
-            .select('id').eq('vendor_id', vendor_id).eq('board', category).eq('image_url', url).limit(1).maybeSingle();
+            .select('id').eq('vendor_id', vendor_id).eq('board_type', category).eq('image_url', url).limit(1).maybeSingle();
           if (!existing) {
             await supabase.from('featured_boards').insert([{
-              vendor_id, board: category, image_url: url,
+              vendor_id, board_type: category, image_url: url,
               image_id: image_id || null,
               title: data.title || null, description: data.description || null,
               created_at: new Date().toISOString(),
