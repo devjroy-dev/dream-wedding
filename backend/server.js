@@ -4690,12 +4690,38 @@ app.get("/api/v2/couple/money/:userId", async (req, res) => {
       supabase.from("couple_expenses").select("*").eq("couple_id", userId).then(r => r.data || []),
       supabase.from("couple_events").select("id, event_name, budget_total").eq("couple_id", userId).then(r => r.data || []),
     ]);
-    const exps = expenses.map(e => ({ ...e, amount: e.actual_amount || 0, status: e.payment_status || "committed", vendor_name: e.vendor_name || null, purpose: e.description || null, event_name: e.event || null }));
+    const exps = expenses.map(e => ({
+      ...e,
+      actual_amount: e.actual_amount || 0,
+      amount: e.actual_amount || 0,
+      status: e.payment_status || "committed",
+      vendor_name: e.vendor_name || null,
+      purpose: e.description || null,
+      event_name: e.event || null,
+      due_date: e.due_date || null,
+    }));
     const committed = exps.filter(e => ["committed","paid"].includes(e.status)).reduce((s,e) => s + e.amount, 0);
-    const paid = exps.filter(e => e.status === "paid").reduce((s,e) => s + e.amount, 0);
-    const upcoming = exps.filter(e => e.status !== "paid");
-    const events = eventsRaw.map(e => ({ id: e.id, name: e.event_name || "", budget: e.budget_total || 0 }));
-    res.json({ totalBudget: profile?.total_budget || 0, committed, paid, events, thisWeek: upcoming.slice(0,2), next30: upcoming });
+    const paid      = exps.filter(e => e.status === "paid").reduce((s,e) => s + e.amount, 0);
+    const events    = eventsRaw.map(e => ({ id: e.id, name: e.event_name || "", budget: e.budget_total || 0 }));
+
+    // Upcoming payments bucketed by due_date
+    const now     = new Date(); now.setHours(0,0,0,0);
+    const in7     = new Date(now); in7.setDate(now.getDate() + 7);
+    const in30    = new Date(now); in30.setDate(now.getDate() + 30);
+
+    const unpaid  = exps.filter(e => e.status !== "paid");
+    const thisWeek = unpaid.filter(e => {
+      if (!e.due_date) return false;
+      const d = new Date(e.due_date); d.setHours(0,0,0,0);
+      return d >= now && d <= in7;
+    }).map(e => ({ ...e, bucket: "this_week" }));
+    const next30 = unpaid.filter(e => {
+      if (!e.due_date) return false;
+      const d = new Date(e.due_date); d.setHours(0,0,0,0);
+      return d > in7 && d <= in30;
+    }).map(e => ({ ...e, bucket: "next_30" }));
+
+    res.json({ totalBudget: profile?.total_budget || 0, committed, paid, events, thisWeek, next30 });
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 app.get("/api/v2/couple/guests/:userId", async (req, res) => {
@@ -4715,6 +4741,103 @@ app.get("/api/v2/couple/events/:userId", async (req, res) => {
     const rows = (data || []).map(e => ({ ...e, name: e.event_name || e.event_type || "", date: e.event_date || null, venue: e.venue || e.event_city || null, task_count: e.task_count ?? null, vendor_count: e.vendor_count ?? null, guest_count: e.guest_count ?? null }));
     res.json(rows);
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+
+
+// ─────────────────────────────────────────────
+// v2 Couple Auth — OTP via Twilio Verify
+// ─────────────────────────────────────────────
+
+app.post("/api/v2/couple/auth/send-otp", async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    if (!phone || phone.length !== 10) return res.status(400).json({ success: false, error: "Valid 10-digit phone required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) {
+      console.error("[v2 OTP] Twilio not configured");
+      return res.status(500).json({ success: false, error: "OTP service unavailable" });
+    }
+    const verification = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verifications.create({ to: "+91" + phone, channel: "sms" });
+    console.log("[v2 OTP] sent:", verification.status, "to +91" + phone);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[v2 OTP] send error:", err.code, err.message);
+    res.status(500).json({ success: false, error: "Failed to send OTP" });
+  }
+});
+
+app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
+  try {
+    const { phone, code } = req.body || {};
+    if (!phone || !code) return res.status(400).json({ success: false, error: "Phone and code required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) return res.status(500).json({ success: false, error: "OTP service unavailable" });
+
+    const check = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verificationChecks.create({ to: "+91" + phone, code });
+
+    if (check.status !== "approved") {
+      return res.status(401).json({ success: false, error: "Incorrect code" });
+    }
+
+    // Look up user in users table by phone
+    const fullPhone = "+91" + phone;
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, name, phone")
+      .eq("phone", fullPhone)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!user) return res.status(404).json({ success: false, error: "No account found. Join the waitlist." });
+
+    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone } });
+  } catch (err) {
+    console.error("[v2 OTP] verify error:", err.message);
+    res.status(500).json({ success: false, error: "Verification failed" });
+  }
+});
+
+
+// v2 Couple Auth — OTP via Twilio Verify
+app.post("/api/v2/couple/auth/send-otp", async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    if (!phone || phone.length !== 10) return res.status(400).json({ success: false, error: "Valid 10-digit phone required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) {
+      console.error("[v2 OTP] Twilio not configured");
+      return res.status(500).json({ success: false, error: "OTP service unavailable" });
+    }
+    const verification = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verifications.create({ to: "+91" + phone, channel: "sms" });
+    console.log("[v2 OTP] sent:", verification.status, "to +91" + phone);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[v2 OTP] send error:", err.code, err.message);
+    res.status(500).json({ success: false, error: "Failed to send OTP" });
+  }
+});
+
+app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
+  try {
+    const { phone, code } = req.body || {};
+    if (!phone || !code) return res.status(400).json({ success: false, error: "Phone and code required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) return res.status(500).json({ success: false, error: "OTP service unavailable" });
+    const check = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verificationChecks.create({ to: "+91" + phone, code });
+    if (check.status !== "approved") return res.status(401).json({ success: false, error: "Incorrect code" });
+    const fullPhone = "+91" + phone;
+    const { data: user, error } = await supabase.from("users").select("id, name, phone").eq("phone", fullPhone).maybeSingle();
+    if (error) throw error;
+    if (!user) return res.status(404).json({ success: false, error: "No account found. Join the waitlist." });
+    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone } });
+  } catch (err) {
+    console.error("[v2 OTP] verify error:", err.message);
+    res.status(500).json({ success: false, error: "Verification failed" });
+  }
 });
 
 server.listen(PORT, () => {
