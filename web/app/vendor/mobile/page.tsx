@@ -14549,10 +14549,8 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
   const [images, setImages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [filter, setFilter] = useState<string>('all');        // 'all' | 'featured' | 'portfolio' | 'album:XYZ'
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [showBulkTagSheet, setShowBulkTagSheet] = useState(false);
+  // Mode: 'view' = tap photo to delete, 'hero' = tap photo to set as hero, 'carousel' = tap photo to toggle carousel
+  const [mode, setMode] = useState<'view' | 'hero' | 'carousel'>('view');
   const [editingImage, setEditingImage] = useState<any>(null);
 
   const loadImages = async () => {
@@ -14604,7 +14602,7 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
           body: JSON.stringify({
             vendor_id: session.vendorId, url,
             width: check.width, height: check.height, file_size: f.size,
-            tags: ['portfolio'],
+            tags: [],
           }),
         });
         uploaded++;
@@ -14617,28 +14615,38 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
     if (skipped > 0) alert(`${uploaded} uploaded · ${skipped} skipped (low quality)`);
   };
 
-  const toggleSelect = (id: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  const setAsHero = async (imageId: string) => {
+    try {
+      const res = await fetch(`${API}/api/vendor-images/set-hero`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor_id: session.vendorId, image_id: imageId }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        await loadImages();
+        onReload();
+      } else {
+        alert(d.error || 'Could not set hero');
+      }
+    } catch { alert('Network error'); }
   };
 
-  const applyBulkTag = async (addTags: string[], removeTags: string[]) => {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
+  const toggleCarousel = async (imageId: string) => {
     try {
-      await fetch(`${API}/api/vendor-images/bulk-tag`, {
+      const res = await fetch(`${API}/api/vendor-images/toggle-carousel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_ids: ids, add_tags: addTags, remove_tags: removeTags }),
+        body: JSON.stringify({ vendor_id: session.vendorId, image_id: imageId }),
       });
-      await loadImages();
-      onReload();
-      setShowBulkTagSheet(false);
-      setSelectMode(false);
-      setSelected(new Set());
-    } catch {}
+      const d = await res.json();
+      if (d.success) {
+        await loadImages();
+        onReload();
+      } else if (d.error === 'tier_cap') {
+        alert(d.message || 'Carousel limit reached for your tier.');
+      } else {
+        alert(d.error || 'Could not toggle');
+      }
+    } catch { alert('Network error'); }
   };
 
   const deleteImage = async (id: string) => {
@@ -14651,255 +14659,101 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
     } catch {}
   };
 
-  // Unique albums derived from tags (tags starting with 'album:')
-  const allAlbums = new Set<string>();
-  images.forEach(img => {
-    const tags = Array.isArray(img.tags) ? img.tags : [];
-    tags.forEach((t: string) => { if (t.startsWith('album:')) allAlbums.add(t); });
-  });
-
-  // Apply filter
-  const filtered = images.filter(img => {
-    const tags = Array.isArray(img.tags) ? img.tags : [];
-    if (filter === 'all') return true;
-    return tags.includes(filter);
-  });
-
-  const taggedCounts = {
-    featured: images.filter(i => (i.tags || []).includes('featured')).length,
-    portfolio: images.filter(i => (i.tags || []).includes('portfolio')).length,
-    profile_pic: images.filter(i => (i.tags || []).includes('profile_pic')).length,
-  };
-
-  // Detail sheet for single image edit
+  // Detail sheet — only for delete now (no tag editing)
   if (editingImage) {
-    const tags = Array.isArray(editingImage.tags) ? editingImage.tags : [];
-    const toggle = (t: string) => {
-      const next = tags.includes(t) ? tags.filter((x: string) => x !== t) : [...tags, t];
-      setEditingImage({ ...editingImage, tags: next });
-    };
-    const save = async () => {
-      try {
-        await fetch(`${API}/api/vendor-images/${editingImage.id}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tags: editingImage.tags,
-            album_title: editingImage.album_title || null,
-            album_city: editingImage.album_city || null,
-            album_date: editingImage.album_date || null,
-            caption: editingImage.caption || null,
-          }),
-        });
-        await loadImages();
-        onReload();
-        setEditingImage(null);
-      } catch {}
-    };
     return (
       <div style={{
         position: 'fixed' as const, inset: 0, zIndex: 70,
-        background: 'rgba(0,0,0,0.9)', overflow: 'auto' as const,
-      }} onClick={() => setEditingImage(null)}>
-        <div onClick={e => e.stopPropagation()} style={{
-          maxWidth: 480, margin: '0 auto',
-          background: C.cream, minHeight: '100vh',
-          padding: '20px 20px 100px',
+        background: 'rgba(0,0,0,0.85)', display: 'flex' as const,
+        flexDirection: 'column' as const,
+      }}>
+        <div style={{
+          padding: 'max(24px, env(safe-area-inset-top)) 16px 16px',
+          display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const,
         }}>
-          <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, marginBottom: 16 }}>
-            <button onClick={() => setEditingImage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-              <X size={20} color={C.dark} />
-            </button>
-            <button onClick={() => deleteImage(editingImage.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-              <Trash2 size={18} color="#C65757" />
-            </button>
+          <button onClick={() => setEditingImage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6 }}>
+            <X size={22} color="#FFF" />
+          </button>
+          <div style={{ display: 'flex' as const, gap: 6 }}>
+            {(editingImage.tags || []).includes('hero') && (
+              <span style={{ padding: '4px 10px', borderRadius: 12, background: C.gold, fontSize: 9, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' as const }}>★ Hero</span>
+            )}
+            {(editingImage.tags || []).includes('carousel') && (
+              <span style={{ padding: '4px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.15)', fontSize: 9, color: '#FFF', fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' as const }}>Carousel</span>
+            )}
           </div>
-
-          <img src={editingImage.url} style={{ width: '100%', borderRadius: 12, marginBottom: 16 }} />
-
-          {/* ── Discover placement controls ── */}
-          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>
-            Discover placement
-          </p>
-          <div style={{ display: 'flex' as const, gap: 8, marginBottom: 8 }}>
-            <button onClick={async () => {
-              try {
-                const res = await fetch(`${API}/api/vendor-images/set-hero`, {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ vendor_id: session.vendorId, image_id: editingImage.id }),
-                });
-                const d = await res.json();
-                if (d.success) {
-                  await loadImages();
-                  setEditingImage({ ...editingImage, tags: [...(tags.filter((t: string) => t !== 'hero')), 'hero'] });
-                  alert('Set as Hero image — this is what couples will see first on Discover.');
-                }
-              } catch {}
-            }} disabled={tags.includes('hero')} style={{
-              flex: 1, padding: '11px 14px', borderRadius: 10,
-              background: tags.includes('hero') ? C.gold : C.ivory,
-              color: tags.includes('hero') ? C.dark : C.dark,
-              border: `1px solid ${tags.includes('hero') ? C.gold : C.border}`,
-              fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
-              cursor: tags.includes('hero') ? 'default' as const : 'pointer' as const,
-              display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6,
-            }}>
-              {tags.includes('hero') ? '★ Hero' : '☆ Set as Hero'}
-            </button>
-            <button onClick={async () => {
-              try {
-                const res = await fetch(`${API}/api/vendor-images/toggle-carousel`, {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ vendor_id: session.vendorId, image_id: editingImage.id }),
-                });
-                const d = await res.json();
-                if (d.success) {
-                  await loadImages();
-                  const newTags = d.added ? [...tags, 'carousel'] : tags.filter((t: string) => t !== 'carousel');
-                  setEditingImage({ ...editingImage, tags: newTags });
-                } else if (d.error === 'tier_cap') {
-                  alert(d.message || `Tier cap reached. Upgrade to add more.`);
-                }
-              } catch {}
-            }} style={{
-              flex: 1, padding: '11px 14px', borderRadius: 10,
-              background: tags.includes('carousel') ? C.dark : C.ivory,
-              color: tags.includes('carousel') ? C.gold : C.dark,
-              border: `1px solid ${tags.includes('carousel') ? C.dark : C.border}`,
-              fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-            }}>
-              {tags.includes('carousel') ? '✓ In Carousel' : '+ Add to Carousel'}
-            </button>
-          </div>
-          <p style={{ margin: '0 0 16px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '14px' }}>
-            Hero shows on Discover cards. Carousel shows when couples tap your profile.
-          </p>
-
-          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Tags</p>
-          <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
-            {['featured', 'portfolio', 'profile_pic'].map(t => {
-              const active = tags.includes(t);
-              return (
-                <button key={t} onClick={() => toggle(t)} style={{
-                  padding: '7px 12px', borderRadius: 20,
-                  background: active ? C.dark : C.ivory,
-                  color: active ? C.gold : C.dark,
-                  border: `1px solid ${active ? C.dark : C.border}`,
-                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-                }}>{t.replace('_', ' ')}</button>
-              );
-            })}
-          </div>
-
-          <p style={{ margin: '0 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Album (optional)</p>
-          <input value={editingImage.album_title || ''} onChange={e => setEditingImage({ ...editingImage, album_title: e.target.value })}
-            placeholder="e.g. Mumbai Wedding 2024" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
-          <div style={{ display: 'flex' as const, gap: 8, marginTop: 8 }}>
-            <input value={editingImage.album_city || ''} onChange={e => setEditingImage({ ...editingImage, album_city: e.target.value })}
-              placeholder="City" style={{ ...inputStyle, flex: 1 }} onFocus={scrollIntoViewOnFocus} />
-            <input type="date" value={editingImage.album_date || ''} onChange={e => setEditingImage({ ...editingImage, album_date: e.target.value })}
-              style={{ ...inputStyle, flex: 1 }} onFocus={scrollIntoViewOnFocus} />
-          </div>
-
-          <p style={{ margin: '16px 0 8px', fontSize: 10, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '2px', textTransform: 'uppercase' as const }}>Caption (optional)</p>
-          <input value={editingImage.caption || ''} onChange={e => setEditingImage({ ...editingImage, caption: e.target.value })}
-            placeholder="A short note for couples" style={inputStyle} onFocus={scrollIntoViewOnFocus} />
-
-          <button onClick={save} style={{
-            width: '100%', padding: '14px', borderRadius: 10,
-            background: C.dark, border: 'none' as const, color: C.gold, fontSize: 13,
-            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer', marginTop: 20,
-          }}>Save</button>
+          <button onClick={() => deleteImage(editingImage.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6 }}>
+            <Trash2 size={20} color="#FF8B8B" />
+          </button>
+        </div>
+        <div style={{ flex: 1, display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, padding: '20px' }}>
+          <img src={editingImage.url} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' as const, borderRadius: 12 }} />
         </div>
       </div>
     );
   }
 
+  // Compute counts for header
+  const tier = (session.tier || 'essential').toLowerCase();
+  const cap = tier === 'prestige' ? 20 : tier === 'signature' ? 10 : 5;
+  const hasHero = images.some(i => Array.isArray(i.tags) && i.tags.includes('hero'));
+  const carouselCount = images.filter(i => Array.isArray(i.tags) && i.tags.includes('carousel')).length;
+
   // Main grid view
   return (
     <div style={{ minHeight: 'calc(100vh - 120px)', background: C.cream, padding: '20px 20px 100px' }}>
-      <div style={{ display: 'flex' as const, justifyContent: 'space-between' as const, alignItems: 'flex-start' as const, marginBottom: 14 }}>
-        <div>
-          <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
-            Image Hub
-          </p>
-          <h2 style={{ margin: 0, fontSize: 22, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
-            All your media.
-          </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-            Upload once, tag for where it shows.
-          </p>
-          {(() => {
-            const tier = (session.tier || 'essential').toLowerCase();
-            const cap = tier === 'prestige' ? 20 : tier === 'signature' ? 10 : 5;
-            const hasHero = images.some(i => Array.isArray(i.tags) && i.tags.includes('hero'));
-            const carouselCount = images.filter(i => Array.isArray(i.tags) && i.tags.includes('carousel')).length;
-            const usedVisible = (hasHero ? 1 : 0) + carouselCount;
-            return (
-              <p style={{ margin: '6px 0 0', fontSize: 10, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '1.5px', textTransform: 'uppercase' as const }}>
-                Hero {hasHero ? '✓' : '—'} · Carousel {carouselCount}/{cap - 1} · {tier}
-              </p>
-            );
-          })()}
-        </div>
-        {images.length > 0 && (
-          <button onClick={() => { setSelectMode(!selectMode); setSelected(new Set()); }} style={{
-            padding: '6px 12px', borderRadius: 20,
-            background: selectMode ? C.dark : C.ivory,
-            color: selectMode ? C.gold : C.dark,
-            border: `1px solid ${selectMode ? C.dark : C.border}`,
-            fontSize: 11, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer',
-          }}>{selectMode ? 'Done' : 'Select'}</button>
-        )}
-      </div>
-
-      {/* Coaching pill */}
-      <div style={{
-        background: C.goldSoft, border: `1px solid ${C.goldBorder}`,
-        borderRadius: 10, padding: '10px 14px', marginBottom: 14,
-        display: 'flex' as const, gap: 8, alignItems: 'flex-start' as const,
-      }}>
-        <Sparkles size={12} color={C.gold} style={{ marginTop: 2, flexShrink: 0 }} />
-        <p style={{ margin: 0, fontSize: 11, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 400, lineHeight: '16px' }}>
-          Couples tend to spend 3x longer on profiles with vertical, high-resolution photos.
+      {/* Header */}
+      <div style={{ marginBottom: 14 }}>
+        <p style={{ margin: '0 0 4px', fontSize: 11, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '3px', textTransform: 'uppercase' as const }}>
+          Image Hub
+        </p>
+        <h2 style={{ margin: 0, fontSize: 22, color: C.dark, fontFamily: "'Playfair Display', serif", fontWeight: 500 }}>
+          All your media.
+        </h2>
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
+          Hero {hasHero ? '✓' : '—'} · Carousel {carouselCount}/{cap - 1} · {tier}
         </p>
       </div>
 
-      {/* Filter chips */}
-      <div style={{ display: 'flex' as const, gap: 6, marginBottom: 12, overflow: 'auto' as const, scrollbarWidth: 'none' as const }}>
-        <button onClick={() => setFilter('all')} style={{
-          padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
-          background: filter === 'all' ? C.dark : C.ivory,
-          color: filter === 'all' ? C.gold : C.dark,
-          border: `1px solid ${filter === 'all' ? C.dark : C.border}`,
-          fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-        }}>All ({images.length})</button>
-        {(['featured', 'portfolio', 'profile_pic'] as const).map(t => (
-          <button key={t} onClick={() => setFilter(t)} style={{
-            padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
-            background: filter === t ? C.dark : C.ivory,
-            color: filter === t ? C.gold : C.dark,
-            border: `1px solid ${filter === t ? C.dark : C.border}`,
-            fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-          }}>{t.replace('_', ' ')} ({taggedCounts[t]})</button>
-        ))}
-        {Array.from(allAlbums).map(a => (
-          <button key={a} onClick={() => setFilter(a)} style={{
-            padding: '6px 14px', borderRadius: 20, whiteSpace: 'nowrap' as const,
-            background: filter === a ? C.dark : C.ivory,
-            color: filter === a ? C.gold : C.dark,
-            border: `1px solid ${filter === a ? C.dark : C.border}`,
-            fontSize: 11, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-          }}>{a.replace('album:', '')}</button>
-        ))}
+      {/* TWO MODE BUTTONS */}
+      <div style={{ display: 'flex' as const, gap: 10, marginBottom: 14 }}>
+        <button onClick={() => setMode(mode === 'hero' ? 'view' : 'hero')} style={{
+          flex: 1, padding: '14px 12px', borderRadius: 12,
+          background: mode === 'hero' ? C.gold : C.ivory,
+          color: mode === 'hero' ? C.dark : C.dark,
+          border: `1px solid ${mode === 'hero' ? C.gold : C.goldBorder}`,
+          fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 600,
+          letterSpacing: '0.5px', cursor: 'pointer' as const,
+        }}>
+          {mode === 'hero' ? '★ Tap a photo to set as Hero' : '★ Set Hero'}
+        </button>
+        <button onClick={() => setMode(mode === 'carousel' ? 'view' : 'carousel')} style={{
+          flex: 1, padding: '14px 12px', borderRadius: 12,
+          background: mode === 'carousel' ? C.dark : C.ivory,
+          color: mode === 'carousel' ? C.gold : C.dark,
+          border: `1px solid ${mode === 'carousel' ? C.dark : C.goldBorder}`,
+          fontSize: 13, fontFamily: 'DM Sans, sans-serif', fontWeight: 600,
+          letterSpacing: '0.5px', cursor: 'pointer' as const,
+        }}>
+          {mode === 'carousel' ? '✓ Tap photos for Carousel' : '+ Carousel'}
+        </button>
       </div>
+
+      {/* Helper text — what tap does in current mode */}
+      <p style={{ margin: '0 0 14px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontStyle: 'italic' as const, textAlign: 'center' as const }}>
+        {mode === 'view' && 'Tap a photo to view or delete.'}
+        {mode === 'hero' && 'Hero is what couples see first on Discover. Choose one.'}
+        {mode === 'carousel' && `Carousel shows when couples open your profile. Tap to add or remove. (${carouselCount}/${cap - 1} used)`}
+      </p>
 
       {/* Upload button */}
       <label style={{
-        display: 'block' as const, padding: '12px 16px', borderRadius: 10,
+        display: 'block' as const, padding: '14px 16px', borderRadius: 10,
         background: C.dark, color: C.gold, fontSize: 13,
         fontFamily: 'DM Sans, sans-serif', fontWeight: 500,
         textAlign: 'center' as const, cursor: uploading ? 'wait' : 'pointer',
-        opacity: uploading ? 0.7 : 1, marginBottom: 14,
+        opacity: uploading ? 0.7 : 1, marginBottom: 16,
+        letterSpacing: '0.3px',
       }}>
         {uploading ? 'Uploading…' : '+ Upload photos'}
         <input type="file" multiple accept="image/*" onChange={handleUpload}
@@ -14909,53 +14763,64 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
       {/* Grid */}
       {loading ? (
         <p style={{ textAlign: 'center' as const, padding: '40px 0', color: C.muted, fontSize: 13, fontFamily: 'DM Sans, sans-serif' }}>Loading…</p>
-      ) : filtered.length === 0 ? (
+      ) : images.length === 0 ? (
         <div style={{ padding: '40px 20px', textAlign: 'center' as const }}>
           <ImageIcon size={28} color={C.goldBorder} />
-          <p style={{ margin: '10px 0 4px', fontSize: 14, color: C.dark, fontFamily: 'Playfair Display, serif', fontWeight: 400 }}>
-            {images.length === 0 ? 'No photos yet' : 'No photos with this tag'}
+          <p style={{ margin: '10px 0 4px', fontSize: 14, color: C.dark, fontFamily: "'Playfair Display', serif", fontWeight: 500 }}>
+            No photos yet
           </p>
           <p style={{ margin: 0, fontSize: 12, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300 }}>
-            {images.length === 0 ? 'Upload to get started.' : 'Change filter to see others.'}
+            Upload to get started.
           </p>
         </div>
       ) : (
         <div style={{ display: 'grid' as const, gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
-          {filtered.map(img => {
+          {images.map(img => {
             const tags = Array.isArray(img.tags) ? img.tags : [];
-            const isSel = selected.has(img.id);
+            const isHero = tags.includes('hero');
+            const inCarousel = tags.includes('carousel');
+            const handleTap = () => {
+              if (mode === 'hero') setAsHero(img.id);
+              else if (mode === 'carousel') toggleCarousel(img.id);
+              else setEditingImage(img);
+            };
             return (
-              <div key={img.id} onClick={() => selectMode ? toggleSelect(img.id) : setEditingImage(img)} style={{
+              <div key={img.id} onClick={handleTap} style={{
                 aspectRatio: '1', position: 'relative' as const, cursor: 'pointer' as const,
                 background: `url(${img.url}) center/cover`,
-                border: isSel ? `3px solid ${C.gold}` : `1px solid ${C.border}`,
+                border: isHero
+                  ? `3px solid ${C.gold}`
+                  : (inCarousel ? `2px solid ${C.dark}` : `1px solid ${C.border}`),
                 borderRadius: 8, overflow: 'hidden' as const,
               }}>
-                {/* Tag indicators */}
+                {/* Status badges in corner */}
                 <div style={{ position: 'absolute' as const, top: 4, left: 4, display: 'flex' as const, gap: 3, flexDirection: 'column' as const }}>
-                  {tags.includes('hero') && (
-                    <div style={{ background: C.gold, borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 600, letterSpacing: '0.5px' }}>★ HERO</div>
+                  {isHero && (
+                    <div style={{ background: C.gold, borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px' }}>★ HERO</div>
                   )}
-                  {tags.includes('carousel') && !tags.includes('hero') && (
-                    <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' }}>CAROUSEL</div>
-                  )}
-                  {tags.includes('featured') && !tags.includes('hero') && !tags.includes('carousel') && (
-                    <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' }}>FEATURED</div>
-                  )}
-                  {tags.includes('profile_pic') && (
-                    <div style={{ background: 'rgba(201,168,76,0.92)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.dark, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, letterSpacing: '0.5px' }}>PROFILE</div>
+                  {inCarousel && !isHero && (
+                    <div style={{ background: 'rgba(44,36,32,0.85)', borderRadius: 4, padding: '2px 6px', fontSize: 8, color: C.gold, fontFamily: 'DM Sans, sans-serif', fontWeight: 600, letterSpacing: '0.5px', backdropFilter: 'blur(4px)' as const }}>CAROUSEL</div>
                   )}
                 </div>
-                {/* Select indicator */}
-                {selectMode && (
+                {/* Mode-active overlay hint */}
+                {mode !== 'view' && (
                   <div style={{
-                    position: 'absolute' as const, top: 6, right: 6,
-                    width: 22, height: 22, borderRadius: 11,
-                    background: isSel ? C.gold : 'rgba(255,255,255,0.9)',
-                    border: `2px solid ${isSel ? C.gold : '#fff'}`,
+                    position: 'absolute' as const, inset: 0,
+                    background: mode === 'hero'
+                      ? (isHero ? 'rgba(201,168,76,0.25)' : 'rgba(255,255,255,0.15)')
+                      : (inCarousel ? 'rgba(44,36,32,0.4)' : 'rgba(255,255,255,0.15)'),
                     display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const,
                   }}>
-                    {isSel && <CheckCircle size={14} color={C.dark} />}
+                    {mode === 'hero' && isHero && (
+                      <div style={{ background: C.gold, borderRadius: '50%', width: 32, height: 32, display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const }}>
+                        <span style={{ fontSize: 18, color: C.dark }}>★</span>
+                      </div>
+                    )}
+                    {mode === 'carousel' && inCarousel && (
+                      <div style={{ background: C.dark, borderRadius: '50%', width: 32, height: 32, display: 'flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const }}>
+                        <CheckCircle size={18} color={C.gold} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -14963,84 +14828,10 @@ function DiscoveryImageHub({ session, onReload }: { session: VendorSession; onRe
           })}
         </div>
       )}
-
-      {/* Bulk-action bar (fixed bottom) */}
-      {selectMode && selected.size > 0 && (
-        <div style={{
-          position: 'fixed' as const, bottom: 'max(60px, env(safe-area-inset-bottom))',
-          left: 0, right: 0, maxWidth: 480, margin: '0 auto',
-          padding: '12px 16px', background: C.dark,
-          borderTop: `1px solid ${C.gold}`,
-          display: 'flex' as const, gap: 10, zIndex: 15,
-        }}>
-          <span style={{ color: C.gold, fontSize: 12, fontFamily: 'DM Sans, sans-serif', fontWeight: 500, alignSelf: 'center' as const, flex: 1 }}>
-            {selected.size} selected
-          </span>
-          <button onClick={() => setShowBulkTagSheet(true)} style={{
-            padding: '8px 14px', borderRadius: 8, background: C.gold,
-            border: 'none' as const, color: C.dark, fontSize: 12,
-            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer' as const,
-          }}>Tag</button>
-          <button onClick={async () => {
-            if (!confirm(`Delete ${selected.size} photos?`)) return;
-            for (const id of Array.from(selected)) {
-              try { await fetch(`${API}/api/vendor-images/${id}`, { method: 'DELETE' }); } catch {}
-            }
-            await loadImages(); onReload();
-            setSelected(new Set()); setSelectMode(false);
-          }} style={{
-            padding: '8px 14px', borderRadius: 8, background: 'transparent' as const,
-            border: `1px solid ${C.gold}`, color: C.gold, fontSize: 12,
-            fontFamily: 'DM Sans, sans-serif', fontWeight: 500, cursor: 'pointer' as const,
-          }}>Delete</button>
-        </div>
-      )}
-
-      {/* Bulk tag sheet */}
-      {showBulkTagSheet && (
-        <div style={{
-          position: 'fixed' as const, inset: 0, zIndex: 80,
-          background: 'rgba(0,0,0,0.6)', display: 'flex' as const, alignItems: 'flex-end' as const,
-        }} onClick={() => setShowBulkTagSheet(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            width: '100%', maxWidth: 480, margin: '0 auto',
-            background: C.cream, borderRadius: '20px 20px 0 0',
-            padding: '20px 20px max(24px, env(safe-area-inset-bottom))',
-          }}>
-            <div style={{ padding: '6px 0 12px', textAlign: 'center' as const }}>
-              <div style={{ width: 36, height: 4, borderRadius: 2, background: C.border, margin: '0 auto' }} />
-            </div>
-            <h3 style={{ margin: '0 0 16px', fontSize: 18, fontFamily: 'Playfair Display, serif', color: C.dark, fontWeight: 400 }}>
-              Tag {selected.size} photo{selected.size > 1 ? 's' : ''}
-            </h3>
-            <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Add tag:</p>
-            <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 18 }}>
-              {['featured', 'portfolio', 'profile_pic'].map(t => (
-                <button key={t} onClick={() => applyBulkTag([t], [])} style={{
-                  padding: '8px 14px', borderRadius: 20,
-                  background: C.ivory, color: C.dark,
-                  border: `1px solid ${C.border}`,
-                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-                }}>+ {t.replace('_', ' ')}</button>
-              ))}
-            </div>
-            <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif' }}>Remove tag:</p>
-            <div style={{ display: 'flex' as const, gap: 6, flexWrap: 'wrap' as const, marginBottom: 18 }}>
-              {['featured', 'portfolio', 'profile_pic'].map(t => (
-                <button key={t} onClick={() => applyBulkTag([], [t])} style={{
-                  padding: '8px 14px', borderRadius: 20,
-                  background: C.ivory, color: C.dark,
-                  border: `1px solid ${C.border}`,
-                  fontSize: 12, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-                }}>− {t.replace('_', ' ')}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
 
 function DiscoveryPower({ session, modeState, onReload }: { session: VendorSession; modeState: ModeState; onReload: () => void }) {
   const [activeSection, setActiveSection] = useState<'none' | 'profile' | 'offers' | 'featured' | 'boost' | 'insights' | 'flex'>('none');
