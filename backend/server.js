@@ -4801,6 +4801,21 @@ app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
 
 
 // v2 Couple Auth — OTP via Twilio Verify
+
+// ── SESSION 13: Waitlist endpoint ──
+app.post('/api/v2/waitlist', async (req, res) => {
+  try {
+    const { phone, instagram, role } = req.body;
+    const { error } = await supabase
+      .from('waitlist')
+      .insert([{ phone, instagram, role }]);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Waitlist error:', err);
+    res.status(500).json({ error: 'Failed to submit' });
+  }
+});
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
@@ -10079,4 +10094,19 @@ app.get('/api/v2/discovery/feed', async (req, res) => {
     console.error('Discovery feed error:', err);
     res.status(500).json({ error: 'Failed to load feed' });
   }
+
+// ── SESSION 13: Waitlist endpoint ──
+app.post('/api/v2/waitlist', async (req, res) => {
+  try {
+    const { phone, instagram, role } = req.body;
+    const { error } = await supabase
+      .from('waitlist')
+      .insert([{ phone, instagram, role }]);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Waitlist error:', err);
+    res.status(500).json({ error: 'Failed to submit' });
+  }
 });
+
