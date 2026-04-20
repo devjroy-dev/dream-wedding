@@ -9938,3 +9938,15 @@ app.get('/api/vendor-featured/admin/all', async (req, res) => {
     res.json({ success: true, data: enriched });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
+
+// v2 Discovery feed
+app.get('/api/v2/discovery/feed', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('discovery_seed_cards').select('*').eq('is_active', true).order('sort_order', { ascending: true });
+    if (error) throw error;
+    res.json({ cards: data });
+  } catch (err) {
+    console.error('Discovery feed error:', err);
+    res.status(500).json({ error: 'Failed to load feed' });
+  }
+});
