@@ -161,7 +161,7 @@ export default function AdminPage() {
   };
   const [activeTab, setActiveTab] = useState('dashboard');
   useEffect(() => { if (activeTab === 'tdw-ai') loadAiVendors(); }, [activeTab]);
-  useEffect(() => { if (activeTab === 'users') loadUsers(); }, [activeTab]);
+  useEffect(() => { if (activeTab === 'users' || activeTab === 'dashboard') loadUsers(); }, [activeTab]);
   useEffect(() => { if (activeTab === 'founding') loadFoundingVendors(); }, [activeTab]);
 
   // ── Hot Dates (Turn 9D) ────────────────────────────────────────
@@ -989,7 +989,8 @@ export default function AdminPage() {
           <div style={s.statGrid}>
             {[
               { l: 'Total Vendors', v: vendors.length, c: '#C9A84C' },
-              { l: 'Active', v: activeVendors.length, c: '#4CAF50' },
+              { l: 'Active Vendors', v: activeVendors.length, c: '#4CAF50' },
+              { l: 'Total Couples', v: users.length, c: '#C9A84C' },
               { l: 'Founding Partners', v: foundingPartners.length, c: '#C9A84C' },
               { l: 'Featured', v: featuredVendors.length, c: '#2196F3' },
               { l: 'Access Codes', v: codes.length, c: '#9C27B0' },

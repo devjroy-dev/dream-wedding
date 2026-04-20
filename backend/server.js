@@ -202,12 +202,19 @@ app.post('/api/users', async (req, res) => {
 
 app.get('/api/users', async (req, res) => {
   try {
+    // Use select('*') to tolerate any schema differences
     const { data, error } = await supabase.from('users')
-      .select('id, name, phone, email, couple_tier, token_balance, created_at, user_type, instagram')
+      .select('*')
       .order('created_at', { ascending: false });
-    if (error) throw error;
+    if (error) {
+      console.error('[GET /api/users] error:', error.message);
+      return res.status(500).json({ success: false, error: error.message });
+    }
     res.json({ success: true, data: data || [] });
-  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error) {
+    console.error('[GET /api/users] unhandled:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 app.delete('/api/users/:id', async (req, res) => {
