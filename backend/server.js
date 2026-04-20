@@ -4671,6 +4671,52 @@ function genCode() {
 }
 
 const PORT = process.env.PORT || 8080;
+
+// v2 Couple Plan endpoints
+app.get("/api/v2/couple/tasks/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_checklist").select("*").eq("couple_id", userId).order("due_date", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(t => ({ ...t, title: t.title || t.text || "", event_name: t.event_name || t.event || "", status: t.is_complete ? "done" : "pending", priority: t.priority === "high" ? "high" : t.priority === "low" ? "low" : "medium" }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/money/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const [profile, expenses, eventsRaw] = await Promise.all([
+      supabase.from("couple_profiles").select("total_budget").eq("user_id", userId).single().then(r => r.data),
+      supabase.from("couple_expenses").select("*").eq("couple_id", userId).then(r => r.data || []),
+      supabase.from("couple_events").select("id, event_name, budget_total").eq("couple_id", userId).then(r => r.data || []),
+    ]);
+    const exps = expenses.map(e => ({ ...e, amount: e.actual_amount || 0, status: e.payment_status || "committed", vendor_name: e.vendor_name || null, purpose: e.description || null, event_name: e.event || null }));
+    const committed = exps.filter(e => ["committed","paid"].includes(e.status)).reduce((s,e) => s + e.amount, 0);
+    const paid = exps.filter(e => e.status === "paid").reduce((s,e) => s + e.amount, 0);
+    const upcoming = exps.filter(e => e.status !== "paid");
+    const events = eventsRaw.map(e => ({ id: e.id, name: e.event_name || "", budget: e.budget_total || 0 }));
+    res.json({ totalBudget: profile?.total_budget || 0, committed, paid, events, thisWeek: upcoming.slice(0,2), next30: upcoming });
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/guests/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_guests").select("*").eq("couple_id", userId).order("name", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(g => ({ ...g, events: g.events || Object.keys(g.event_invites || {}), rsvp: g.rsvp_status || "pending" }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/events/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_events").select("*").eq("couple_id", userId).order("event_date", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(e => ({ ...e, name: e.event_name || e.event_type || "", date: e.event_date || null, venue: e.venue || e.event_city || null, task_count: e.task_count ?? null, vendor_count: e.vendor_count ?? null, guest_count: e.guest_count ?? null }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
