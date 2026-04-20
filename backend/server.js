@@ -5834,6 +5834,29 @@ const COUPLE_CHILD_TABLES = [
   'ai_token_purchases', 'notifications', 'messages',
 ];
 
+// Helper: delete all rows from a table reliably
+// Tries multiple strategies and returns {count, error}
+async function wipeTable(table) {
+  // Strategy 1: fetch all primary keys, then delete in batch
+  // First try common PK names
+  const pkCandidates = ['id', 'vendor_id', 'user_id', 'couple_id'];
+  for (const pk of pkCandidates) {
+    try {
+      const { data: rows, error: selErr } = await supabase.from(table).select(pk).limit(10000);
+      if (selErr) continue;
+      if (!rows) return { count: 0, error: null };
+      if (rows.length === 0) return { count: 0, error: null };
+      const ids = rows.map(r => r[pk]).filter(Boolean);
+      if (ids.length === 0) continue;
+      // Delete by PK values
+      const { error: delErr } = await supabase.from(table).delete().in(pk, ids);
+      if (delErr) return { count: 0, error: delErr.message };
+      return { count: ids.length, error: null };
+    } catch (e) { continue; }
+  }
+  return { count: 0, error: 'no-pk-found' };
+}
+
 app.post('/api/admin/wipe-vendors', async (req, res) => {
   try {
     const { confirm } = req.body || {};
@@ -5842,25 +5865,22 @@ app.post('/api/admin/wipe-vendors', async (req, res) => {
     }
     console.log('[wipe-vendors] STARTING — wiping ALL vendor data');
     const counts = {};
-    // Wipe all child tables first (FK constraints)
+    const errors = {};
+    // Wipe all child tables first
     for (const t of VENDOR_CHILD_TABLES) {
-      try {
-        const { count } = await supabase.from(t).delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        counts[t] = count || 0;
-      } catch (e) {
-        counts[t] = 'skip:' + (e.message || '').slice(0, 30);
-      }
+      const r = await wipeTable(t);
+      counts[t] = r.count;
+      if (r.error && r.error !== 'no-pk-found') errors[t] = r.error;
     }
-    // Now wipe vendors table
-    try {
-      const { count } = await supabase.from('vendors').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-      counts['vendors'] = count || 0;
-    } catch (e) {
-      counts['vendors'] = 'error:' + e.message;
-    }
+    // Now wipe vendors table itself
+    const vr = await wipeTable('vendors');
+    counts['vendors'] = vr.count;
+    if (vr.error) errors['vendors'] = vr.error;
+
     console.log('[wipe-vendors] DONE. Counts:', JSON.stringify(counts));
+    if (Object.keys(errors).length) console.error('[wipe-vendors] Errors:', JSON.stringify(errors));
     logActivity('admin_wipe_vendors', `Wiped all vendor data: ${JSON.stringify(counts)}`);
-    res.json({ success: true, wiped: counts });
+    res.json({ success: true, wiped: counts, errors });
   } catch (error) {
     console.error('[wipe-vendors] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -5875,24 +5895,20 @@ app.post('/api/admin/wipe-couples', async (req, res) => {
     }
     console.log('[wipe-couples] STARTING — wiping ALL couple data');
     const counts = {};
+    const errors = {};
     for (const t of COUPLE_CHILD_TABLES) {
-      try {
-        const { count } = await supabase.from(t).delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        counts[t] = count || 0;
-      } catch (e) {
-        counts[t] = 'skip:' + (e.message || '').slice(0, 30);
-      }
+      const r = await wipeTable(t);
+      counts[t] = r.count;
+      if (r.error && r.error !== 'no-pk-found') errors[t] = r.error;
     }
-    // Wipe users (only couples — preserve dreamer_type !== 'couple' if it exists)
-    try {
-      const { count } = await supabase.from('users').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-      counts['users'] = count || 0;
-    } catch (e) {
-      counts['users'] = 'error:' + e.message;
-    }
+    const ur = await wipeTable('users');
+    counts['users'] = ur.count;
+    if (ur.error) errors['users'] = ur.error;
+
     console.log('[wipe-couples] DONE. Counts:', JSON.stringify(counts));
+    if (Object.keys(errors).length) console.error('[wipe-couples] Errors:', JSON.stringify(errors));
     logActivity('admin_wipe_couples', `Wiped all couple data: ${JSON.stringify(counts)}`);
-    res.json({ success: true, wiped: counts });
+    res.json({ success: true, wiped: counts, errors });
   } catch (error) {
     console.error('[wipe-couples] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -5907,31 +5923,32 @@ app.post('/api/admin/wipe-all', async (req, res) => {
     }
     console.log('[wipe-all] STARTING — wiping vendors + couples + everything');
     const counts = { vendors: {}, couples: {} };
+    const errors = { vendors: {}, couples: {} };
+
     for (const t of VENDOR_CHILD_TABLES) {
-      try {
-        const { count } = await supabase.from(t).delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        counts.vendors[t] = count || 0;
-      } catch { counts.vendors[t] = 0; }
+      const r = await wipeTable(t);
+      counts.vendors[t] = r.count;
+      if (r.error && r.error !== 'no-pk-found') errors.vendors[t] = r.error;
     }
-    try {
-      const { count } = await supabase.from('vendors').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-      counts.vendors['vendors'] = count || 0;
-    } catch (e) { counts.vendors['vendors'] = 'error:' + e.message; }
+    const vr = await wipeTable('vendors');
+    counts.vendors['vendors'] = vr.count;
+    if (vr.error) errors.vendors['vendors'] = vr.error;
 
     for (const t of COUPLE_CHILD_TABLES) {
-      try {
-        const { count } = await supabase.from(t).delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        counts.couples[t] = count || 0;
-      } catch { counts.couples[t] = 0; }
+      const r = await wipeTable(t);
+      counts.couples[t] = r.count;
+      if (r.error && r.error !== 'no-pk-found') errors.couples[t] = r.error;
     }
-    try {
-      const { count } = await supabase.from('users').delete({ count: 'exact' }).neq('id', '00000000-0000-0000-0000-000000000000');
-      counts.couples['users'] = count || 0;
-    } catch (e) { counts.couples['users'] = 'error:' + e.message; }
+    const ur = await wipeTable('users');
+    counts.couples['users'] = ur.count;
+    if (ur.error) errors.couples['users'] = ur.error;
 
     console.log('[wipe-all] DONE. Counts:', JSON.stringify(counts));
+    if (Object.keys(errors.vendors).length || Object.keys(errors.couples).length) {
+      console.error('[wipe-all] Errors:', JSON.stringify(errors));
+    }
     logActivity('admin_wipe_all', `Wiped EVERYTHING: ${JSON.stringify(counts)}`);
-    res.json({ success: true, wiped: counts });
+    res.json({ success: true, wiped: counts, errors });
   } catch (error) {
     console.error('[wipe-all] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
