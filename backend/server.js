@@ -9177,10 +9177,19 @@ function computeTrialDeadline(startedAt, tier) {
 // ── Discovery mode state ────────────────────────────────────────────────
 app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
   try {
+    // Use minimal column set that's guaranteed to exist; rely on best-effort fetch for the rest
     const { data: v } = await supabase.from('vendors')
-      .select('id, tier, discovery_basics_completed_at, discovery_trial_started_at, discovery_trial_deadline, discovery_trial_status, discover_completion_pct, discover_listed, starting_price, response_time_commitment, phone, email, category, city, instagram, about')
+      .select('*')  // pick all columns — tolerant of missing schema fields
       .eq('id', req.params.vendor_id).maybeSingle();
     if (!v) return res.status(404).json({ success: false, error: 'vendor not found' });
+
+    // Tier from subscription table (NOT from vendors table)
+    let tier = 'essential';
+    try {
+      const { data: sub } = await supabase.from('vendor_subscriptions')
+        .select('tier').eq('vendor_id', v.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (sub?.tier) tier = sub.tier;
+    } catch {}
 
     // Determine what basics still need to be filled
     const missingBasics = [];
@@ -9192,38 +9201,49 @@ app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
     if (!v.starting_price) missingBasics.push('starting_price');
     if (!v.response_time_commitment) missingBasics.push('response_time_commitment');
 
-    const { count: imgCount } = await supabase.from('vendor_images')
-      .select('id', { count: 'exact', head: true }).eq('vendor_id', v.id);
-    if ((imgCount || 0) < 3) missingBasics.push('three_photos');
+    let imgCount = 0;
+    try {
+      const { count } = await supabase.from('vendor_images')
+        .select('id', { count: 'exact', head: true }).eq('vendor_id', v.id);
+      imgCount = count || 0;
+    } catch {}
+    if (imgCount < 3) missingBasics.push('three_photos');
 
-    // Is trial expired?
-    const deadline = v.discovery_trial_deadline ? new Date(v.discovery_trial_deadline) : null;
+    // Trial tracking — gracefully default if columns don't exist yet
+    const basicsCompletedAt = v.discovery_basics_completed_at || null;
+    const trialStartedAt = v.discovery_trial_started_at || null;
+    const trialDeadline = v.discovery_trial_deadline ? new Date(v.discovery_trial_deadline) : null;
+    let trialStatus = v.discovery_trial_status || 'not_started';
+    const completionPct = v.discover_completion_pct || 0;
+
     const now = new Date();
-    let status = v.discovery_trial_status || 'not_started';
-    if (status === 'active' && deadline && deadline < now && (v.discover_completion_pct || 0) < 100) {
-      status = 'paused';
-      await supabase.from('vendors').update({ discovery_trial_status: 'paused' }).eq('id', v.id);
+    if (trialStatus === 'active' && trialDeadline && trialDeadline < now && completionPct < 100) {
+      trialStatus = 'paused';
+      try { await supabase.from('vendors').update({ discovery_trial_status: 'paused' }).eq('id', v.id); } catch {}
     }
 
-    const daysLeft = deadline ? Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / 86400000)) : null;
+    const daysLeft = trialDeadline ? Math.max(0, Math.ceil((trialDeadline.getTime() - now.getTime()) / 86400000)) : null;
 
     res.json({
       success: true,
       data: {
         vendor_id: v.id,
-        tier: v.tier,
-        basics_completed: !!v.discovery_basics_completed_at,
-        basics_completed_at: v.discovery_basics_completed_at,
+        tier,
+        basics_completed: !!basicsCompletedAt,
+        basics_completed_at: basicsCompletedAt,
         missing_basics: missingBasics,
-        trial_started_at: v.discovery_trial_started_at,
-        trial_deadline: v.discovery_trial_deadline,
-        trial_status: status,
+        trial_started_at: trialStartedAt,
+        trial_deadline: v.discovery_trial_deadline || null,
+        trial_status: trialStatus,
         days_left: daysLeft,
-        completion_pct: v.discover_completion_pct || 0,
-        discover_listed: v.discover_listed,
+        completion_pct: completionPct,
+        discover_listed: !!v.discover_listed,
       },
     });
-  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error) {
+    console.error('[mode-state] error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Submit onboarding wall (first-time Discovery entry)
