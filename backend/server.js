@@ -10296,3 +10296,270 @@ app.post('/api/v2/waitlist', async (req, res) => {
   }
 });
 
+
+// ── SESSION 17: Razorpay + Vendor Today + Vendor Clients ──────────────────────
+
+// POST /api/v2/razorpay/create-order
+app.post('/api/v2/razorpay/create-order', async (req, res) => {
+  try {
+    const { amount, currency = 'INR', payment_type, user_id } = req.body;
+    if (!amount || !payment_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'amount, payment_type, user_id required' });
+    }
+    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return res.json({ success: false, error: 'Payment service not configured yet' });
+    }
+    const auth = Buffer.from(RAZORPAY_KEY_ID + ':' + RAZORPAY_KEY_SECRET).toString('base64');
+    const receipt = 'tdw_' + payment_type.slice(0, 8) + '_' + Date.now();
+    const orderRes = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: amount * 100,
+        currency,
+        receipt,
+        notes: { user_id, payment_type, purpose: 'tdw_couple_upgrade' },
+      }),
+    });
+    const order = await orderRes.json();
+    if (order.error) return res.json({ success: false, error: order.error.description || 'Order creation failed' });
+    // Record in payments table
+    try {
+      await supabase.from('payments').insert([{
+        user_id, amount, currency, payment_type,
+        razorpay_order_id: order.id, status: 'created',
+      }]);
+    } catch (e) {}
+    res.json({ success: true, order_id: order.id, amount: order.amount, currency: order.currency, key_id: RAZORPAY_KEY_ID });
+  } catch (err) {
+    console.error('[Razorpay] create-order error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/razorpay/verify-payment
+app.post('/api/v2/razorpay/verify-payment', async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, payment_type, user_id } = req.body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !payment_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!RAZORPAY_KEY_SECRET) return res.json({ success: false, error: 'Not configured' });
+    const crypto = require('crypto');
+    const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex');
+    if (expected !== razorpay_signature) {
+      return res.status(400).json({ success: false, error: 'Invalid signature' });
+    }
+    // Update payments table
+    try {
+      await supabase.from('payments')
+        .update({ status: 'paid', razorpay_payment_id, razorpay_signature })
+        .eq('razorpay_order_id', razorpay_order_id);
+    } catch (e) {}
+    // Apply entitlement by payment_type
+    if (payment_type === 'couple_gold') {
+      await supabase.from('users').update({ dreamer_type: 'gold' }).eq('id', user_id);
+    } else if (payment_type === 'couple_platinum') {
+      await supabase.from('users').update({ dreamer_type: 'platinum' }).eq('id', user_id);
+    } else if (payment_type === 'dreamer_tokens') {
+      const { data: cp } = await supabase.from('couple_profiles').select('dreamai_tokens').eq('user_id', user_id).maybeSingle();
+      const current = (cp && cp.dreamai_tokens) || 0;
+      await supabase.from('couple_profiles').update({ dreamai_tokens: current + 50 }).eq('user_id', user_id);
+    } else if (payment_type === 'vendor_signature') {
+      const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
+      if (existing) {
+        await supabase.from('vendor_subscriptions').update({ tier: 'signature', status: 'active' }).eq('vendor_id', user_id);
+      } else {
+        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'signature', status: 'active' }]);
+      }
+    } else if (payment_type === 'vendor_prestige') {
+      const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
+      if (existing) {
+        await supabase.from('vendor_subscriptions').update({ tier: 'prestige', status: 'active' }).eq('vendor_id', user_id);
+      } else {
+        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'prestige', status: 'active' }]);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Razorpay] verify-payment error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/vendor/today/:vendorId
+app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const today = new Date().toISOString().split('T')[0];
+    const todayStart = today + 'T00:00:00.000Z';
+    const todayEnd = today + 'T23:59:59.999Z';
+    const in48h = new Date(Date.now() + 48 * 3600000).toISOString();
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+
+    // Needs attention — overdue invoices
+    const { data: overdueInvoices } = await supabase.from('vendor_invoices')
+      .select('id, client_name, amount, due_date, status')
+      .eq('vendor_id', vendorId)
+      .in('status', ['pending', 'sent'])
+      .lt('due_date', today)
+      .order('due_date', { ascending: true })
+      .limit(3);
+
+    // Needs attention — unanswered enquiries (no reply in 24h)
+    const { data: openLeads } = await supabase.from('vendor_leads')
+      .select('id, couple_name, created_at, status')
+      .eq('vendor_id', vendorId)
+      .eq('status', 'new')
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    // Needs attention — upcoming shoots within 48h
+    const { data: upcomingShoot } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', today)
+      .lte('event_date', in48h)
+      .order('event_date', { ascending: true })
+      .limit(2);
+
+    // Build attention items — sort by urgency, cap at 3
+    const attention = [];
+    (overdueInvoices || []).forEach(inv => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'inv_' + inv.id,
+        type: 'invoice',
+        title: (inv.client_name || 'Client') + ' — invoice overdue',
+        subtitle: 'Due ' + new Date(inv.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        amount: inv.amount,
+        cta: 'Send reminder',
+      });
+    });
+    (openLeads || []).forEach(lead => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'lead_' + lead.id,
+        type: 'enquiry',
+        title: (lead.couple_name || 'New enquiry') + ' is waiting',
+        subtitle: 'Reply within 24 hours to stay top of feed',
+        cta: 'Reply with DreamAi',
+      });
+    });
+    (upcomingShoot || []).forEach(ev => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'shoot_' + ev.id,
+        type: 'shoot',
+        title: ev.title || 'Upcoming shoot',
+        subtitle: new Date(ev.event_date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }),
+        cta: 'Confirm team',
+      });
+    });
+
+    // Today's schedule
+    const { data: todayEvents } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', todayStart)
+      .lte('event_date', todayEnd)
+      .order('event_date', { ascending: true });
+
+    const todays_schedule = (todayEvents || []).map(ev => ({
+      id: ev.id,
+      time: new Date(ev.event_date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      event_name: ev.title || 'Event',
+      client_name: ev.client_name || null,
+    }));
+
+    // This week summary
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    const { data: weekEvents } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', weekStart.toISOString())
+      .lte('event_date', weekEnd.toISOString());
+
+    const { data: weekInvoices } = await supabase.from('vendor_invoices')
+      .select('amount, status')
+      .eq('vendor_id', vendorId)
+      .in('status', ['paid', 'pending', 'sent'])
+      .gte('due_date', weekStart.toISOString().split('T')[0])
+      .lte('due_date', weekEnd.toISOString().split('T')[0]);
+
+    const shootCount = (weekEvents || []).length;
+    const expectedRevenue = (weekInvoices || []).reduce((s, inv) => s + (inv.amount || 0), 0);
+
+    let this_week_summary = '';
+    const parts = [];
+    if (shootCount === 1) parts.push('One shoot');
+    else if (shootCount > 1) parts.push(shootCount + ' shoots');
+    if (expectedRevenue > 0) parts.push('₹' + expectedRevenue.toLocaleString('en-IN') + ' expected');
+    this_week_summary = parts.length ? parts.join(', ') + '.' : 'A quiet week ahead.';
+
+    // Discovery snapshot — last 7 days vs previous 7
+    const { data: thisWeekSnap } = await supabase.from('vendor_analytics_daily')
+      .select('profile_views, saves, enquiries')
+      .eq('vendor_id', vendorId)
+      .gte('day', weekAgo);
+
+    const { data: prevWeekSnap } = await supabase.from('vendor_analytics_daily')
+      .select('profile_views, saves, enquiries')
+      .eq('vendor_id', vendorId)
+      .gte('day', twoWeeksAgo)
+      .lt('day', weekAgo);
+
+    const sumSnap = (rows) => (rows || []).reduce(
+      (acc, r) => ({ views: acc.views + (r.profile_views || 0), saves: acc.saves + (r.saves || 0), enquiries: acc.enquiries + (r.enquiries || 0) }),
+      { views: 0, saves: 0, enquiries: 0 }
+    );
+    const cur = sumSnap(thisWeekSnap);
+    const prev = sumSnap(prevWeekSnap);
+
+    const snapshot = {
+      views: cur.views,
+      saves: cur.saves,
+      enquiries: cur.enquiries,
+      views_delta: cur.views - prev.views,
+      saves_delta: cur.saves - prev.saves,
+      enquiries_delta: cur.enquiries - prev.enquiries,
+    };
+
+    res.json({
+      success: true,
+      needs_attention: attention,
+      todays_schedule,
+      this_week_summary,
+      snapshot,
+    });
+  } catch (err) {
+    console.error('[Vendor Today] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/vendor/clients/:vendorId
+app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { data, error } = await supabase.from('vendor_clients')
+      .select('id, name, phone, event_type, event_date, budget, status, notes')
+      .eq('vendor_id', vendorId)
+      .order('event_date', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('[Vendor Clients] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
