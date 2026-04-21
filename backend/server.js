@@ -4860,7 +4860,7 @@ app.get('/api/v2/cover-photos', async (req, res) => {
 });
 
 app.post('/api/v2/admin/cover-photos', async (req, res) => {
-  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
@@ -4888,7 +4888,7 @@ app.post('/api/v2/admin/cover-photos', async (req, res) => {
 });
 
 app.put('/api/v2/admin/cover-photos/:id', async (req, res) => {
-  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
@@ -4910,7 +4910,7 @@ app.put('/api/v2/admin/cover-photos/:id', async (req, res) => {
 });
 
 app.delete('/api/v2/admin/cover-photos/:id', async (req, res) => {
-  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
