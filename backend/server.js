@@ -10563,3 +10563,321 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
   }
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SESSION 22 — DreamAi Deep Integration
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/dreamai/couple-context/:userId
+app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // User
+    const { data: user } = await supabase.from('users')
+      .select('id, name, wedding_date, partner_name')
+      .eq('id', userId).maybeSingle();
+
+    // Events
+    const { data: events } = await supabase.from('couple_events')
+      .select('id, event_name, event_date, venue, budget_allocated, budget_spent')
+      .eq('user_id', userId)
+      .order('event_date', { ascending: true });
+
+    // Tasks
+    const { data: tasks } = await supabase.from('couple_checklist')
+      .select('id, task_name, status, due_date, event_name, vendor_name, is_complete')
+      .eq('user_id', userId)
+      .order('due_date', { ascending: true });
+
+    // Budget
+    const { data: budgetRows } = await supabase.from('couple_planner_budget')
+      .select('total_budget, committed_amount, paid_amount')
+      .eq('user_id', userId).maybeSingle();
+
+    // Expenses / upcoming payments
+    const next30 = new Date(Date.now() + 30 * 86400000).toISOString();
+    const { data: expenses } = await supabase.from('couple_planner_budget')
+      .select('id, vendor_name, purpose, amount, actual_amount, due_date, status, event_name')
+      .eq('user_id', userId)
+      .order('due_date', { ascending: true });
+
+    // Muse (saved vendors)
+    const { data: muse } = await supabase.from('moodboard_items')
+      .select('id, vendor_id, vendors(name, category, tier)')
+      .eq('user_id', userId)
+      .limit(20);
+
+    // Guests
+    const { data: guestRows } = await supabase.from('couple_guests')
+      .select('id, rsvp_status')
+      .eq('user_id', userId);
+
+    const guestTotal = (guestRows || []).length;
+    const guestConfirmed = (guestRows || []).filter(g => g.rsvp_status === 'confirmed').length;
+    const guestPending = (guestRows || []).filter(g => g.rsvp_status === 'pending' || !g.rsvp_status).length;
+
+    // Overdue tasks
+    const now = new Date().toISOString();
+    const overdueTasks = (tasks || []).filter(t => !t.is_complete && t.due_date && t.due_date < now);
+
+    // Upcoming payments (next 30 days, unpaid)
+    const upcomingPayments = (expenses || []).filter(e =>
+      e.status !== 'paid' && e.due_date && e.due_date <= next30
+    );
+
+    // Days remaining to next event
+    let daysRemaining = null;
+    if (events && events.length > 0) {
+      const nextEv = events.find(e => e.event_date && new Date(e.event_date) >= new Date());
+      if (nextEv) {
+        daysRemaining = Math.ceil((new Date(nextEv.event_date) - new Date()) / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    res.json({
+      user: {
+        name: user?.name || null,
+        partner_name: user?.partner_name || null,
+        wedding_date: user?.wedding_date || null,
+        days_remaining: daysRemaining,
+      },
+      events: (events || []).map(e => ({
+        id: e.id,
+        name: e.event_name,
+        date: e.event_date,
+        budget_allocated: e.budget_allocated || 0,
+        budget_spent: e.budget_spent || 0,
+      })),
+      tasks: (tasks || []).map(t => ({
+        id: t.id,
+        title: t.task_name,
+        status: t.is_complete ? 'done' : (t.status || 'pending'),
+        due_date: t.due_date,
+        event_name: t.event_name,
+        vendor_name: t.vendor_name,
+      })),
+      budget: {
+        total: budgetRows?.total_budget || 0,
+        committed: budgetRows?.committed_amount || 0,
+        paid: budgetRows?.paid_amount || 0,
+        remaining: (budgetRows?.total_budget || 0) - (budgetRows?.committed_amount || 0),
+      },
+      muse: (muse || []).map(m => ({
+        id: m.id,
+        vendor_name: m.vendors?.name || null,
+        category: m.vendors?.category || null,
+        tier: m.vendors?.tier || null,
+      })),
+      guests: {
+        total: guestTotal,
+        confirmed: guestConfirmed,
+        pending: guestPending,
+      },
+      overdue_tasks: overdueTasks.map(t => ({
+        id: t.id,
+        title: t.task_name,
+        due_date: t.due_date,
+        event_name: t.event_name,
+      })),
+      upcoming_payments: upcomingPayments.map(e => ({
+        vendor_name: e.vendor_name,
+        amount: e.actual_amount || e.amount || 0,
+        due_date: e.due_date,
+        purpose: e.purpose,
+      })),
+    });
+  } catch (err) {
+    console.error('[DreamAi couple-context] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/dreamai/vendor-context/:vendorId
+app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    // Vendor
+    const { data: vendor } = await supabase.from('vendors')
+      .select('id, name, category, city')
+      .eq('id', vendorId).maybeSingle();
+
+    // Tier from subscriptions
+    let tier = 'essential';
+    try {
+      const { data: sub } = await supabase.from('vendor_subscriptions')
+        .select('tier').eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (sub?.tier) tier = sub.tier;
+    } catch {}
+
+    // Clients
+    const { data: clients } = await supabase.from('vendor_clients')
+      .select('id, name, event_type, event_date, budget, status')
+      .eq('vendor_id', vendorId)
+      .order('event_date', { ascending: true })
+      .limit(20);
+
+    // Invoices
+    const { data: invoices } = await supabase.from('vendor_invoices')
+      .select('id, client_name, amount, status, due_date')
+      .eq('vendor_id', vendorId)
+      .order('due_date', { ascending: false })
+      .limit(30);
+
+    // Enquiries
+    const { data: enquiries } = await supabase.from('vendor_leads')
+      .select('id, couple_name, message, created_at, budget, event_type, status')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    // Revenue
+    const thisMonthStart = new Date();
+    thisMonthStart.setDate(1); thisMonthStart.setHours(0,0,0,0);
+    const lastMonthStart = new Date(thisMonthStart);
+    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+
+    const paidInvoices = (invoices || []).filter(i => i.status === 'paid');
+    const thisMonthRev = paidInvoices
+      .filter(i => i.due_date && new Date(i.due_date) >= thisMonthStart)
+      .reduce((s, i) => s + (i.amount || 0), 0);
+    const lastMonthRev = paidInvoices
+      .filter(i => i.due_date && new Date(i.due_date) >= lastMonthStart && new Date(i.due_date) < thisMonthStart)
+      .reduce((s, i) => s + (i.amount || 0), 0);
+    const outstanding = (invoices || [])
+      .filter(i => i.status !== 'paid')
+      .reduce((s, i) => s + (i.amount || 0), 0);
+
+    // Calendar — next 60 days
+    const in60 = new Date(Date.now() + 60 * 86400000).toISOString();
+    const { data: calendar } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', new Date().toISOString())
+      .lte('event_date', in60)
+      .order('event_date', { ascending: true });
+
+    // Overdue invoices
+    const todayStr = new Date().toISOString().split('T')[0];
+    const overdueInvoices = (invoices || []).filter(i =>
+      i.status !== 'paid' && i.due_date && i.due_date < todayStr
+    );
+
+    res.json({
+      vendor: { name: vendor?.name || null, category: vendor?.category || null, tier },
+      clients: (clients || []).map(c => ({
+        id: c.id, name: c.name, event_type: c.event_type,
+        event_date: c.event_date, budget: c.budget, status: c.status,
+      })),
+      invoices: (invoices || []).slice(0, 10).map(i => ({
+        id: i.id, client_name: i.client_name,
+        amount: i.amount, paid: i.status === 'paid', due_date: i.due_date,
+      })),
+      enquiries: (enquiries || []).map(e => ({
+        id: e.id, name: e.couple_name, message: e.message,
+        date: e.created_at, budget: e.budget, event_type: e.event_type,
+      })),
+      revenue: {
+        this_month: thisMonthRev,
+        last_month: lastMonthRev,
+        outstanding,
+      },
+      calendar: (calendar || []).map(c => ({
+        date: c.event_date, client_name: c.client_name, event_name: c.title,
+      })),
+      overdue_invoices: overdueInvoices.map(i => ({
+        client_name: i.client_name, amount: i.amount, due_date: i.due_date,
+      })),
+    });
+  } catch (err) {
+    console.error('[DreamAi vendor-context] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/dreamai/chat
+app.post('/api/v2/dreamai/chat', async (req, res) => {
+  try {
+    const { userId, userType, message, context } = req.body || {};
+    if (!message) return res.status(400).json({ success: false, error: 'message required' });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ success: false, error: 'DreamAi not configured' });
+    }
+
+    const isCouple = userType === 'couple';
+    const systemPrompt = isCouple
+      ? `You are DreamAi, the AI wedding companion for The Dream Wedding. You have complete knowledge of this couple's wedding. Speak like a warm, intelligent wedding planner — concise, specific, never generic. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message. If asked to draft a WhatsApp message, reply with just the draft, no preamble.\n\nContext: ${JSON.stringify(context || {})}`
+      : `You are DreamAi, the AI business companion for The Dream Wedding. You have complete knowledge of this Maker's business. Speak like a sharp, professional business assistant — concise, data-driven. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message.\n\nContext: ${JSON.stringify(context || {})}`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }],
+      }),
+    });
+
+    const data = await response.json();
+    const reply = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('').trim();
+    if (!reply) return res.status(500).json({ success: false, error: 'No reply from DreamAi' });
+
+    res.json({ success: true, reply });
+  } catch (err) {
+    console.error('[DreamAi chat] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/dreamai/whatsapp-extract
+app.post('/api/v2/dreamai/whatsapp-extract', async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    if (!message) return res.status(400).json({ success: false, error: 'message required' });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ success: false, error: 'DreamAi not configured' });
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: 'Extract wedding lead details from this WhatsApp message. Return ONLY valid JSON with these exact fields: { "name": string|null, "phone": string|null, "wedding_date": string|null, "event_type": string|null, "budget": string|null, "city": string|null }. If a field cannot be found, use null. No preamble. No explanation. Just the JSON object.',
+        messages: [{ role: 'user', content: message }],
+      }),
+    });
+
+    const data = await response.json();
+    const raw = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('').trim();
+    let extracted = {};
+    try {
+      const clean = raw.replace(/```json|```/g, '').trim();
+      extracted = JSON.parse(clean);
+    } catch {
+      extracted = { name: null, phone: null, wedding_date: null, event_type: null, budget: null, city: null };
+    }
+
+    res.json({ success: true, data: extracted });
+  } catch (err) {
+    console.error('[DreamAi whatsapp-extract] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
