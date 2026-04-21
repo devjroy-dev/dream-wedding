@@ -8,6 +8,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -10934,8 +10936,6 @@ app.post('/api/v2/admin/invites/generate', async (req, res) => {
 });
 
 // Cover photo file upload via backend (bypasses anon key restriction)
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() });
 app.post('/api/v2/admin/cover-photos/upload', upload.single('file'), async (req, res) => {
   if (req.headers['x-admin-password'] !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
