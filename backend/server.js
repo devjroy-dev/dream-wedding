@@ -4816,6 +4816,97 @@ app.post('/api/v2/waitlist', async (req, res) => {
     res.status(500).json({ error: 'Failed to submit' });
   }
 });
+
+// ═══════════════════════════════════════════
+// COVER PHOTOS ENDPOINTS (Session 14)
+// ═══════════════════════════════════════════
+
+app.get('/api/v2/cover-photos', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .select('*')
+      .eq('is_active', true)
+      .or(`valid_to.is.null,valid_to.gte.${today}`)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    res.json({ photos: data });
+  } catch (err) {
+    console.error('GET cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/v2/admin/cover-photos', async (req, res) => {
+  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const { image_url, photographer_name, vendor_id, display_order, is_paid, amount_paid, valid_from, valid_to } = req.body;
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .insert([{
+        image_url,
+        photographer_name,
+        vendor_id: vendor_id || null,
+        display_order: display_order || 0,
+        is_paid: is_paid || false,
+        amount_paid: amount_paid || 0,
+        valid_from: valid_from || null,
+        valid_to: valid_to || null
+      }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('POST cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/v2/admin/cover-photos/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const updates = { ...req.body };
+    delete updates.id;
+    delete updates.created_at;
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('PUT cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/v2/admin/cover-photos/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .update({ is_active: false })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('DELETE cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
