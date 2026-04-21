@@ -10939,13 +10939,37 @@ app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
-    const filename = `cover_${Date.now()}.jpg`;
-    const { data, error } = await supabase.storage
-      .from('cover-photos')
-      .upload(filename, req.file.buffer, { contentType: 'image/jpeg', upsert: true });
-    if (error) throw error;
-    const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
-    res.json({ url: publicUrl });
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
