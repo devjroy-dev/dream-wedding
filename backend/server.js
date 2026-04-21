@@ -10902,7 +10902,7 @@ app.post('/api/v2/admin/invites/generate', async (req, res) => {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { data, error } = await supabase
       .from('invite_codes')
-      .insert({ code, role: role || 'vendor', tier: tier || 'essential', status: 'unused' })
+      .insert({ code, role: role || 'vendor', tier: tier || 'essential' })
       .select()
       .single();
     if (error) throw error;
