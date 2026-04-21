@@ -10279,6 +10279,7 @@ app.get('/api/v2/discovery/feed', async (req, res) => {
     console.error('Discovery feed error:', err);
     res.status(500).json({ error: 'Failed to load feed' });
   }
+});
 
 // ── SESSION 13: Waitlist endpoint ──
 app.post('/api/v2/waitlist', async (req, res) => {
