@@ -4406,6 +4406,19 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { sessionInfo, code } = req.body;
     if (!sessionInfo || !code) return res.status(400).json({ success: false, error: 'Session info and code required' });
+    // Demo bypass for both demo accounts
+    const demoPhones = ['9876543210', '9123456789'];
+    const sessionPhone = sessionInfo.replace('twilio_', '').replace('admin_sdk_', '');
+    if (demoPhones.includes(sessionPhone) && code === '123456') {
+      const phoneNumber = '+91' + sessionPhone;
+      try {
+        let uid;
+        try { const user = await admin.auth().getUserByPhoneNumber(phoneNumber); uid = user.uid; }
+        catch (e) { const newUser = await admin.auth().createUser({ phoneNumber }); uid = newUser.uid; }
+        const customToken = await admin.auth().createCustomToken(uid);
+        return res.json({ success: true, idToken: customToken, localId: uid, phoneNumber });
+      } catch (e) { return res.json({ success: true, localId: 'demo_' + sessionPhone, phoneNumber }); }
+    }
 
     // Handle Twilio verification
     if (sessionInfo.startsWith('twilio_')) {
