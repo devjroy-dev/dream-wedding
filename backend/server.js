@@ -4907,6 +4907,100 @@ app.delete('/api/v2/admin/cover-photos/:id', async (req, res) => {
   }
 });
 
+// GET /api/v2/couple/today/:userId
+// Returns: { priority_tasks[], this_week_events[], upcoming_payments[], budget{}, next_event }
+app.get('/api/v2/couple/today/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const in7Days = new Date(today.getTime() + 7*24*60*60*1000)
+      .toISOString().split('T')[0];
+
+    const { data: tasks } = await supabase
+      .from('couple_checklist')
+      .select('*')
+      .eq('couple_id', userId)
+      .eq('is_complete', false)
+      .order('due_date', { ascending: true })
+      .limit(3);
+
+    const { data: events } = await supabase
+      .from('couple_events')
+      .select('*')
+      .eq('couple_id', userId)
+      .gte('event_date', todayStr)
+      .lte('event_date', in7Days)
+      .order('event_date', { ascending: true });
+
+    const { data: payments } = await supabase
+      .from('couple_expenses')
+      .select('*')
+      .eq('couple_id', userId)
+      .neq('payment_status', 'paid')
+      .gte('due_date', todayStr)
+      .lte('due_date', in7Days)
+      .order('due_date', { ascending: true });
+
+    const { data: profile } = await supabase
+      .from('couple_profiles')
+      .select('total_budget')
+      .eq('user_id', userId)
+      .single();
+
+    const { data: allExpenses } = await supabase
+      .from('couple_expenses')
+      .select('actual_amount, payment_status')
+      .eq('couple_id', userId);
+
+    const committed = allExpenses?.filter(e =>
+      ['committed','paid'].includes(e.payment_status))
+      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
+    const paid = allExpenses?.filter(e => e.payment_status === 'paid')
+      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
+
+    const { data: nextEvents } = await supabase
+      .from('couple_events')
+      .select('*')
+      .eq('couple_id', userId)
+      .gte('event_date', todayStr)
+      .order('event_date', { ascending: true })
+      .limit(1);
+
+    res.json({
+      priority_tasks: tasks || [],
+      this_week_events: events || [],
+      upcoming_payments: payments || [],
+      budget: {
+        total: profile?.total_budget || 0,
+        committed,
+        paid,
+      },
+      next_event: nextEvents?.[0] || null,
+    });
+  } catch (err) {
+    console.error('Today endpoint error:', err);
+    res.status(500).json({ error: 'Failed to load today data' });
+  }
+});
+
+// PATCH /api/v2/couple/tasks/:id/complete
+app.patch('/api/v2/couple/tasks/:id/complete', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('couple_checklist')
+      .update({ is_complete: true })
+      .eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Task complete error:', err);
+    res.status(500).json({ error: 'Failed to mark task complete' });
+  }
+});
+
+
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
