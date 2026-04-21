@@ -10881,3 +10881,33 @@ app.post('/api/v2/dreamai/whatsapp-extract', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Admin Invite Routes
+app.get('/api/v2/admin/invites', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/v2/admin/invites/generate', async (req, res) => {
+  try {
+    const { role, tier } = req.body;
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .insert({ code, role: role || 'vendor', tier: tier || 'essential', status: 'unused' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
