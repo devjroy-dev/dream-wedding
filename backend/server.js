@@ -10932,3 +10932,23 @@ app.post('/api/v2/admin/invites/generate', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Cover photo file upload via backend (bypasses anon key restriction)
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+app.post('/api/v2/admin/cover-photos/upload', upload.single('file'), async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const filename = `cover_${Date.now()}.jpg`;
+    const { data, error } = await supabase.storage
+      .from('cover-photos')
+      .upload(filename, req.file.buffer, { contentType: 'image/jpeg', upsert: true });
+    if (error) throw error;
+    const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+    res.json({ url: publicUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
