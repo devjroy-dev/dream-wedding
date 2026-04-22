@@ -4704,61 +4704,6 @@ app.get("/api/v2/couple/tasks/:userId", async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 app.get("/api/v2/couple/money/:userId", async (req, res) => {
-// ─── CRITICAL: DB FIELD NAME INCONSISTENCY ────────────────────────────────────
-// v2 GET endpoints filter Supabase with `user_id`.
-// POST/PATCH/DELETE endpoints send `couple_id` in request body.
-// Both are the SAME value: session.id from localStorage couple_session.
-// Reading  →  user_id
-// Writing  →  couple_id
-// couple_expenses columns: `description` = purpose, `event` = event_name,
-//   `payment_status` = status, `actual_amount` = displayed amount
-// events v2 GET uses couple_id despite being a v2 endpoint — do not change.
-// NEVER rename any of these. NEVER normalise without a full DB migration.
-// ─────────────────────────────────────────────────────────────────────────────
-app.post("/api/couple/expenses", async (req, res) => {
-  try {
-    const {
-      couple_id,
-      vendor_name,
-      description,
-      actual_amount,
-      event,
-      category,
-      due_date,
-      payment_status,
-    } = req.body;
-
-    if (!couple_id || !vendor_name || !description || actual_amount == null) {
-      return res.status(400).json({ success: false, error: "couple_id, vendor_name, description, and actual_amount are required." });
-    }
-
-    const insertRow = {
-      couple_id,
-      vendor_name,
-      description,
-      actual_amount: Number(actual_amount),
-      event: event || null,
-      category: category || null,
-      due_date: due_date || null,
-      payment_status: payment_status || "committed",
-    };
-
-    const { data, error } = await supabase
-      .from("couple_expenses")
-      .insert(insertRow)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("POST /api/couple/expenses supabase error:", error);
-      return res.status(500).json({ success: false, error: error.message });
-    }
-
-    return res.json({ success: true, data });
-  } catch (err) {
-    console.error("POST /api/couple/expenses unexpected error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error." });
-  }
   const { userId } = req.params;
   try {
     const [profile, expenses, eventsRaw] = await Promise.all([
@@ -11150,6 +11095,122 @@ app.post('/api/v2/admin/invites/generate', async (req, res) => {
 });
 
 // Cover photo file upload via backend (bypasses anon key restriction)
+app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// S28: Add expense endpoint
+app.post('/api/couple/expenses', async (req, res) => {
+  const { couple_id, vendor_name, description, amount, event, category } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('couple_expenses')
+      .insert([{ couple_id, vendor_name, description, amount, event, category }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cover photo upload endpoint
+app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// S28: Add expense endpoint
+app.post('/api/couple/expenses', async (req, res) => {
+  const { couple_id, vendor_name, description, amount, event, category } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('couple_expenses')
+      .insert([{ couple_id, vendor_name, description, amount, event, category }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cover photo upload endpoint
 app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
   if (req.headers['x-admin-password'] !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
