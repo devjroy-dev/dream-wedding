@@ -10977,6 +10977,27 @@ app.get('/api/v2/admin/invites', async (req, res) => {
   }
 });
 
+
+app.post('/api/v2/invite/validate', async (req, res) => {
+  try {
+    const { code, role } = req.body || {};
+    if (!code) return res.status(400).json({ valid: false, error: 'Code required' });
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .select('*')
+      .eq('code', code.toUpperCase().trim())
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.json({ valid: false, error: 'Invalid invite code' });
+    if (data.status === 'used') return res.json({ valid: false, error: 'This code has already been used' });
+    if (data.expires_at && new Date(data.expires_at) < new Date()) return res.json({ valid: false, error: 'This code has expired' });
+    if (role && data.role !== role) return res.json({ valid: false, error: 'This code is not valid for your account type' });
+    res.json({ valid: true, tier: data.tier, role: data.role });
+  } catch (err) {
+    res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
 app.post('/api/v2/admin/invites/generate', async (req, res) => {
   try {
     const { role, tier } = req.body;
