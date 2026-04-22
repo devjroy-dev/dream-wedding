@@ -4704,6 +4704,61 @@ app.get("/api/v2/couple/tasks/:userId", async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 app.get("/api/v2/couple/money/:userId", async (req, res) => {
+// ─── CRITICAL: DB FIELD NAME INCONSISTENCY ────────────────────────────────────
+// v2 GET endpoints filter Supabase with `user_id`.
+// POST/PATCH/DELETE endpoints send `couple_id` in request body.
+// Both are the SAME value: session.id from localStorage couple_session.
+// Reading  →  user_id
+// Writing  →  couple_id
+// couple_expenses columns: `description` = purpose, `event` = event_name,
+//   `payment_status` = status, `actual_amount` = displayed amount
+// events v2 GET uses couple_id despite being a v2 endpoint — do not change.
+// NEVER rename any of these. NEVER normalise without a full DB migration.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post("/api/couple/expenses", async (req, res) => {
+  try {
+    const {
+      couple_id,
+      vendor_name,
+      description,
+      actual_amount,
+      event,
+      category,
+      due_date,
+      payment_status,
+    } = req.body;
+
+    if (!couple_id || !vendor_name || !description || actual_amount == null) {
+      return res.status(400).json({ success: false, error: "couple_id, vendor_name, description, and actual_amount are required." });
+    }
+
+    const insertRow = {
+      couple_id,
+      vendor_name,
+      description,
+      actual_amount: Number(actual_amount),
+      event: event || null,
+      category: category || null,
+      due_date: due_date || null,
+      payment_status: payment_status || "committed",
+    };
+
+    const { data, error } = await supabase
+      .from("couple_expenses")
+      .insert(insertRow)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("POST /api/couple/expenses supabase error:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("POST /api/couple/expenses unexpected error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error." });
+  }
   const { userId } = req.params;
   try {
     const [profile, expenses, eventsRaw] = await Promise.all([
