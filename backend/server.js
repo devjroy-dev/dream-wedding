@@ -4845,7 +4845,8 @@ app.post('/api/v2/waitlist', async (req, res) => {
 
 
 app.post('/api/v2/auth/set-pin', async (req, res) => {
-  const { userId, pin, role, phone } = req.body;
+  const { userId, pin, role: rawRole, phone } = req.body;
+  const role = (rawRole === 'couple') ? 'user' : rawRole;
   if (!pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
   try {
     const hash = await bcrypt.hash(pin, 10);
