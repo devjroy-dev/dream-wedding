@@ -4890,7 +4890,7 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
   const { userId, role, phone } = req.query;
   if (!role) return res.status(400).json({ success: false, error: 'role required' });
   try {
-    const table = (role === 'vendor') ? 'vendors' : 'users';
+    const table = (role === 'vendor') ? 'vendors' : 'users'; // couple and user both map to users
     let query = supabase.from(table).select('pin_set');
     if (phone) {
       const bare = phone.replace(/\D/g, '').slice(-10);
@@ -10988,6 +10988,35 @@ app.get('/api/v2/admin/invites', async (req, res) => {
 });
 
 
+
+
+app.post('/api/v2/couple/upsert', async (req, res) => {
+  const { phone, invite_code } = req.body;
+  if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+  try {
+    const bare = phone.replace(/\D/g, '').slice(-10);
+    const full = '+91' + bare;
+    let existing = null;
+    const { data: d1 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', full).maybeSingle();
+    if (d1) existing = d1;
+    if (!existing) {
+      const { data: d2 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', bare).maybeSingle();
+      if (d2) existing = d2;
+    }
+    if (existing) return res.json({ success: true, userId: existing.id, pin_set: !!existing.pin_set, created: false });
+    const { data: newUser, error } = await supabase.from('users').insert([{
+      phone: full,
+      created_at: new Date().toISOString(),
+    }]).select('id').single();
+    if (error) throw error;
+    if (invite_code) {
+      await supabase.from('invite_codes').update({ status: 'used', used_by: newUser.id }).eq('code', invite_code.toUpperCase());
+    }
+    res.json({ success: true, userId: newUser.id, pin_set: false, created: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.post('/api/v2/vendor/upsert', async (req, res) => {
   const { phone, tier, invite_code } = req.body;
