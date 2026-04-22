@@ -4844,12 +4844,19 @@ app.post('/api/v2/waitlist', async (req, res) => {
 
 
 app.post('/api/v2/auth/set-pin', async (req, res) => {
-  const { userId, pin, role } = req.body;
-  if (!userId || !pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
+  const { userId, pin, role, phone } = req.body;
+  if (!pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
   try {
     const hash = await bcrypt.hash(pin, 10);
     const table = role === 'vendor' ? 'vendors' : 'users';
-    const { error } = await supabase.from(table).update({ pin_set: true, pin_hash: hash }).eq('id', userId);
+    let query = supabase.from(table).update({ pin_set: true, pin_hash: hash });
+    if (phone) {
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      query = query.eq('phone', fullPhone);
+    } else {
+      query = query.eq('id', userId);
+    }
+    const { error } = await query;
     if (error) throw error;
     res.json({ success: true });
   } catch (err) {
