@@ -4893,13 +4893,12 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
     const table = (role === 'vendor') ? 'vendors' : 'users';
     let query = supabase.from(table).select('pin_set');
     if (phone) {
-      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
-      const { data: d1 } = await supabase.from(table).select('pin_set').eq('phone', fullPhone).maybeSingle();
-      if (!d1) {
-        const { data: d2 } = await supabase.from(table).select('pin_set').eq('phone', phone).maybeSingle();
-        return res.json({ success: true, pin_set: !!d2?.pin_set });
-      }
-      return res.json({ success: true, pin_set: !!d1?.pin_set, userId: d1?.id });
+      const bare = phone.replace(/\D/g, '').slice(-10);
+      const full = '+91' + bare;
+      const { data: d1 } = await supabase.from(table).select('id, pin_set').eq('phone', full).maybeSingle();
+      if (d1) return res.json({ success: true, pin_set: !!d1.pin_set, userId: d1.id });
+      const { data: d2 } = await supabase.from(table).select('id, pin_set').eq('phone', bare).maybeSingle();
+      return res.json({ success: true, pin_set: !!d2?.pin_set, userId: d2?.id });
     }
     const { data, error } = await query.eq('id', userId).maybeSingle();
     if (error) throw error;
