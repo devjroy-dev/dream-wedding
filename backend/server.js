@@ -4887,11 +4887,21 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
 });
 
 app.get('/api/v2/auth/pin-status', async (req, res) => {
-  const { userId, role } = req.query;
-  if (!userId || !role) return res.status(400).json({ success: false, error: 'userId and role required' });
+  const { userId, role, phone } = req.query;
+  if (!role) return res.status(400).json({ success: false, error: 'role required' });
   try {
-    const table = role === 'vendor' ? 'vendors' : 'users';
-    const { data, error } = await supabase.from(table).select('pin_set').eq('id', userId).maybeSingle();
+    const table = (role === 'vendor') ? 'vendors' : 'users';
+    let query = supabase.from(table).select('pin_set');
+    if (phone) {
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      const { data: d1 } = await supabase.from(table).select('pin_set').eq('phone', fullPhone).maybeSingle();
+      if (!d1) {
+        const { data: d2 } = await supabase.from(table).select('pin_set').eq('phone', phone).maybeSingle();
+        return res.json({ success: true, pin_set: !!d2?.pin_set });
+      }
+      return res.json({ success: true, pin_set: !!d1?.pin_set });
+    }
+    const { data, error } = await query.eq('id', userId).maybeSingle();
     if (error) throw error;
     res.json({ success: true, pin_set: !!data?.pin_set });
   } catch (err) {
