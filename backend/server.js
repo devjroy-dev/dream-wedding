@@ -16,23 +16,13 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
+app.use(cors());
 app.use(express.json());
 // Block v1 domain - only allow v2 and local
 app.use((req, res, next) => {
   const origin = req.headers.origin || req.headers.referer || '';
   const isV1 = origin.includes('thedreamwedding.in') && !origin.includes('app.thedreamwedding.in') && !origin.includes('tdw-2');
   if (isV1) return res.status(403).json({ error: 'v1 is retired. Please use app.thedreamwedding.in' });
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    // Allow all origins for now - domain blocking happens in next middleware
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
   next();
 });
 
