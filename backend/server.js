@@ -4899,7 +4899,7 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
         const { data: d2 } = await supabase.from(table).select('pin_set').eq('phone', phone).maybeSingle();
         return res.json({ success: true, pin_set: !!d2?.pin_set });
       }
-      return res.json({ success: true, pin_set: !!d1?.pin_set });
+      return res.json({ success: true, pin_set: !!d1?.pin_set, userId: d1?.id });
     }
     const { data, error } = await query.eq('id', userId).maybeSingle();
     if (error) throw error;
