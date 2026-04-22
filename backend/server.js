@@ -11006,7 +11006,6 @@ app.post('/api/v2/vendor/upsert', async (req, res) => {
     // Create new vendor record
     const { data: newVendor, error } = await supabase.from('vendors').insert([{
       phone: fullPhone,
-      tier: tier || 'essential',
       created_at: new Date().toISOString(),
     }]).select('id').single();
     if (error) throw error;
