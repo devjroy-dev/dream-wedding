@@ -25,6 +25,7 @@
     "@shopify/flash-list": "2.0.2",
     "async-storage": "^0.1.0",
     "axios": "^1.15.0",
+    "bcryptjs": "^3.0.3",
     "expo": "~54.0.33",
     "expo-auth-session": "~7.0.10",
     "expo-constants": "~18.0.13",
