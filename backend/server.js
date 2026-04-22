@@ -4838,6 +4838,60 @@ app.post('/api/v2/waitlist', async (req, res) => {
   }
 });
 
+
+// ═══════════════════════════════════════════
+// PIN AUTH ENDPOINTS (Session 23)
+// ═══════════════════════════════════════════
+
+const bcrypt = require('bcryptjs');
+
+app.post('/api/v2/auth/set-pin', async (req, res) => {
+  const { userId, pin, role } = req.body;
+  if (!userId || !pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
+  try {
+    const hash = await bcrypt.hash(pin, 10);
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    const { error } = await supabase.from(table).update({ pin_set: true, pin_hash: hash }).eq('id', userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v2/auth/verify-pin', async (req, res) => {
+  const { userId, pin, role, phone } = req.body;
+  if (!pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
+  try {
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    const field = role === 'vendor' ? 'id' : 'id';
+    let query = supabase.from(table).select('id, pin_hash, pin_set');
+    if (userId) query = query.eq('id', userId);
+    else if (phone) query = query.eq('phone', phone);
+    const { data, error } = await query.maybeSingle();
+    if (error) throw error;
+    if (!data || !data.pin_set || !data.pin_hash) return res.status(400).json({ success: false, error: 'PIN not set' });
+    const match = await bcrypt.compare(pin, data.pin_hash);
+    if (!match) return res.status(400).json({ success: false, error: 'Incorrect PIN' });
+    res.json({ success: true, userId: data.id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/v2/auth/pin-status', async (req, res) => {
+  const { userId, role } = req.query;
+  if (!userId || !role) return res.status(400).json({ success: false, error: 'userId and role required' });
+  try {
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    const { data, error } = await supabase.from(table).select('pin_set').eq('id', userId).maybeSingle();
+    if (error) throw error;
+    res.json({ success: true, pin_set: !!data?.pin_set });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════
 // COVER PHOTOS ENDPOINTS (Session 14)
 // ═══════════════════════════════════════════
