@@ -4842,7 +4842,6 @@ app.post('/api/v2/waitlist', async (req, res) => {
 // PIN AUTH ENDPOINTS (Session 23)
 // ═══════════════════════════════════════════
 
-const bcrypt = require('bcryptjs');
 
 app.post('/api/v2/auth/set-pin', async (req, res) => {
   const { userId, pin, role } = req.body;
