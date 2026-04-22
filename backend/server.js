@@ -10989,6 +10989,37 @@ app.get('/api/v2/admin/invites', async (req, res) => {
 });
 
 
+
+app.post('/api/v2/vendor/upsert', async (req, res) => {
+  const { phone, tier, invite_code } = req.body;
+  if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+  try {
+    const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+    const barePhone = phone.replace('+91', '');
+    // Check if vendor exists with either phone format
+    let { data: existing } = await supabase.from('vendors').select('id, phone, pin_set').eq('phone', fullPhone).maybeSingle();
+    if (!existing) {
+      const { data: existing2 } = await supabase.from('vendors').select('id, phone, pin_set').eq('phone', barePhone).maybeSingle();
+      existing = existing2;
+    }
+    if (existing) return res.json({ success: true, vendorId: existing.id, pin_set: !!existing.pin_set, created: false });
+    // Create new vendor record
+    const { data: newVendor, error } = await supabase.from('vendors').insert([{
+      phone: fullPhone,
+      tier: tier || 'essential',
+      created_at: new Date().toISOString(),
+    }]).select('id').single();
+    if (error) throw error;
+    // Mark invite code as used
+    if (invite_code) {
+      await supabase.from('invite_codes').update({ status: 'used', used_by: newVendor.id }).eq('code', invite_code.toUpperCase());
+    }
+    res.json({ success: true, vendorId: newVendor.id, pin_set: false, created: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/v2/invite/validate', async (req, res) => {
   try {
     const { code, role } = req.body || {};
