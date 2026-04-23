@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 
 const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) : null;
@@ -7,7 +8,6 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -18,6 +18,14 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+// Block v1 domain - only allow v2 and local
+app.use((req, res, next) => {
+  const origin = req.headers.origin || req.headers.referer || '';
+  const isV1 = origin.includes('thedreamwedding.in') && !origin.includes('app.thedreamwedding.in') && !origin.includes('tdw-2');
+  if (isV1) return res.status(403).json({ error: 'v1 is retired. Please use app.thedreamwedding.in' });
+  next();
+});
+
 app.use(express.urlencoded({ extended: true }));
 
 const supabase = createClient(
@@ -4406,6 +4414,19 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { sessionInfo, code } = req.body;
     if (!sessionInfo || !code) return res.status(400).json({ success: false, error: 'Session info and code required' });
+    // Demo bypass for both demo accounts
+    const demoPhones = ['9876543210', '9123456789'];
+    const sessionPhone = sessionInfo.replace('twilio_', '').replace('admin_sdk_', '');
+    if (demoPhones.includes(sessionPhone) && code === '123456') {
+      const phoneNumber = '+91' + sessionPhone;
+      try {
+        let uid;
+        try { const user = await admin.auth().getUserByPhoneNumber(phoneNumber); uid = user.uid; }
+        catch (e) { const newUser = await admin.auth().createUser({ phoneNumber }); uid = newUser.uid; }
+        const customToken = await admin.auth().createCustomToken(uid);
+        return res.json({ success: true, idToken: customToken, localId: uid, phoneNumber });
+      } catch (e) { return res.json({ success: true, localId: 'demo_' + sessionPhone, phoneNumber }); }
+    }
 
     // Handle Twilio verification
     if (sessionInfo.startsWith('twilio_')) {
@@ -4671,6 +4692,417 @@ function genCode() {
 }
 
 const PORT = process.env.PORT || 8080;
+
+// v2 Couple Plan endpoints
+app.get("/api/v2/couple/tasks/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_checklist").select("*").eq("couple_id", userId).order("due_date", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(t => ({ ...t, title: t.title || t.text || "", event_name: t.event_name || t.event || "", status: t.is_complete ? "done" : "pending", priority: t.priority === "high" ? "high" : t.priority === "low" ? "low" : "medium" }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/money/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const [profile, expenses, eventsRaw] = await Promise.all([
+      supabase.from("couple_profiles").select("total_budget").eq("user_id", userId).single().then(r => r.data),
+      supabase.from("couple_expenses").select("*").eq("couple_id", userId).then(r => r.data || []),
+      supabase.from("couple_events").select("id, event_name, budget_total").eq("couple_id", userId).then(r => r.data || []),
+    ]);
+    const exps = expenses.map(e => ({
+      ...e,
+      actual_amount: e.actual_amount || 0,
+      amount: e.actual_amount || 0,
+      status: e.payment_status || "committed",
+      vendor_name: e.vendor_name || null,
+      purpose: e.description || null,
+      event_name: e.event || null,
+      due_date: e.due_date || null,
+    }));
+    const committed = exps.filter(e => ["committed","paid"].includes(e.status)).reduce((s,e) => s + e.amount, 0);
+    const paid      = exps.filter(e => e.status === "paid").reduce((s,e) => s + e.amount, 0);
+    const events    = eventsRaw.map(e => ({ id: e.id, name: e.event_name || "", budget: e.budget_total || 0 }));
+
+    // Upcoming payments bucketed by due_date
+    const now     = new Date(); now.setHours(0,0,0,0);
+    const in7     = new Date(now); in7.setDate(now.getDate() + 7);
+    const in30    = new Date(now); in30.setDate(now.getDate() + 30);
+
+    const unpaid  = exps.filter(e => e.status !== "paid");
+    const thisWeek = unpaid.filter(e => {
+      if (!e.due_date) return false;
+      const d = new Date(e.due_date); d.setHours(0,0,0,0);
+      return d >= now && d <= in7;
+    }).map(e => ({ ...e, bucket: "this_week" }));
+    const next30 = unpaid.filter(e => {
+      if (!e.due_date) return false;
+      const d = new Date(e.due_date); d.setHours(0,0,0,0);
+      return d > in7 && d <= in30;
+    }).map(e => ({ ...e, bucket: "next_30" }));
+
+    res.json({ totalBudget: profile?.total_budget || 0, committed, paid, events, thisWeek, next30 });
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/guests/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_guests").select("*").eq("couple_id", userId).order("name", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(g => ({ ...g, events: g.events || Object.keys(g.event_invites || {}), rsvp: g.rsvp_status || "pending" }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+app.get("/api/v2/couple/events/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const { data, error } = await supabase.from("couple_events").select("*").eq("couple_id", userId).order("event_date", { ascending: true });
+    if (error) throw error;
+    const rows = (data || []).map(e => ({ ...e, name: e.event_name || e.event_type || "", date: e.event_date || null, venue: e.venue || e.event_city || null, task_count: e.task_count ?? null, vendor_count: e.vendor_count ?? null, guest_count: e.guest_count ?? null }));
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+});
+
+
+// ─────────────────────────────────────────────
+// v2 Couple Auth — OTP via Twilio Verify
+// ─────────────────────────────────────────────
+
+app.post("/api/v2/couple/auth/send-otp", async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    if (!phone || phone.length !== 10) return res.status(400).json({ success: false, error: "Valid 10-digit phone required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) {
+      console.error("[v2 OTP] Twilio not configured");
+      return res.status(500).json({ success: false, error: "OTP service unavailable" });
+    }
+    const verification = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verifications.create({ to: "+91" + phone, channel: "sms" });
+    console.log("[v2 OTP] sent:", verification.status, "to +91" + phone);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[v2 OTP] send error:", err.code, err.message);
+    res.status(500).json({ success: false, error: "Failed to send OTP" });
+  }
+});
+
+app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
+  try {
+    const { phone, code } = req.body || {};
+    if (!phone || !code) return res.status(400).json({ success: false, error: "Phone and code required" });
+    if (!twilioClient || !TWILIO_VERIFY_SID) return res.status(500).json({ success: false, error: "OTP service unavailable" });
+
+    const check = await twilioClient.verify.v2
+      .services(TWILIO_VERIFY_SID)
+      .verificationChecks.create({ to: "+91" + phone, code });
+
+    if (check.status !== "approved") {
+      return res.status(401).json({ success: false, error: "Incorrect code" });
+    }
+
+    // Look up user in users table by phone
+    const fullPhone = "+91" + phone;
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, name, phone")
+      .eq("phone", fullPhone)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!user) return res.status(404).json({ success: false, error: "No account found. Join the waitlist." });
+
+    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone } });
+  } catch (err) {
+    console.error("[v2 OTP] verify error:", err.message);
+    res.status(500).json({ success: false, error: "Verification failed" });
+  }
+});
+
+
+// v2 Couple Auth — OTP via Twilio Verify
+
+// ── SESSION 13: Waitlist endpoint ──
+app.post('/api/v2/waitlist', async (req, res) => {
+  try {
+    const { phone, instagram, role } = req.body;
+    const { error } = await supabase
+      .from('waitlist')
+      .insert([{ phone, instagram, role }]);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Waitlist error:', err);
+    res.status(500).json({ error: 'Failed to submit' });
+  }
+});
+
+
+// ═══════════════════════════════════════════
+// PIN AUTH ENDPOINTS (Session 23)
+// ═══════════════════════════════════════════
+
+
+app.post('/api/v2/auth/set-pin', async (req, res) => {
+  const { userId, pin, role: rawRole, phone } = req.body;
+  const role = (rawRole === 'couple') ? 'user' : rawRole;
+  if (!pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
+  try {
+    const hash = await bcrypt.hash(pin, 10);
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    let query = supabase.from(table).update({ pin_set: true, pin_hash: hash });
+    if (phone) {
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      query = query.eq('phone', fullPhone);
+    } else {
+      query = query.eq('id', userId);
+    }
+    const { error } = await query;
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v2/auth/verify-pin', async (req, res) => {
+  const { userId, pin, role, phone } = req.body;
+  if (!pin || pin.length !== 4) return res.status(400).json({ success: false, error: 'Invalid PIN' });
+  try {
+    const table = (role === 'vendor') ? 'vendors' : 'users';
+    let data = null;
+    if (phone) {
+      const bare = phone.replace(/\D/g, '').slice(-10);
+      const full = '+91' + bare;
+      const { data: d1 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('phone', full).maybeSingle();
+      if (d1) data = d1;
+      if (!data) {
+        const { data: d2 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('phone', bare).maybeSingle();
+        if (d2) data = d2;
+      }
+    }
+    if (!data && userId) {
+      const { data: d3 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('id', userId).maybeSingle();
+      if (d3) data = d3;
+    }
+    const error = null;
+    if (error) throw error;
+    if (!data || !data.pin_set || !data.pin_hash) return res.status(400).json({ success: false, error: 'PIN not set' });
+    const match = await bcrypt.compare(pin, data.pin_hash);
+    if (!match) return res.status(400).json({ success: false, error: 'Incorrect PIN' });
+    res.json({ success: true, userId: data.id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/v2/auth/pin-status', async (req, res) => {
+  const { userId, role, phone } = req.query;
+  if (!role) return res.status(400).json({ success: false, error: 'role required' });
+  try {
+    const table = (role === 'vendor') ? 'vendors' : 'users'; // couple and user both map to users
+    let query = supabase.from(table).select('pin_set');
+    if (phone) {
+      const bare = phone.replace(/\D/g, '').slice(-10);
+      const full = '+91' + bare;
+      const { data: d1 } = await supabase.from(table).select('id, pin_set').eq('phone', full).maybeSingle();
+      if (d1) return res.json({ success: true, pin_set: !!d1.pin_set, userId: d1.id });
+      const { data: d2 } = await supabase.from(table).select('id, pin_set').eq('phone', bare).maybeSingle();
+      return res.json({ success: true, pin_set: !!d2?.pin_set, userId: d2?.id });
+    }
+    const { data, error } = await query.eq('id', userId).maybeSingle();
+    if (error) throw error;
+    res.json({ success: true, pin_set: !!data?.pin_set });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════
+// COVER PHOTOS ENDPOINTS (Session 14)
+// ═══════════════════════════════════════════
+
+app.get('/api/v2/cover-photos', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .select('*')
+      .eq('is_active', true)
+      .or(`valid_to.is.null,valid_to.gte.${today}`)
+      .order('display_order', { ascending: true });
+    if (error) throw error;
+    res.json({ photos: data });
+  } catch (err) {
+    console.error('GET cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/v2/admin/cover-photos', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const { image_url, photographer_name, vendor_id, display_order, is_paid, amount_paid, valid_from, valid_to } = req.body;
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .insert([{
+        image_url,
+        photographer_name,
+        vendor_id: vendor_id || null,
+        display_order: display_order || 0,
+        is_paid: is_paid || false,
+        amount_paid: amount_paid || 0,
+        valid_from: valid_from || null,
+        valid_to: valid_to || null
+      }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('POST cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/v2/admin/cover-photos/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const updates = { ...req.body };
+    delete updates.id;
+    delete updates.created_at;
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('PUT cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/v2/admin/cover-photos/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('cover_photos')
+      .update({ is_active: false })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, photo: data });
+  } catch (err) {
+    console.error('DELETE cover-photos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/v2/couple/today/:userId
+// Returns: { priority_tasks[], this_week_events[], upcoming_payments[], budget{}, next_event }
+app.get('/api/v2/couple/today/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const in7Days = new Date(today.getTime() + 7*24*60*60*1000)
+      .toISOString().split('T')[0];
+
+    const { data: tasks } = await supabase
+      .from('couple_checklist')
+      .select('*')
+      .eq('couple_id', userId)
+      .eq('is_complete', false)
+      .order('due_date', { ascending: true })
+      .limit(3);
+
+    const { data: events } = await supabase
+      .from('couple_events')
+      .select('*')
+      .eq('couple_id', userId)
+      .gte('event_date', todayStr)
+      .lte('event_date', in7Days)
+      .order('event_date', { ascending: true });
+
+    const { data: payments } = await supabase
+      .from('couple_expenses')
+      .select('*')
+      .eq('couple_id', userId)
+      .neq('payment_status', 'paid')
+      .gte('due_date', todayStr)
+      .lte('due_date', in7Days)
+      .order('due_date', { ascending: true });
+
+    const { data: profile } = await supabase
+      .from('couple_profiles')
+      .select('total_budget')
+      .eq('user_id', userId)
+      .single();
+
+    const { data: allExpenses } = await supabase
+      .from('couple_expenses')
+      .select('actual_amount, payment_status')
+      .eq('couple_id', userId);
+
+    const committed = allExpenses?.filter(e =>
+      ['committed','paid'].includes(e.payment_status))
+      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
+    const paid = allExpenses?.filter(e => e.payment_status === 'paid')
+      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
+
+    const { data: nextEvents } = await supabase
+      .from('couple_events')
+      .select('*')
+      .eq('couple_id', userId)
+      .gte('event_date', todayStr)
+      .order('event_date', { ascending: true })
+      .limit(1);
+
+    res.json({
+      priority_tasks: tasks || [],
+      this_week_events: events || [],
+      upcoming_payments: payments || [],
+      budget: {
+        total: profile?.total_budget || 0,
+        committed,
+        paid,
+      },
+      next_event: nextEvents?.[0] || null,
+    });
+  } catch (err) {
+    console.error('Today endpoint error:', err);
+    res.status(500).json({ error: 'Failed to load today data' });
+  }
+});
+
+// PATCH /api/v2/couple/tasks/:id/complete
+app.patch('/api/v2/couple/tasks/:id/complete', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('couple_checklist')
+      .update({ is_complete: true })
+      .eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Task complete error:', err);
+    res.status(500).json({ error: 'Failed to mark task complete' });
+  }
+});
+
+
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
 });
@@ -8982,11 +9414,9 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
   try {
     const { couple_id } = req.params;
     if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
-    // Only select columns that actually exist in moodboard_items
     const { data: saves, error: savesError } = await supabase.from('moodboard_items')
       .select('id, user_id, vendor_id, image_url, function_tag, note, created_at')
-      .eq('user_id', couple_id)
-      .not('vendor_id', 'is', null)
+      .eq('user_id', couple_id).not('vendor_id', 'is', null)
       .order('created_at', { ascending: false });
     if (savesError) throw savesError;
     const vendorIds = [...new Set((saves || []).map(s => s.vendor_id).filter(Boolean))];
@@ -8997,7 +9427,6 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
         .in('id', vendorIds);
       (vendors || []).forEach(v => { vendorMap[v.id] = v; });
     }
-    // Shape each save to match what the frontend expects
     const enriched = (saves || []).map(s => ({
       ...s,
       vendor_name: vendorMap[s.vendor_id]?.name || null,
@@ -9031,30 +9460,316 @@ app.post('/api/couple/muse/remove', async (req, res) => {
 // Save a vendor to Muse (also creates moodboard_items row for Plan-side Moodboard sync)
 app.post('/api/couple/muse/save', async (req, res) => {
   try {
-    const { couple_id, vendor_id } = req.body || {};
+    const { couple_id, vendor_id, event } = req.body || {};
     if (!couple_id || !vendor_id) return res.status(400).json({ success: false, error: 'couple_id and vendor_id required' });
-    // Check if already saved — only using columns that exist
+    // Check if already saved
     const { data: existing } = await supabase.from('moodboard_items')
       .select('id').eq('user_id', couple_id).eq('vendor_id', vendor_id).maybeSingle();
     if (existing) return res.json({ success: true, already_saved: true });
-    // Insert only columns that exist in moodboard_items: id, user_id, vendor_id, image_url, function_tag, note, created_at
-    const { data: vendor } = await supabase.from('vendors')
-      .select('featured_photos, portfolio_images').eq('id', vendor_id).maybeSingle();
+    const { data: vendor } = await supabase.from('vendors').select('featured_photos, portfolio_images').eq('id', vendor_id).maybeSingle();
     const image_url = vendor?.featured_photos?.[0] || vendor?.portfolio_images?.[0] || null;
     const { data, error } = await supabase.from('moodboard_items').insert([{
-      user_id: couple_id,
-      vendor_id,
-      image_url,
-      function_tag: 'muse_save',
+      user_id: couple_id, vendor_id,
+      image_url, function_tag: 'muse_save',
       created_at: new Date().toISOString(),
     }]).select().single();
     if (error) throw error;
-    // Bump vendor analytics + activity log
+    // Part D: bump vendor analytics + activity log
     bumpVendorMetric(vendor_id, 'saves').catch(() => {});
     logVendorActivity(vendor_id, 'saved_to_muse', 'A couple saved you to their Muse').catch(() => {});
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// S29: MUSE → BESPOKE FLOW + CONTACT UNLOCK
+// ══════════════════════════════════════════════════════════════════════════════
+// Add these endpoints to backend/server.js after line 9042 (after muse/save endpoint)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHORTLIST: Move vendor from Muse to Bespoke
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/couple/muse/shortlist', async (req, res) => {
+  try {
+    const { save_id, couple_id, event } = req.body || {};
+    
+    if (!save_id || !couple_id) {
+      return res.status(400).json({ success: false, error: 'save_id and couple_id required' });
+    }
+
+    // Step 1: Get the moodboard_item details
+    const { data: museItem, error: fetchError } = await supabase
+      .from('moodboard_items')
+      .select('*')
+      .eq('id', save_id)
+      .eq('user_id', couple_id)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+    if (!museItem) {
+      return res.status(404).json({ success: false, error: 'Muse item not found' });
+    }
+
+    const vendor_id = museItem.vendor_id;
+
+    // Step 2: Get vendor details for the Bespoke pin
+    const { data: vendor, error: vendorError } = await supabase
+      .from('vendors')
+      .select('id, name, category, city, portfolio_images, featured_photos, tier')
+      .eq('id', vendor_id)
+      .maybeSingle();
+
+    if (vendorError) throw vendorError;
+
+    const image_url = museItem.vendor_image 
+      || vendor?.featured_photos?.[0] 
+      || vendor?.portfolio_images?.[0] 
+      || null;
+
+    // Step 3: Create Bespoke pin (couple_moodboard_pins)
+    const { data: pin, error: pinError } = await supabase
+      .from('couple_moodboard_pins')
+      .insert([{
+        couple_id,
+        event: event || museItem.event || 'general',
+        pin_type: 'vendor', // Platform vendor
+        image_url,
+        source_url: null,
+        source_domain: 'thedreamwedding.in',
+        title: vendor?.name || museItem.vendor_name || 'Vendor',
+        note: `${vendor?.category || ''} · ${vendor?.city || ''}`.trim(),
+        is_curated: false,
+        is_suggestion: false,
+        added_by: couple_id,
+        added_by_name: null,
+        vendor_id, // CRITICAL: Link to vendor
+      }])
+      .select()
+      .single();
+
+    if (pinError) throw pinError;
+
+    // Step 4: Update entity_links (if exists) OR create new one
+    const { data: existingLink } = await supabase
+      .from('entity_links')
+      .select('id')
+      .eq('from_entity_id', couple_id)
+      .eq('to_entity_id', vendor_id)
+      .eq('from_entity_type', 'couple')
+      .eq('to_entity_type', 'vendor')
+      .maybeSingle();
+
+    if (existingLink) {
+      // Update existing link to 'shortlisted_for'
+      await supabase
+        .from('entity_links')
+        .update({ link_type: 'shortlisted_for', updated_at: new Date().toISOString() })
+        .eq('id', existingLink.id);
+    } else {
+      // Create new link
+      await supabase
+        .from('entity_links')
+        .insert([{
+          from_entity_type: 'couple',
+          from_entity_id: couple_id,
+          to_entity_type: 'vendor',
+          to_entity_id: vendor_id,
+          link_type: 'shortlisted_for',
+          metadata: { event: event || 'general' },
+        }]);
+    }
+
+    // Step 5: Remove from Muse (moodboard_items)
+    const { error: deleteError } = await supabase
+      .from('moodboard_items')
+      .delete()
+      .eq('id', save_id);
+
+    if (deleteError) throw deleteError;
+
+    // Step 6: Bump vendor metrics
+    bumpVendorMetric(vendor_id, 'shortlists').catch(() => {});
+    logVendorActivity(vendor_id, 'shortlisted', 'A couple moved you to their Bespoke board').catch(() => {});
+
+    res.json({ 
+      success: true, 
+      data: { 
+        pin, 
+        whatsapp_unlocked: true,
+        message: 'Vendor moved to Bespoke. Contact details unlocked.' 
+      } 
+    });
+
+  } catch (error) {
+    console.error('Shortlist error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD EXTERNAL PIN: Add manual image/link to Bespoke
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/couple/bespoke/add-pin', async (req, res) => {
+  try {
+    const {
+      couple_id,
+      event,
+      pin_type, // 'image' | 'link' | 'note'
+      image_url,
+      source_url,
+      title,
+      note,
+    } = req.body || {};
+
+    if (!couple_id || !event || !pin_type) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'couple_id, event, and pin_type required' 
+      });
+    }
+
+    // Extract domain from source_url if provided
+    let source_domain = null;
+    if (source_url) {
+      try {
+        const url = new URL(source_url);
+        source_domain = url.hostname.replace('www.', '');
+      } catch {}
+    }
+
+    const { data: pin, error } = await supabase
+      .from('couple_moodboard_pins')
+      .insert([{
+        couple_id,
+        event,
+        pin_type,
+        image_url: image_url || null,
+        source_url: source_url || null,
+        source_domain,
+        title: title || null,
+        note: note || null,
+        is_curated: false,
+        is_suggestion: false,
+        added_by: couple_id,
+        vendor_id: null, // External pin, not linked to vendor
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, data: pin });
+
+  } catch (error) {
+    console.error('Add pin error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHECK CONTACT UNLOCK: Is vendor's WhatsApp unlocked for this couple?
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/couple/vendor/:vendor_id/contact-status', async (req, res) => {
+  try {
+    const { vendor_id } = req.params;
+    const { couple_id } = req.query;
+
+    if (!couple_id) {
+      return res.status(400).json({ success: false, error: 'couple_id query param required' });
+    }
+
+    // Check if vendor is shortlisted (in Bespoke)
+    const { data: link } = await supabase
+      .from('entity_links')
+      .select('link_type')
+      .eq('from_entity_id', couple_id)
+      .eq('to_entity_id', vendor_id)
+      .eq('from_entity_type', 'couple')
+      .eq('to_entity_type', 'vendor')
+      .maybeSingle();
+
+    const isShortlisted = link?.link_type === 'shortlisted_for';
+
+    if (isShortlisted) {
+      // Fetch vendor contact details
+      const { data: vendor } = await supabase
+        .from('vendors')
+        .select('phone, email, instagram_handle, show_whatsapp_public')
+        .eq('id', vendor_id)
+        .maybeSingle();
+
+      res.json({
+        success: true,
+        whatsapp_unlocked: true,
+        contact: {
+          phone: vendor?.phone || null,
+          email: vendor?.email || null,
+          instagram: vendor?.instagram_handle || null,
+          show_whatsapp_public: vendor?.show_whatsapp_public || false,
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        whatsapp_unlocked: false,
+        message: 'Shortlist this vendor to unlock contact details'
+      });
+    }
+
+  } catch (error) {
+    console.error('Contact status error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Bump vendor metric (reuse if exists, otherwise add)
+// ─────────────────────────────────────────────────────────────────────────────
+async function bumpVendorMetric(vendor_id, metric_name) {
+  try {
+    const { data: analytics } = await supabase
+      .from('vendor_analytics')
+      .select('*')
+      .eq('vendor_id', vendor_id)
+      .maybeSingle();
+
+    if (analytics) {
+      const updates = {};
+      updates[metric_name] = (analytics[metric_name] || 0) + 1;
+      await supabase
+        .from('vendor_analytics')
+        .update(updates)
+        .eq('vendor_id', vendor_id);
+    } else {
+      const row = { vendor_id };
+      row[metric_name] = 1;
+      await supabase.from('vendor_analytics').insert([row]);
+    }
+  } catch (error) {
+    console.error(`bumpVendorMetric(${metric_name}) failed:`, error.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Log vendor activity
+// ─────────────────────────────────────────────────────────────────────────────
+async function logVendorActivity(vendor_id, activity_type, description) {
+  try {
+    await supabase.from('vendor_activity').insert([{
+      vendor_id,
+      activity_type,
+      description,
+      created_at: new Date().toISOString(),
+    }]);
+  } catch (error) {
+    console.error('logVendorActivity failed:', error.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// END S29 ENDPOINTS
+// ══════════════════════════════════════════════════════════════════════════════
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BUILD 3: VENDOR LOCK DATE PREFERENCES
@@ -9954,145 +10669,883 @@ app.get('/api/vendor-featured/admin/all', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-
-// ─────────────────────────────────────────────────────────────
-// GET /api/v2/couple/today/:userId
-// Returns: { wedding_date, event_label, nudges[], thisWeek[], muse[], activity[] }
-// ─────────────────────────────────────────────────────────────
-app.get('/api/v2/couple/today/:userId', async (req, res) => {
-  const { userId } = req.params;
+// v2 Discovery feed
+app.get('/api/v2/discovery/feed', async (req, res) => {
   try {
-    // 1. Wedding date from users table
-    let wedding_date = null;
-    let event_label = 'wedding';
-    if (userId && userId !== 'demo') {
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('wedding_date, dreamer_type')
-        .eq('id', userId)
-        .single();
-      if (userRow) {
-        wedding_date = userRow.wedding_date || null;
-        if (userRow.dreamer_type) event_label = userRow.dreamer_type;
+    const { data, error } = await supabase.from('discovery_seed_cards').select('*').eq('is_active', true).order('sort_order', { ascending: true });
+    if (error) throw error;
+    res.json({ cards: data });
+  } catch (err) {
+    console.error('Discovery feed error:', err);
+    res.status(500).json({ error: 'Failed to load feed' });
+  }
+});
+
+// ── SESSION 13: Waitlist endpoint ──
+app.post('/api/v2/waitlist', async (req, res) => {
+  try {
+    const { phone, instagram, role } = req.body;
+    const { error } = await supabase
+      .from('waitlist')
+      .insert([{ phone, instagram, role }]);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Waitlist error:', err);
+    res.status(500).json({ error: 'Failed to submit' });
+  }
+});
+
+
+// ── SESSION 17: Razorpay + Vendor Today + Vendor Clients ──────────────────────
+
+// POST /api/v2/razorpay/create-order
+app.post('/api/v2/razorpay/create-order', async (req, res) => {
+  try {
+    const { amount, currency = 'INR', payment_type, user_id } = req.body;
+    if (!amount || !payment_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'amount, payment_type, user_id required' });
+    }
+    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return res.json({ success: false, error: 'Payment service not configured yet' });
+    }
+    const auth = Buffer.from(RAZORPAY_KEY_ID + ':' + RAZORPAY_KEY_SECRET).toString('base64');
+    const receipt = 'tdw_' + payment_type.slice(0, 8) + '_' + Date.now();
+    const orderRes = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: amount * 100,
+        currency,
+        receipt,
+        notes: { user_id, payment_type, purpose: 'tdw_couple_upgrade' },
+      }),
+    });
+    const order = await orderRes.json();
+    if (order.error) return res.json({ success: false, error: order.error.description || 'Order creation failed' });
+    // Record in payments table
+    try {
+      await supabase.from('payments').insert([{
+        user_id, amount, currency, payment_type,
+        razorpay_order_id: order.id, status: 'created',
+      }]);
+    } catch (e) {}
+    res.json({ success: true, order_id: order.id, amount: order.amount, currency: order.currency, key_id: RAZORPAY_KEY_ID });
+  } catch (err) {
+    console.error('[Razorpay] create-order error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/razorpay/verify-payment
+app.post('/api/v2/razorpay/verify-payment', async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, payment_type, user_id } = req.body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !payment_type || !user_id) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!RAZORPAY_KEY_SECRET) return res.json({ success: false, error: 'Not configured' });
+    const crypto = require('crypto');
+    const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex');
+    if (expected !== razorpay_signature) {
+      return res.status(400).json({ success: false, error: 'Invalid signature' });
+    }
+    // Update payments table
+    try {
+      await supabase.from('payments')
+        .update({ status: 'paid', razorpay_payment_id, razorpay_signature })
+        .eq('razorpay_order_id', razorpay_order_id);
+    } catch (e) {}
+    // Apply entitlement by payment_type
+    if (payment_type === 'couple_gold') {
+      await supabase.from('users').update({ dreamer_type: 'gold' }).eq('id', user_id);
+    } else if (payment_type === 'couple_platinum') {
+      await supabase.from('users').update({ dreamer_type: 'platinum' }).eq('id', user_id);
+    } else if (payment_type === 'dreamer_tokens') {
+      const { data: cp } = await supabase.from('couple_profiles').select('dreamai_tokens').eq('user_id', user_id).maybeSingle();
+      const current = (cp && cp.dreamai_tokens) || 0;
+      await supabase.from('couple_profiles').update({ dreamai_tokens: current + 50 }).eq('user_id', user_id);
+    } else if (payment_type === 'vendor_signature') {
+      const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
+      if (existing) {
+        await supabase.from('vendor_subscriptions').update({ tier: 'signature', status: 'active' }).eq('vendor_id', user_id);
+      } else {
+        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'signature', status: 'active' }]);
+      }
+    } else if (payment_type === 'vendor_prestige') {
+      const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
+      if (existing) {
+        await supabase.from('vendor_subscriptions').update({ tier: 'prestige', status: 'active' }).eq('vendor_id', user_id);
+      } else {
+        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'prestige', status: 'active' }]);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Razorpay] verify-payment error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/vendor/today/:vendorId
+app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const today = new Date().toISOString().split('T')[0];
+    const todayStart = today + 'T00:00:00.000Z';
+    const todayEnd = today + 'T23:59:59.999Z';
+    const in48h = new Date(Date.now() + 48 * 3600000).toISOString();
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+
+    // Needs attention — overdue invoices
+    const { data: overdueInvoices } = await supabase.from('vendor_invoices')
+      .select('id, client_name, amount, due_date, status')
+      .eq('vendor_id', vendorId)
+      .in('status', ['pending', 'sent'])
+      .lt('due_date', today)
+      .order('due_date', { ascending: true })
+      .limit(3);
+
+    // Needs attention — unanswered enquiries (no reply in 24h)
+    const { data: openLeads } = await supabase.from('vendor_leads')
+      .select('id, couple_name, created_at, status')
+      .eq('vendor_id', vendorId)
+      .eq('status', 'new')
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    // Needs attention — upcoming shoots within 48h
+    const { data: upcomingShoot } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', today)
+      .lte('event_date', in48h)
+      .order('event_date', { ascending: true })
+      .limit(2);
+
+    // Build attention items — sort by urgency, cap at 3
+    const attention = [];
+    (overdueInvoices || []).forEach(inv => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'inv_' + inv.id,
+        type: 'invoice',
+        title: (inv.client_name || 'Client') + ' — invoice overdue',
+        subtitle: 'Due ' + new Date(inv.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        amount: inv.amount,
+        cta: 'Send reminder',
+      });
+    });
+    (openLeads || []).forEach(lead => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'lead_' + lead.id,
+        type: 'enquiry',
+        title: (lead.couple_name || 'New enquiry') + ' is waiting',
+        subtitle: 'Reply within 24 hours to stay top of feed',
+        cta: 'Reply with DreamAi',
+      });
+    });
+    (upcomingShoot || []).forEach(ev => {
+      if (attention.length >= 3) return;
+      attention.push({
+        id: 'shoot_' + ev.id,
+        type: 'shoot',
+        title: ev.title || 'Upcoming shoot',
+        subtitle: new Date(ev.event_date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }),
+        cta: 'Confirm team',
+      });
+    });
+
+    // Today's schedule
+    const { data: todayEvents } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', todayStart)
+      .lte('event_date', todayEnd)
+      .order('event_date', { ascending: true });
+
+    const todays_schedule = (todayEvents || []).map(ev => ({
+      id: ev.id,
+      time: new Date(ev.event_date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      event_name: ev.title || 'Event',
+      client_name: ev.client_name || null,
+    }));
+
+    // This week summary
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    const { data: weekEvents } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', weekStart.toISOString())
+      .lte('event_date', weekEnd.toISOString());
+
+    const { data: weekInvoices } = await supabase.from('vendor_invoices')
+      .select('amount, status')
+      .eq('vendor_id', vendorId)
+      .in('status', ['paid', 'pending', 'sent'])
+      .gte('due_date', weekStart.toISOString().split('T')[0])
+      .lte('due_date', weekEnd.toISOString().split('T')[0]);
+
+    const shootCount = (weekEvents || []).length;
+    const expectedRevenue = (weekInvoices || []).reduce((s, inv) => s + (inv.amount || 0), 0);
+
+    let this_week_summary = '';
+    const parts = [];
+    if (shootCount === 1) parts.push('One shoot');
+    else if (shootCount > 1) parts.push(shootCount + ' shoots');
+    if (expectedRevenue > 0) parts.push('₹' + expectedRevenue.toLocaleString('en-IN') + ' expected');
+    this_week_summary = parts.length ? parts.join(', ') + '.' : 'A quiet week ahead.';
+
+    // Discovery snapshot — last 7 days vs previous 7
+    const { data: thisWeekSnap } = await supabase.from('vendor_analytics_daily')
+      .select('profile_views, saves, enquiries')
+      .eq('vendor_id', vendorId)
+      .gte('day', weekAgo);
+
+    const { data: prevWeekSnap } = await supabase.from('vendor_analytics_daily')
+      .select('profile_views, saves, enquiries')
+      .eq('vendor_id', vendorId)
+      .gte('day', twoWeeksAgo)
+      .lt('day', weekAgo);
+
+    const sumSnap = (rows) => (rows || []).reduce(
+      (acc, r) => ({ views: acc.views + (r.profile_views || 0), saves: acc.saves + (r.saves || 0), enquiries: acc.enquiries + (r.enquiries || 0) }),
+      { views: 0, saves: 0, enquiries: 0 }
+    );
+    const cur = sumSnap(thisWeekSnap);
+    const prev = sumSnap(prevWeekSnap);
+
+    const snapshot = {
+      views: cur.views,
+      saves: cur.saves,
+      enquiries: cur.enquiries,
+      views_delta: cur.views - prev.views,
+      saves_delta: cur.saves - prev.saves,
+      enquiries_delta: cur.enquiries - prev.enquiries,
+    };
+
+    res.json({
+      success: true,
+      needs_attention: attention,
+      todays_schedule,
+      this_week_summary,
+      snapshot,
+    });
+  } catch (err) {
+    console.error('[Vendor Today] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/vendor/clients/:vendorId
+app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { data, error } = await supabase.from('vendor_clients')
+      .select('id, name, phone, event_type, event_date, budget, status, notes')
+      .eq('vendor_id', vendorId)
+      .order('event_date', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('[Vendor Clients] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SESSION 22 — DreamAi Deep Integration
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/dreamai/couple-context/:userId
+app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // User
+    const { data: user } = await supabase.from('users')
+      .select('id, name, wedding_date, partner_name')
+      .eq('id', userId).maybeSingle();
+
+    // Events
+    const { data: events } = await supabase.from('couple_events')
+      .select('id, event_name, event_date, venue, budget_allocated, budget_spent')
+      .eq('user_id', userId)
+      .order('event_date', { ascending: true });
+
+    // Tasks
+    const { data: tasks } = await supabase.from('couple_checklist')
+      .select('id, task_name, status, due_date, event_name, vendor_name, is_complete')
+      .eq('user_id', userId)
+      .order('due_date', { ascending: true });
+
+    // Budget
+    const { data: budgetRows } = await supabase.from('couple_planner_budget')
+      .select('total_budget, committed_amount, paid_amount')
+      .eq('user_id', userId).maybeSingle();
+
+    // Expenses / upcoming payments
+    const next30 = new Date(Date.now() + 30 * 86400000).toISOString();
+    const { data: expenses } = await supabase.from('couple_planner_budget')
+      .select('id, vendor_name, purpose, amount, actual_amount, due_date, status, event_name')
+      .eq('user_id', userId)
+      .order('due_date', { ascending: true });
+
+    // Muse (saved vendors)
+    const { data: muse } = await supabase.from('moodboard_items')
+      .select('id, vendor_id, vendors(name, category, tier)')
+      .eq('user_id', userId)
+      .limit(20);
+
+    // Guests
+    const { data: guestRows } = await supabase.from('couple_guests')
+      .select('id, rsvp_status')
+      .eq('user_id', userId);
+
+    const guestTotal = (guestRows || []).length;
+    const guestConfirmed = (guestRows || []).filter(g => g.rsvp_status === 'confirmed').length;
+    const guestPending = (guestRows || []).filter(g => g.rsvp_status === 'pending' || !g.rsvp_status).length;
+
+    // Overdue tasks
+    const now = new Date().toISOString();
+    const overdueTasks = (tasks || []).filter(t => !t.is_complete && t.due_date && t.due_date < now);
+
+    // Upcoming payments (next 30 days, unpaid)
+    const upcomingPayments = (expenses || []).filter(e =>
+      e.status !== 'paid' && e.due_date && e.due_date <= next30
+    );
+
+    // Days remaining to next event
+    let daysRemaining = null;
+    if (events && events.length > 0) {
+      const nextEv = events.find(e => e.event_date && new Date(e.event_date) >= new Date());
+      if (nextEv) {
+        daysRemaining = Math.ceil((new Date(nextEv.event_date) - new Date()) / (1000 * 60 * 60 * 24));
       }
     }
 
-    // 2. Nudges: pending tasks due within 30 days
-    let nudges = [];
-    const now = new Date();
-    const in30 = new Date(now); in30.setDate(in30.getDate() + 30);
-    if (userId && userId !== 'demo') {
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select('id, title, description, due_date, vendor_id')
-        .eq('user_id', userId)
-        .eq('status', 'pending')
-        .lte('due_date', in30.toISOString())
-        .gte('due_date', now.toISOString())
-        .order('due_date', { ascending: true })
-        .limit(3);
-      nudges = (tasks || []).map(t => ({
+    res.json({
+      user: {
+        name: user?.name || null,
+        partner_name: user?.partner_name || null,
+        wedding_date: user?.wedding_date || null,
+        days_remaining: daysRemaining,
+      },
+      events: (events || []).map(e => ({
+        id: e.id,
+        name: e.event_name,
+        date: e.event_date,
+        budget_allocated: e.budget_allocated || 0,
+        budget_spent: e.budget_spent || 0,
+      })),
+      tasks: (tasks || []).map(t => ({
         id: t.id,
-        title: t.title,
-        context: t.description || 'This needs your attention before your big day.',
-        cta: 'Review',
-        vendor_name: null,
-      }));
-    }
-
-    // 3. This week: events/tasks Mon–Sun
-    let thisWeek = [];
-    const weekStart = new Date(now);
-    const dayOfWeek = weekStart.getDay();
-    const diffToMon = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    weekStart.setDate(weekStart.getDate() + diffToMon);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
-    const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    if (userId && userId !== 'demo') {
-      const { data: weekTasks } = await supabase
-        .from('tasks')
-        .select('id, title, due_date')
-        .eq('user_id', userId)
-        .gte('due_date', weekStart.toISOString())
-        .lt('due_date', weekEnd.toISOString())
-        .order('due_date', { ascending: true });
-      thisWeek = (weekTasks || []).map(t => ({
+        title: t.task_name,
+        status: t.is_complete ? 'done' : (t.status || 'pending'),
+        due_date: t.due_date,
+        event_name: t.event_name,
+        vendor_name: t.vendor_name,
+      })),
+      budget: {
+        total: budgetRows?.total_budget || 0,
+        committed: budgetRows?.committed_amount || 0,
+        paid: budgetRows?.paid_amount || 0,
+        remaining: (budgetRows?.total_budget || 0) - (budgetRows?.committed_amount || 0),
+      },
+      muse: (muse || []).map(m => ({
+        id: m.id,
+        vendor_name: m.vendors?.name || null,
+        category: m.vendors?.category || null,
+        tier: m.vendors?.tier || null,
+      })),
+      guests: {
+        total: guestTotal,
+        confirmed: guestConfirmed,
+        pending: guestPending,
+      },
+      overdue_tasks: overdueTasks.map(t => ({
         id: t.id,
-        day: DAYS_SHORT[new Date(t.due_date).getDay()],
-        label: t.title,
-      }));
+        title: t.task_name,
+        due_date: t.due_date,
+        event_name: t.event_name,
+      })),
+      upcoming_payments: upcomingPayments.map(e => ({
+        vendor_name: e.vendor_name,
+        amount: e.actual_amount || e.amount || 0,
+        due_date: e.due_date,
+        purpose: e.purpose,
+      })),
+    });
+  } catch (err) {
+    console.error('[DreamAi couple-context] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/dreamai/vendor-context/:vendorId
+app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    // Vendor
+    const { data: vendor } = await supabase.from('vendors')
+      .select('id, name, category, city')
+      .eq('id', vendorId).maybeSingle();
+
+    // Tier from subscriptions
+    let tier = 'essential';
+    try {
+      const { data: sub } = await supabase.from('vendor_subscriptions')
+        .select('tier').eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (sub?.tier) tier = sub.tier;
+    } catch {}
+
+    // Clients
+    const { data: clients } = await supabase.from('vendor_clients')
+      .select('id, name, event_type, event_date, budget, status')
+      .eq('vendor_id', vendorId)
+      .order('event_date', { ascending: true })
+      .limit(20);
+
+    // Invoices
+    const { data: invoices } = await supabase.from('vendor_invoices')
+      .select('id, client_name, amount, status, due_date')
+      .eq('vendor_id', vendorId)
+      .order('due_date', { ascending: false })
+      .limit(30);
+
+    // Enquiries
+    const { data: enquiries } = await supabase.from('vendor_leads')
+      .select('id, couple_name, message, created_at, budget, event_type, status')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    // Revenue
+    const thisMonthStart = new Date();
+    thisMonthStart.setDate(1); thisMonthStart.setHours(0,0,0,0);
+    const lastMonthStart = new Date(thisMonthStart);
+    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+
+    const paidInvoices = (invoices || []).filter(i => i.status === 'paid');
+    const thisMonthRev = paidInvoices
+      .filter(i => i.due_date && new Date(i.due_date) >= thisMonthStart)
+      .reduce((s, i) => s + (i.amount || 0), 0);
+    const lastMonthRev = paidInvoices
+      .filter(i => i.due_date && new Date(i.due_date) >= lastMonthStart && new Date(i.due_date) < thisMonthStart)
+      .reduce((s, i) => s + (i.amount || 0), 0);
+    const outstanding = (invoices || [])
+      .filter(i => i.status !== 'paid')
+      .reduce((s, i) => s + (i.amount || 0), 0);
+
+    // Calendar — next 60 days
+    const in60 = new Date(Date.now() + 60 * 86400000).toISOString();
+    const { data: calendar } = await supabase.from('vendor_calendar_events')
+      .select('id, title, event_date, client_name')
+      .eq('vendor_id', vendorId)
+      .gte('event_date', new Date().toISOString())
+      .lte('event_date', in60)
+      .order('event_date', { ascending: true });
+
+    // Overdue invoices
+    const todayStr = new Date().toISOString().split('T')[0];
+    const overdueInvoices = (invoices || []).filter(i =>
+      i.status !== 'paid' && i.due_date && i.due_date < todayStr
+    );
+
+    res.json({
+      vendor: { name: vendor?.name || null, category: vendor?.category || null, tier },
+      clients: (clients || []).map(c => ({
+        id: c.id, name: c.name, event_type: c.event_type,
+        event_date: c.event_date, budget: c.budget, status: c.status,
+      })),
+      invoices: (invoices || []).slice(0, 10).map(i => ({
+        id: i.id, client_name: i.client_name,
+        amount: i.amount, paid: i.status === 'paid', due_date: i.due_date,
+      })),
+      enquiries: (enquiries || []).map(e => ({
+        id: e.id, name: e.couple_name, message: e.message,
+        date: e.created_at, budget: e.budget, event_type: e.event_type,
+      })),
+      revenue: {
+        this_month: thisMonthRev,
+        last_month: lastMonthRev,
+        outstanding,
+      },
+      calendar: (calendar || []).map(c => ({
+        date: c.event_date, client_name: c.client_name, event_name: c.title,
+      })),
+      overdue_invoices: overdueInvoices.map(i => ({
+        client_name: i.client_name, amount: i.amount, due_date: i.due_date,
+      })),
+    });
+  } catch (err) {
+    console.error('[DreamAi vendor-context] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/dreamai/chat
+app.post('/api/v2/dreamai/chat', async (req, res) => {
+  try {
+    const { userId, userType, message, context } = req.body || {};
+    if (!message) return res.status(400).json({ success: false, error: 'message required' });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ success: false, error: 'DreamAi not configured' });
     }
 
-    // 4. Muse: up to 3 vendor saves
-    let muse = [];
-    if (userId && userId !== 'demo') {
-      const { data: saves } = await supabase
-        .from('saves')
-        .select('id, vendor_id, vendors(name, category, featured_photos)')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(3);
-      muse = (saves || []).map(s => {
-        const v = s.vendors || {};
-        const photos = v.featured_photos || [];
-        return {
-          id: s.id,
-          vendor_name: v.name || 'Vendor',
-          category: v.category || '',
-          thumbnail_url: photos[0] || null,
-        };
-      });
+    const isCouple = userType === 'couple';
+    const systemPrompt = isCouple
+      ? `You are DreamAi, the AI wedding companion for The Dream Wedding. You have complete knowledge of this couple's wedding. Speak like a warm, intelligent wedding planner — concise, specific, never generic. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message. If asked to draft a WhatsApp message, reply with just the draft, no preamble.\n\nContext: ${JSON.stringify(context || {})}`
+      : `You are DreamAi, the AI business companion for The Dream Wedding. You have complete knowledge of this Maker's business. Speak like a sharp, professional business assistant — concise, data-driven. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message.\n\nContext: ${JSON.stringify(context || {})}`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }],
+      }),
+    });
+
+    const data = await response.json();
+    const reply = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('').trim();
+    if (!reply) return res.status(500).json({ success: false, error: 'No reply from DreamAi' });
+
+    res.json({ success: true, reply });
+  } catch (err) {
+    console.error('[DreamAi chat] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/dreamai/whatsapp-extract
+app.post('/api/v2/dreamai/whatsapp-extract', async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    if (!message) return res.status(400).json({ success: false, error: 'message required' });
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ success: false, error: 'DreamAi not configured' });
     }
 
-    // 5. Activity: last 10 entries
-    let activity = [];
-    if (userId && userId !== 'demo') {
-      const { data: logs } = await supabase
-        .from('activity_log')
-        .select('id, text, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      activity = (logs || []).map(l => ({
-        id: l.id,
-        text: l.text,
-        timestamp: l.created_at,
-      }));
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: 'Extract wedding lead details from this WhatsApp message. Return ONLY valid JSON with these exact fields: { "name": string|null, "phone": string|null, "wedding_date": string|null, "event_type": string|null, "budget": string|null, "city": string|null }. If a field cannot be found, use null. No preamble. No explanation. Just the JSON object.',
+        messages: [{ role: 'user', content: message }],
+      }),
+    });
+
+    const data = await response.json();
+    const raw = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('').trim();
+    let extracted = {};
+    try {
+      const clean = raw.replace(/```json|```/g, '').trim();
+      extracted = JSON.parse(clean);
+    } catch {
+      extracted = { name: null, phone: null, wedding_date: null, event_type: null, budget: null, city: null };
     }
 
-    // 6. Seed demo data if nothing returned (first load / demo user)
-    const isEmpty = nudges.length === 0 && thisWeek.length === 0 && muse.length === 0 && activity.length === 0;
-    if (isEmpty) {
-      const today = new Date();
-      const DEMO_DAYS = ['Mon','Tue','Wed'];
-      nudges = [
-        { id: 'demo-n1', title: 'Confirm your mehendi artist', context: 'You have an open enquiry from 3 days ago. A quick reply keeps your slot.', cta: 'View enquiry', vendor_name: null },
-        { id: 'demo-n2', title: 'Share your moodboard with your photographer', context: 'Your photographer is waiting on a reference — share it before your pre-shoot call.', cta: 'Open Moodboard', vendor_name: null },
-        { id: 'demo-n3', title: 'Finalise your catering menu', context: 'Selections are due this week. Your caterer has shared the tasting notes.', cta: 'Review menu', vendor_name: null },
-      ];
-      thisWeek = [
-        { id: 'demo-w1', day: 'Tue', label: 'Catering call' },
-        { id: 'demo-w2', day: 'Thu', label: 'Venue visit' },
-        { id: 'demo-w3', day: 'Sat', label: 'Trial run' },
-      ];
-      muse = [
-        { id: 'demo-m1', vendor_name: 'Studio Nidaan', category: 'Photography', thumbnail_url: null },
-        { id: 'demo-m2', vendor_name: 'Weddingscapes', category: 'Décor', thumbnail_url: null },
-        { id: 'demo-m3', vendor_name: 'Ritu Kumar Bridal', category: 'Couture', thumbnail_url: null },
-      ];
-      activity = [
-        { id: 'demo-a1', text: 'You saved Studio Nidaan to your Muse', timestamp: new Date(today.getTime() - 1*3600000).toISOString() },
-        { id: 'demo-a2', text: 'Enquiry sent to Weddingscapes Décor', timestamp: new Date(today.getTime() - 5*3600000).toISOString() },
-        { id: 'demo-a3', text: 'You added 3 photos to your Moodboard', timestamp: new Date(today.getTime() - 26*3600000).toISOString() },
-        { id: 'demo-a4', text: 'Venue confirmed for Dec 14', timestamp: new Date(today.getTime() - 50*3600000).toISOString() },
-        { id: 'demo-a5', text: 'Guest list updated — 240 total', timestamp: new Date(today.getTime() - 74*3600000).toISOString() },
-      ];
-      wedding_date = wedding_date || new Date(today.getTime() + 143*86400000).toISOString().split('T')[0];
-    }
+    res.json({ success: true, data: extracted });
+  } catch (err) {
+    console.error('[DreamAi whatsapp-extract] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-    res.json({ wedding_date, event_label, nudges, thisWeek, muse, activity });
+// Admin Invite Routes
+app.get('/api/v2/admin/invites', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+
+
+
+app.post('/api/v2/couple/upsert', async (req, res) => {
+  const { phone, invite_code } = req.body;
+  if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+  try {
+    const bare = phone.replace(/\D/g, '').slice(-10);
+    const full = '+91' + bare;
+    let existing = null;
+    const { data: d1 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', full).maybeSingle();
+    if (d1) existing = d1;
+    if (!existing) {
+      const { data: d2 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', bare).maybeSingle();
+      if (d2) existing = d2;
+    }
+    if (existing) return res.json({ success: true, userId: existing.id, pin_set: !!existing.pin_set, created: false });
+    const { data: newUser, error } = await supabase.from('users').insert([{
+      phone: full,
+      created_at: new Date().toISOString(),
+    }]).select('id').single();
+    if (error) throw error;
+    if (invite_code) {
+      await supabase.from('invite_codes').update({ status: 'used', used_by: newUser.id }).eq('code', invite_code.toUpperCase());
+    }
+    res.json({ success: true, userId: newUser.id, pin_set: false, created: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v2/vendor/upsert', async (req, res) => {
+  const { phone, tier, invite_code } = req.body;
+  if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+  try {
+    const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+    const barePhone = phone.replace('+91', '');
+    // Check if vendor exists with either phone format
+    let { data: existing } = await supabase.from('vendors').select('id, phone, pin_set').eq('phone', fullPhone).maybeSingle();
+    if (!existing) {
+      const { data: existing2 } = await supabase.from('vendors').select('id, phone, pin_set').eq('phone', barePhone).maybeSingle();
+      existing = existing2;
+    }
+    if (existing) return res.json({ success: true, vendorId: existing.id, pin_set: !!existing.pin_set, created: false });
+    // Create new vendor record
+    const { data: newVendor, error } = await supabase.from('vendors').insert([{
+      phone: fullPhone,
+      created_at: new Date().toISOString(),
+    }]).select('id').single();
+    if (error) throw error;
+    // Mark invite code as used
+    if (invite_code) {
+      await supabase.from('invite_codes').update({ status: 'used', used_by: newVendor.id }).eq('code', invite_code.toUpperCase());
+    }
+    res.json({ success: true, vendorId: newVendor.id, pin_set: false, created: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v2/invite/validate', async (req, res) => {
+  try {
+    const { code, role } = req.body || {};
+    if (!code) return res.status(400).json({ valid: false, error: 'Code required' });
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .select('*')
+      .eq('code', code.toUpperCase().trim())
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.json({ valid: false, error: 'Invalid invite code' });
+    if (data.status === 'used') return res.json({ valid: false, error: 'This code has already been used' });
+    if (data.expires_at && new Date(data.expires_at) < new Date()) return res.json({ valid: false, error: 'This code has expired' });
+    if (role && data.role !== role) return res.json({ valid: false, error: 'This code is not valid for your account type' });
+    res.json({ valid: true, tier: data.tier, role: data.role });
+  } catch (err) {
+    res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
+app.post('/api/v2/admin/invites/generate', async (req, res) => {
+  try {
+    const { role, tier } = req.body;
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { data, error } = await supabase
+      .from('invite_codes')
+      .insert({ code, role: role || 'vendor', tier: tier || 'essential' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cover photo file upload via backend (bypasses anon key restriction)
+app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// S28: Add expense endpoint
+app.post('/api/couple/expenses', async (req, res) => {
+  const { couple_id, vendor_name, description, amount, event, category } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('couple_expenses')
+      .insert([{ couple_id, vendor_name, description, amount, event, category }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cover photo upload endpoint
+app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// S28: Add expense endpoint
+app.post('/api/couple/expenses', async (req, res) => {
+  const { couple_id, vendor_name, description, amount, event, category } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('couple_expenses')
+      .insert([{ couple_id, vendor_name, description, amount, event, category }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cover photo upload endpoint
+app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    const rawBody = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || '';
+    const boundary = contentType.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: 'No boundary' });
+    const boundaryBuf = Buffer.from('--' + boundary);
+    let start = rawBody.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+    while (start < rawBody.length) {
+      const end = rawBody.indexOf(boundaryBuf, start);
+      if (end === -1) break;
+      const part = rawBody.slice(start, end - 2);
+      const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd !== -1) {
+        const headers = part.slice(0, headerEnd).toString();
+        if (headers.includes('filename=')) {
+          const fileData = part.slice(headerEnd + 4);
+          const filename = 'cover_' + Date.now() + '.jpg';
+          const { error } = await supabase.storage.from('cover-photos').upload(filename, fileData, { contentType: 'image/jpeg', upsert: true });
+          if (error) throw error;
+          const { data: { publicUrl } } = supabase.storage.from('cover-photos').getPublicUrl(filename);
+          return res.json({ url: publicUrl });
+        }
+      }
+      start = end + boundaryBuf.length + 2;
+    }
+    res.status(400).json({ error: 'No file found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
