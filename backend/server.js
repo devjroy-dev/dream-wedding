@@ -7554,6 +7554,9 @@ app.patch('/api/couple/expenses/:expenseId', async (req, res) => {
       .eq('id', expenseId)
       .select().single();
     if (error) throw error;
+    if (updates.payment_status === 'paid' && data?.couple_id && data?.vendor_id) {
+      upsertCoupleVendor(data.couple_id, data.vendor_id, 'paid').catch(() => {});
+    }
     res.json({ success: true, data });
   } catch (error) {
     console.error('expense update error:', error.message);
@@ -9493,6 +9496,7 @@ app.post('/api/couple/muse/save', async (req, res) => {
     // Part D: bump vendor analytics + activity log
     bumpVendorMetric(vendor_id, 'saves').catch(() => {});
     logVendorActivity(vendor_id, 'saved_to_muse', 'A couple saved you to their Muse').catch(() => {});
+    upsertCoupleVendor(couple_id, vendor_id, 'considering').catch(() => {});
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -9739,6 +9743,33 @@ app.get('/api/couple/vendor/:vendor_id/contact-status', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Auto-upsert vendor into couple's My Vendors with status ratchet
+async function upsertCoupleVendor(couple_id, vendor_id, newStatus) {
+  const statusRank = { considering: 1, contacted: 2, booked: 3, paid: 4 };
+  try {
+    const { data: vendor } = await supabase.from('vendors')
+      .select('name, category, city, phone, starting_price').eq('id', vendor_id).maybeSingle();
+    if (!vendor) return;
+    const { data: existing } = await supabase.from('couple_vendors')
+      .select('id, status').eq('couple_id', couple_id).eq('vendor_id', vendor_id).maybeSingle();
+    if (existing) {
+      if ((statusRank[newStatus] || 0) > (statusRank[existing.status] || 0)) {
+        await supabase.from('couple_vendors').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', existing.id);
+      }
+    } else {
+      await supabase.from('couple_vendors').insert([{
+        couple_id, vendor_id,
+        name: vendor.name || '',
+        category: vendor.category || null,
+        phone: vendor.phone || null,
+        quoted_total: vendor.starting_price || 0,
+        status: newStatus,
+        source: 'platform',
+      }]);
+    }
+  } catch (e) {}
+}
+
 // HELPER: Bump vendor metric (reuse if exists, otherwise add)
 // ─────────────────────────────────────────────────────────────────────────────
 async function bumpVendorMetric(vendor_id, metric_name) {
@@ -9950,6 +9981,8 @@ app.post('/api/enquiries', async (req, res) => {
       bumpVendorMetric(vendor_id, 'enquiries').catch(() => {});
       logVendorActivity(vendor_id, 'enquiry_received', 'New enquiry from a couple', { enquiry_id: enquiry.id }).catch(() => {});
     }
+    // Auto-upsert into couple_vendors as 'contacted'
+    upsertCoupleVendor(couple_id, vendor_id, 'contacted').catch(() => {});
     res.json({ success: true, data: enquiry });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
