@@ -7368,6 +7368,10 @@ app.post('/api/couple/checklist', async (req, res) => {
       }])
       .select().single();
     if (error) throw error;
+    if (data?.id) {
+      if (assigned_to) { resolveVendorId(assigned_to).then(vid => { if (vid) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'vendor', to_entity_id: vid, link_type: 'assigned_to', couple_id }); }).catch(() => {}); }
+      if (event && event !== 'general') { resolveEventId(event, couple_id).then(eid => { if (eid) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eid, link_type: 'scheduled_for', couple_id }); }).catch(() => {}); }
+    }
     res.json({ success: true, data });
   } catch (error) {
     console.error('checklist create error:', error.message);
@@ -7707,6 +7711,7 @@ app.post('/api/couple/guests', async (req, res) => {
       }])
       .select().single();
     if (error) throw error;
+    if (data?.id && event_invites && Object.keys(event_invites).length > 0) { for (const evName of Object.keys(event_invites)) { resolveEventId(evName, couple_id).then(eid => { if (eid) writeEntityLink({ from_entity_type: 'guest', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eid, link_type: 'invited_to', couple_id }); }).catch(() => {}); } }
     res.json({ success: true, data });
   } catch (error) {
     console.error('guests create error:', error.message);
@@ -8005,6 +8010,7 @@ app.patch('/api/couple/vendors/:vendorId', async (req, res) => {
       .eq('id', vendorId)
       .select().single();
     if (error) throw error;
+    if ((updates.status === 'booked' || updates.status === 'paid') && data?.couple_id && data?.vendor_id) { const eid = req.body.event_id || null; if (eid) writeEntityLink({ from_entity_type: 'vendor', from_entity_id: data.vendor_id, to_entity_type: 'event', to_entity_id: eid, link_type: 'booked_for', couple_id: data.couple_id }); }
     res.json({ success: true, data });
   } catch (error) {
     console.error('vendors update error:', error.message);
@@ -8285,6 +8291,7 @@ app.post('/api/co-planner/accept', async (req, res) => {
       co_planner_user_id: userId, name, phone: '+91' + cleanPhone, status: 'active',
     }).eq('id', invite.id);
 
+    writeEntityLink({ from_entity_type: 'couple', from_entity_id: invite.primary_user_id, to_entity_type: 'co_planner', to_entity_id: userId, link_type: 'shared_with', couple_id: invite.primary_user_id });
     logActivity('co_planner_joined', `${name} joined as co-planner via ${invite_code}`);
     res.json({ success: true, data: { id: userId, name, type: 'co_planner', primary_user_id: invite.primary_user_id, invite_code } });
   } catch (error) {
@@ -10054,6 +10061,7 @@ app.post('/api/enquiries/:id/messages', async (req, res) => {
       updates.couple_unread_count = (await supabase.from('vendor_enquiries').select('couple_unread_count').eq('id', req.params.id).maybeSingle()).data?.couple_unread_count + 1 || 1;
     }
     await supabase.from('vendor_enquiries').update(updates).eq('id', req.params.id);
+    if (from_role === 'couple') { supabase.from('vendor_enquiries').select('couple_id, vendor_id').eq('id', req.params.id).maybeSingle().then(({ data: enq }) => { if (enq?.couple_id && enq?.vendor_id) writeEntityLink({ from_entity_type: 'couple', from_entity_id: enq.couple_id, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'communicated_via', couple_id: enq.couple_id }); }).catch(() => {}); }
     res.json({ success: true, data: msg });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
