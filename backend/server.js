@@ -8292,6 +8292,7 @@ app.post('/api/co-planner/accept', async (req, res) => {
     }).eq('id', invite.id);
 
     writeEntityLink({ from_entity_type: 'couple', from_entity_id: invite.primary_user_id, to_entity_type: 'co_planner', to_entity_id: userId, link_type: 'shared_with', couple_id: invite.primary_user_id });
+    writeEntityLink({ from_entity_type: 'couple', from_entity_id: invite.primary_user_id, to_entity_type: 'co_planner', to_entity_id: userId, link_type: 'shared_with', couple_id: invite.primary_user_id });
     logActivity('co_planner_joined', `${name} joined as co-planner via ${invite_code}`);
     res.json({ success: true, data: { id: userId, name, type: 'co_planner', primary_user_id: invite.primary_user_id, invite_code } });
   } catch (error) {
