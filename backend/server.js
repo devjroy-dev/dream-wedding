@@ -11323,13 +11323,13 @@ app.post('/api/v2/couple/upsert', async (req, res) => {
     const bare = phone.replace(/\D/g, '').slice(-10);
     const full = '+91' + bare;
     let existing = null;
-    const { data: d1 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', full).maybeSingle();
+    const { data: d1 } = await supabase.from('users').select('id, phone, pin_set, dreamer_type, name').eq('phone', full).maybeSingle();
     if (d1) existing = d1;
     if (!existing) {
-      const { data: d2 } = await supabase.from('users').select('id, phone, pin_set').eq('phone', bare).maybeSingle();
+      const { data: d2 } = await supabase.from('users').select('id, phone, pin_set, dreamer_type, name').eq('phone', bare).maybeSingle();
       if (d2) existing = d2;
     }
-    if (existing) return res.json({ success: true, userId: existing.id, pin_set: !!existing.pin_set, created: false });
+    if (existing) return res.json({ success: true, userId: existing.id, pin_set: !!existing.pin_set, created: false, dreamer_type: existing.dreamer_type || 'basic', name: existing.name || null });
     const { data: newUser, error } = await supabase.from('users').insert([{
       phone: full,
       created_at: new Date().toISOString(),
