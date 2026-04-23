@@ -145,6 +145,21 @@ app.get('/api/vendors/:id', async (req, res) => {
   }
 });
 
+// ── Vendor search by name (for feed hub search bar) ──────────────────────────
+app.get('/api/vendors/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) return res.json({ success: true, data: [] });
+    const { data, error } = await supabase.from('vendors')
+      .select('id, name, category, city, featured_photos, portfolio_images, starting_price, rating')
+      .ilike('name', `%${q.trim()}%`)
+      .limit(10);
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+
 app.post('/api/vendors', async (req, res) => {
   try {
     const { data, error } = await supabase.from('vendors').insert([req.body]).select().single();
@@ -9987,8 +10002,9 @@ app.post('/api/enquiries/:id/messages', async (req, res) => {
     const { from_role, content, attachments } = req.body || {};
     if (!from_role || !['couple', 'vendor'].includes(from_role)) return res.status(400).json({ success: false, error: 'from_role required' });
     if (!content) return res.status(400).json({ success: false, error: 'content required' });
+    const filteredContent = sanitizeMessage(content);
     const { data: msg, error } = await supabase.from('vendor_enquiry_messages').insert([{
-      enquiry_id: req.params.id, from_role, content,
+      enquiry_id: req.params.id, from_role, content: filteredContent,
       attachments: attachments || [],
     }]).select().single();
     if (error) throw error;
