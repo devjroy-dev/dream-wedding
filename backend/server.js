@@ -8200,15 +8200,16 @@ app.post('/api/co-planner/invite', async (req, res) => {
     const { data: user } = await supabase.from('users').select('couple_tier, token_balance').eq('id', user_id).single();
     if (!user) return res.json({ success: false, error: 'User not found' });
 
+    // First invite always free regardless of tier
     const tierLabel = user.couple_tier === 'elite' ? 'platinum' : user.couple_tier === 'premium' ? 'gold' : 'basic';
-    let tokenCost = 2;
-    if (tierLabel === 'platinum') {
-      if (active.length === 0) tokenCost = 0;
-      else if (active.length === 1) tokenCost = 1;
+    let tokenCost = 0;
+    if (active.length > 0) {
+      if (tierLabel === 'platinum') tokenCost = 0;
+      else if (tierLabel === 'gold') tokenCost = 1;
       else tokenCost = 2;
     }
 
-    if (user.token_balance < tokenCost) {
+    if (tokenCost > 0 && user.token_balance < tokenCost) {
       return res.json({ success: false, error: `Not enough tokens. This invite costs ${tokenCost} token${tokenCost !== 1 ? 's' : ''}.`, token_cost: tokenCost });
     }
 
