@@ -11608,3 +11608,20 @@ app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// S35: Entity links backfill endpoint
+app.post('/api/v2/entity-links/backfill/:coupleId', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  const coupleId = req.params.coupleId;
+  let written = 0;
+  try {
+    const { data: muse } = await supabase.from('moodboard_items').select('id, vendor_id').eq('user_id', coupleId).not('vendor_id', 'is', null);
+    for (const item of muse || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: item.vendor_id, link_type: 'saved_to_muse', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
+    const { data: enquiries } = await supabase.from('vendor_enquiries').select('id, vendor_id').eq('couple_id', coupleId);
+    for (const enq of enquiries || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'enquired_about', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
+    const { data: cvs } = await supabase.from('couple_vendors').select('id, vendor_id, status').eq('couple_id', coupleId).not('vendor_id', 'is', null);
+    for (const cv of cvs || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: cv.vendor_id, link_type: cv.status === 'booked' || cv.status === 'paid' ? 'booked_for' : 'considering', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
+    await new Promise(r => setTimeout(r, 800));
+    res.json({ success: true, written });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
