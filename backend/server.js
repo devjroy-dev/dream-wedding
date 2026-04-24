@@ -5025,75 +5025,136 @@ app.delete('/api/v2/admin/cover-photos/:id', async (req, res) => {
 });
 
 // GET /api/v2/couple/today/:userId
-// Returns: { priority_tasks[], this_week_events[], upcoming_payments[], budget{}, next_event }
+// S36: Graph-intelligent today endpoint
 app.get('/api/v2/couple/today/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const in7Days = new Date(today.getTime() + 7*24*60*60*1000)
-      .toISOString().split('T')[0];
+    const now = new Date(); now.setHours(0,0,0,0);
+    const todayStr = now.toISOString().split('T')[0];
+    const in3Str = new Date(now.getTime() + 3*24*60*60*1000).toISOString().split('T')[0];
+    const in7Str = new Date(now.getTime() + 7*24*60*60*1000).toISOString().split('T')[0];
+    const in90Str = new Date(now.getTime() + 90*24*60*60*1000).toISOString().split('T')[0];
+    const ago48h = new Date(now.getTime() - 48*60*60*1000).toISOString();
 
-    const { data: tasks } = await supabase
-      .from('couple_checklist')
-      .select('*')
-      .eq('couple_id', userId)
-      .eq('is_complete', false)
-      .order('due_date', { ascending: true })
-      .limit(3);
+    const [
+      { data: userRow },
+      { data: allTasks },
+      { data: allEvents },
+      { data: allExpenses },
+      { data: profile },
+      { data: museItems },
+      { data: recentEnquiries },
+      { data: myVendors },
+      { data: activityRows },
+    ] = await Promise.all([
+      supabase.from('users').select('wedding_date, name').eq('id', userId).maybeSingle(),
+      supabase.from('couple_checklist').select('*').eq('couple_id', userId).eq('is_complete', false),
+      supabase.from('couple_events').select('*').eq('couple_id', userId).order('event_date', { ascending: true }),
+      supabase.from('couple_expenses').select('*').eq('couple_id', userId),
+      supabase.from('couple_profiles').select('total_budget').eq('user_id', userId).maybeSingle(),
+      supabase.from('moodboard_items').select('id, vendor_id, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(3),
+      supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, vendor_unread_count').eq('couple_id', userId).eq('status', 'active').order('last_message_at', { ascending: false }),
+      supabase.from('couple_vendors').select('vendor_id, status, events').eq('couple_id', userId),
+      supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
+    ]);
 
-    const { data: events } = await supabase
-      .from('couple_events')
-      .select('*')
-      .eq('couple_id', userId)
-      .gte('event_date', todayStr)
-      .lte('event_date', in7Days)
-      .order('event_date', { ascending: true });
+    const weddingDate = userRow?.wedding_date;
+    let heroState = 'no_date';
+    let daysUntil = null;
+    let nextEventName = null;
+    let heroLabel = null;
 
-    const { data: payments } = await supabase
-      .from('couple_expenses')
-      .select('*')
-      .eq('couple_id', userId)
-      .neq('payment_status', 'paid')
-      .gte('due_date', todayStr)
-      .lte('due_date', in7Days)
-      .order('due_date', { ascending: true });
+    if (weddingDate) {
+      const wd = new Date(weddingDate); wd.setHours(0,0,0,0);
+      daysUntil = Math.round((wd.getTime() - now.getTime()) / 86400000);
+      if (daysUntil < 0) {
+        heroState = 'past';
+      } else {
+        const upcomingEvents = (allEvents || []).filter(e => e.event_date >= todayStr).sort((a,b) => a.event_date.localeCompare(b.event_date));
+        if (upcomingEvents.length > 0) {
+          heroState = 'event';
+          nextEventName = upcomingEvents[0].event_name;
+          const evDate = new Date(upcomingEvents[0].event_date); evDate.setHours(0,0,0,0);
+          daysUntil = Math.round((evDate.getTime() - now.getTime()) / 86400000);
+          heroLabel = upcomingEvents[0].event_name;
+        } else {
+          heroState = 'date_only';
+          heroLabel = 'wedding';
+        }
+      }
+    }
 
-    const { data: profile } = await supabase
-      .from('couple_profiles')
-      .select('total_budget')
-      .eq('user_id', userId)
-      .single();
+    const expenses = allExpenses || [];
+    const committed = expenses.filter(e => ['committed','paid'].includes(e.payment_status)).reduce((s,e) => s + (e.actual_amount || 0), 0);
+    const paid = expenses.filter(e => e.payment_status === 'paid').reduce((s,e) => s + (e.actual_amount || 0), 0);
 
-    const { data: allExpenses } = await supabase
-      .from('couple_expenses')
-      .select('actual_amount, payment_status')
-      .eq('couple_id', userId);
+    const moments = [];
 
-    const committed = allExpenses?.filter(e =>
-      ['committed','paid'].includes(e.payment_status))
-      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
-    const paid = allExpenses?.filter(e => e.payment_status === 'paid')
-      .reduce((s, e) => s + (e.actual_amount || 0), 0) || 0;
+    const overdueTasks = (allTasks || []).filter(t => t.due_date && t.due_date < todayStr);
+    for (const t of overdueTasks.slice(0, 2)) {
+      if (moments.length >= 3) break;
+      moments.push({ type: 'overdue_task', priority: 1, title: 'Overdue task', body: t.text || t.title || 'A task needs your attention', action: 'Complete: ' + (t.text || t.title), task_id: t.id, due_date: t.due_date });
+    }
 
-    const { data: nextEvents } = await supabase
-      .from('couple_events')
-      .select('*')
-      .eq('couple_id', userId)
-      .gte('event_date', todayStr)
-      .order('event_date', { ascending: true })
-      .limit(1);
+    if (moments.length < 3) {
+      const staleEnquiries = (recentEnquiries || []).filter(e => e.last_message_from === 'couple' && e.last_message_at < ago48h);
+      for (const enq of staleEnquiries.slice(0, 1)) {
+        if (moments.length >= 3) break;
+        moments.push({ type: 'unanswered_enquiry', priority: 2, title: 'Awaiting reply', body: 'A vendor has not responded in over 48 hours.', action: 'Follow up', enquiry_id: enq.id });
+      }
+    }
+
+    if (moments.length < 3) {
+      const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
+      for (const p of upcomingPayments.slice(0, 1)) {
+        if (moments.length >= 3) break;
+        const amt = p.actual_amount ? 'Rs.' + p.actual_amount.toLocaleString('en-IN') : 'A payment';
+        moments.push({ type: 'upcoming_payment', priority: 3, title: 'Payment due', body: amt + ' due to ' + (p.vendor_name || 'vendor') + ' by ' + new Date(p.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), action: 'Pay ' + amt, expense_id: p.id, due_date: p.due_date, amount: p.actual_amount });
+      }
+    }
+
+    if (moments.length < 3) {
+      const imminent = (allTasks || []).filter(t => t.due_date && t.due_date >= todayStr && t.due_date <= in3Str);
+      for (const t of imminent.slice(0, 1)) {
+        if (moments.length >= 3) break;
+        moments.push({ type: 'imminent_task', priority: 4, title: 'Due soon', body: t.text || t.title || 'Task due in 3 days', action: 'Complete: ' + (t.text || t.title), task_id: t.id, due_date: t.due_date });
+      }
+    }
+
+    if (moments.length < 3) {
+      const bookedVendorEventIds = new Set((myVendors || []).filter(v => v.status === 'booked' || v.status === 'paid').flatMap(v => v.events || []));
+      const gapEvents = (allEvents || []).filter(e => e.event_date >= todayStr && e.event_date <= in90Str && !bookedVendorEventIds.has(e.id));
+      if (gapEvents.length > 0) {
+        const ev = gapEvents[0];
+        const daysTo = Math.round((new Date(ev.event_date).getTime() - now.getTime()) / 86400000);
+        moments.push({ type: 'unbooked_event', priority: 5, title: 'No maker booked', body: ev.event_name + ' is ' + daysTo + ' days away with no confirmed makers.', action: 'Find makers for ' + ev.event_name, event_id: ev.id, event_name: ev.event_name });
+      }
+    }
+
+    let museSavesEnriched = museItems || [];
+    if (museSavesEnriched.length > 0) {
+      const vendorIds = museSavesEnriched.map(m => m.vendor_id).filter(Boolean);
+      if (vendorIds.length > 0) {
+        const { data: vendors } = await supabase.from('vendors').select('id, name, category, city, featured_photos, portfolio_images, starting_price').in('id', vendorIds);
+        const vendorMap = Object.fromEntries((vendors || []).map(v => [v.id, v]));
+        museSavesEnriched = museSavesEnriched.map(m => ({ ...m, vendor: vendorMap[m.vendor_id] || null }));
+      }
+    }
+
+    const thisWeekEvents = (allEvents || []).filter(e => e.event_date >= todayStr && e.event_date <= in7Str);
+    const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
+    const quietActivity = (activityRows || []).slice(0, 5).map(e => ({ type: 'message', text: e.last_message_preview || 'New message', at: e.last_message_at, enquiry_id: e.id }));
 
     res.json({
-      priority_tasks: tasks || [],
-      this_week_events: events || [],
-      upcoming_payments: payments || [],
-      budget: {
-        total: profile?.total_budget || 0,
-        committed,
-        paid,
-      },
-      next_event: nextEvents?.[0] || null,
+      hero: { state: heroState, days_until: daysUntil, event_name: heroLabel, wedding_date: weddingDate },
+      three_moments: moments,
+      muse_saves: museSavesEnriched,
+      this_week_events: thisWeekEvents,
+      upcoming_payments: upcomingPayments,
+      budget: { total: profile?.total_budget || 0, committed, paid },
+      next_event: (allEvents || []).find(e => e.event_date >= todayStr) || null,
+      quiet_activity: quietActivity,
+      priority_tasks: (allTasks || []).filter(t => t.due_date && t.due_date >= todayStr).slice(0, 3),
     });
   } catch (err) {
     console.error('Today endpoint error:', err);
