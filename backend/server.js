@@ -4849,16 +4849,53 @@ app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
 
 // ── SESSION 13: Waitlist endpoint ──
 app.post('/api/v2/waitlist', async (req, res) => {
+  // Full waitlist upsert — accepts all fields from the new landing page.
+  // Upserts on phone so the 60-second edit window can overwrite a submission.
   try {
-    const { phone, instagram, role } = req.body;
+    const {
+      phone, instagram, role,
+      name,
+      category, category_other,
+      wedding_date, wedding_date_season, wedding_date_status,
+    } = req.body;
+
+    if (!phone) return res.status(400).json({ success: false, error: 'phone required' });
+
+    // Normalise phone to last 10 digits for consistent upsert key
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
+    if (cleanPhone.length < 10) return res.status(400).json({ success: false, error: 'invalid phone' });
+
+    const payload = {
+      phone: cleanPhone,
+      instagram: instagram || null,
+      role: role || 'dreamer',
+      name: name || null,
+      category: category || null,
+      category_other: category_other || null,
+      wedding_date: wedding_date || null,
+      wedding_date_season: wedding_date_season || null,
+      wedding_date_status: wedding_date_status || null,
+      source: 'landing',
+      updated_at: new Date().toISOString(),
+    };
+
+    // Upsert on phone — overwrites if same phone submits again (edit window)
     const { error } = await supabase
       .from('waitlist')
-      .insert([{ phone, instagram, role }]);
-    if (error) throw error;
+      .upsert([payload], { onConflict: 'phone', ignoreDuplicates: false });
+
+    if (error) {
+      // If upsert fails (e.g. column doesn't exist yet), fall back to insert
+      const { error: insertErr } = await supabase
+        .from('waitlist')
+        .insert([{ phone: cleanPhone, instagram: instagram || null, role: role || 'dreamer', name: name || null }]);
+      if (insertErr) throw insertErr;
+    }
+
     res.json({ success: true });
   } catch (err) {
-    console.error('Waitlist error:', err);
-    res.status(500).json({ error: 'Failed to submit' });
+    console.error('[waitlist] error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to submit' });
   }
 });
 
@@ -11417,19 +11454,148 @@ app.get('/api/v2/discovery/feed', async (req, res) => {
 
 // ── SESSION 13: Waitlist endpoint ──
 app.post('/api/v2/waitlist', async (req, res) => {
+  // Full waitlist upsert — accepts all fields from the new landing page.
+  // Upserts on phone so the 60-second edit window can overwrite a submission.
   try {
-    const { phone, instagram, role } = req.body;
+    const {
+      phone, instagram, role,
+      name,
+      category, category_other,
+      wedding_date, wedding_date_season, wedding_date_status,
+    } = req.body;
+
+    if (!phone) return res.status(400).json({ success: false, error: 'phone required' });
+
+    // Normalise phone to last 10 digits for consistent upsert key
+    const cleanPhone = String(phone).replace(/\D/g, '').slice(-10);
+    if (cleanPhone.length < 10) return res.status(400).json({ success: false, error: 'invalid phone' });
+
+    const payload = {
+      phone: cleanPhone,
+      instagram: instagram || null,
+      role: role || 'dreamer',
+      name: name || null,
+      category: category || null,
+      category_other: category_other || null,
+      wedding_date: wedding_date || null,
+      wedding_date_season: wedding_date_season || null,
+      wedding_date_status: wedding_date_status || null,
+      source: 'landing',
+      updated_at: new Date().toISOString(),
+    };
+
+    // Upsert on phone — overwrites if same phone submits again (edit window)
     const { error } = await supabase
       .from('waitlist')
-      .insert([{ phone, instagram, role }]);
-    if (error) throw error;
+      .upsert([payload], { onConflict: 'phone', ignoreDuplicates: false });
+
+    if (error) {
+      // If upsert fails (e.g. column doesn't exist yet), fall back to insert
+      const { error: insertErr } = await supabase
+        .from('waitlist')
+        .insert([{ phone: cleanPhone, instagram: instagram || null, role: role || 'dreamer', name: name || null }]);
+      if (insertErr) throw insertErr;
+    }
+
     res.json({ success: true });
   } catch (err) {
-    console.error('Waitlist error:', err);
-    res.status(500).json({ error: 'Failed to submit' });
+    console.error('[waitlist] error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to submit' });
   }
 });
 
+
+// ─── Landing page preview vendors ────────────────────────────────────────────
+// "Just Exploring" path on the landing page shows 10 curated vendor cards
+// in the blind swipe feed before the couple signs up.
+// Admin controls which 10 vendors appear via the admin portal.
+
+// GET /api/v2/preview-vendors — called by landing page
+app.get('/api/v2/preview-vendors', async (req, res) => {
+  try {
+    // Get the 10 curated vendor IDs in display order
+    const { data: slots, error: slotErr } = await supabase
+      .from('preview_vendors')
+      .select('vendor_id, display_order')
+      .order('display_order', { ascending: true })
+      .limit(10);
+
+    if (slotErr || !slots || slots.length === 0) {
+      // Fallback: return up to 10 live approved vendors if no curation set yet
+      const { data: fallback } = await supabase
+        .from('vendors')
+        .select('id, name, category, city, featured_photos, portfolio_images, starting_price, vibe_tags, about, rating')
+        .eq('is_approved', true)
+        .eq('discover_listed', true)
+        .eq('subscription_active', true)
+        .limit(10);
+      return res.json({ success: true, data: fallback || [], is_fallback: true });
+    }
+
+    // Fetch full vendor data for each curated slot
+    const ids = slots.map(s => s.vendor_id);
+    const { data: vendors } = await supabase
+      .from('vendors')
+      .select('id, name, category, city, featured_photos, portfolio_images, starting_price, vibe_tags, about, rating')
+      .in('id', ids);
+
+    if (!vendors) return res.json({ success: true, data: [], is_fallback: false });
+
+    // Return in display_order
+    const lookup = Object.fromEntries(vendors.map(v => [v.id, v]));
+    const ordered = slots.map(s => lookup[s.vendor_id]).filter(Boolean);
+
+    res.json({ success: true, data: ordered, is_fallback: false });
+  } catch (err) {
+    console.error('[preview-vendors] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/admin/preview-vendors — admin reads current curation
+app.get('/api/v2/admin/preview-vendors', adminAuth, async (req, res) => {
+  try {
+    const { data: slots } = await supabase
+      .from('preview_vendors')
+      .select('vendor_id, display_order')
+      .order('display_order', { ascending: true });
+
+    if (!slots || slots.length === 0) return res.json({ success: true, data: [] });
+
+    const ids = slots.map(s => s.vendor_id);
+    const { data: vendors } = await supabase
+      .from('vendors')
+      .select('id, name, category, city, featured_photos, tier')
+      .in('id', ids);
+
+    const lookup = Object.fromEntries((vendors || []).map(v => [v.id, v]));
+    const enriched = slots.map(s => ({ ...lookup[s.vendor_id], display_order: s.display_order })).filter(v => v.id);
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/admin/preview-vendors — admin sets the 10 preview slots
+// Body: { vendor_ids: ['uuid1', 'uuid2', ...] } — ordered array, max 10
+app.post('/api/v2/admin/preview-vendors', adminAuth, async (req, res) => {
+  try {
+    const { vendor_ids } = req.body || {};
+    if (!Array.isArray(vendor_ids)) {
+      return res.status(400).json({ success: false, error: 'vendor_ids array required' });
+    }
+    const ids = vendor_ids.slice(0, 10); // enforce max 10
+
+    // Clear existing and insert new slots
+    await supabase.from('preview_vendors').delete().neq('vendor_id', '00000000-0000-0000-0000-000000000000');
+    if (ids.length > 0) {
+      const rows = ids.map((vendor_id, i) => ({ vendor_id, display_order: i + 1 }));
+      const { error } = await supabase.from('preview_vendors').insert(rows);
+      if (error) throw error;
+    }
+
+    logActivity('admin_preview_vendors_updated', `Preview vendors updated: ${ids.length} slots`);
+    res.json({ success: true, count: ids.length });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
 
 // ── SESSION 17: Razorpay + Vendor Today + Vendor Clients ──────────────────────
 
