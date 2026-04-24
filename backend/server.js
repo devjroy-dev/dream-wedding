@@ -12932,25 +12932,24 @@ app.patch('/api/v3/admin/dreamers/:id', adminAuth, async (req, res) => {
 // ── Admin Makers — full list ──────────────────────────────────────────────────
 app.get('/api/v3/admin/makers', adminAuth, async (req, res) => {
   try {
-    const { search, tier, verified, limit = 100, offset = 0 } = req.query;
-    let query = supabase.from('vendors').select('id, name, category, city, phone, tier, is_verified, is_luxury, luxury_approved, couture_approved, subscription_active, created_at, discover_enabled').not('name', 'is', null).order('created_at', { ascending: false });
-    if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,city.ilike.%${search}%`);
-    if (tier && tier !== 'all') query = query.eq('tier', tier);
-    if (verified === 'true') query = query.eq('is_verified', true);
-    query = query.range(Number(offset), Number(offset) + Number(limit) - 1);
+    const { search, tier, limit = 100, offset = 0 } = req.query;
+    let query = supabase.from('vendors')
+      .select('id, name, category, city, phone, is_verified, is_luxury, luxury_approved, subscription_active, created_at, vendor_discover_enabled, rating, review_count, starting_price, is_approved, dreamai_access')
+      .not('name', 'is', null).order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+    if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
     const { data, error } = await query;
     if (error) throw error;
 
-    // Enrich with enquiry counts
+    // Enrich with subscription tier from vendor_subscriptions
     const enriched = await Promise.all((data || []).map(async (v) => {
-      const [{ count: enquiryCount }, { data: pendingImgs }] = await Promise.all([
-        supabase.from('vendor_enquiries').select('*', { count: 'exact', head: true }).eq('vendor_id', v.id),
-        supabase.from('vendor_images').select('id', { count: 'exact', head: true }).eq('vendor_id', v.id).eq('approved', false),
-      ]);
-      return { ...v, enquiries_received: enquiryCount || 0, pending_images: pendingImgs?.length || 0 };
+      const { data: sub } = await supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', v.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const vendorTier = sub?.tier || (v.subscription_active ? 'signature' : 'essential');
+      if (tier && tier !== 'all' && vendorTier !== tier) return null;
+      return { ...v, tier: vendorTier, discover_enabled: v.vendor_discover_enabled };
     }));
 
-    res.json({ success: true, data: enriched });
+    res.json({ success: true, data: enriched.filter(Boolean) });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
@@ -12983,9 +12982,11 @@ app.get('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
 // ── Admin Maker actions ───────────────────────────────────────────────────────
 app.patch('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
   try {
-    const allowed = ['tier', 'is_verified', 'is_luxury', 'luxury_approved', 'couture_approved', 'discover_enabled', 'subscription_active', 'featured'];
+    const allowed = ['is_verified', 'is_luxury', 'luxury_approved', 'vendor_discover_enabled', 'subscription_active', 'is_approved', 'dreamai_access'];
     const patch = {};
     for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+    // Map discover_enabled → vendor_discover_enabled
+    if (req.body.discover_enabled !== undefined) patch.vendor_discover_enabled = req.body.discover_enabled;
     const { data, error } = await supabase.from('vendors').update(patch).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
