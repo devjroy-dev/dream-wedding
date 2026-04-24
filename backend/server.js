@@ -4828,16 +4828,16 @@ app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
 
     // Look up user in users table by phone
     const fullPhone = "+91" + phone;
-    const { data: user, error } = await supabase
-      .from("users")
-      .select("id, name, phone")
-      .eq("phone", fullPhone)
-      .maybeSingle();
-
-    if (error) throw error;
+    let user = null;
+    const { data: u1 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type").eq("phone", fullPhone).maybeSingle();
+    if (u1) user = u1;
+    if (!user) {
+      const { data: u2 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type").eq("phone", phone).maybeSingle();
+      if (u2) user = u2;
+    }
     if (!user) return res.status(404).json({ success: false, error: "No account found. Join the waitlist." });
 
-    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone } });
+    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone, pin_set: !!user.pin_set, dreamer_type: user.dreamer_type || 'basic' } });
   } catch (err) {
     console.error("[v2 OTP] verify error:", err.message);
     res.status(500).json({ success: false, error: "Verification failed" });
@@ -5040,7 +5040,8 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
       const { data: d1 } = await supabase.from(table).select('id, pin_set').eq('phone', full).maybeSingle();
       if (d1) return res.json({ success: true, pin_set: !!d1.pin_set, userId: d1.id });
       const { data: d2 } = await supabase.from(table).select('id, pin_set').eq('phone', bare).maybeSingle();
-      return res.json({ success: true, pin_set: !!d2?.pin_set, userId: d2?.id });
+      if (d2) return res.json({ success: true, pin_set: !!d2.pin_set, userId: d2.id });
+      return res.json({ success: true, pin_set: false, userId: null, found: false });
     }
     const { data, error } = await query.eq('id', userId).maybeSingle();
     if (error) throw error;
