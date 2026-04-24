@@ -12870,7 +12870,7 @@ app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
 app.get('/api/v3/admin/dreamers', adminAuth, async (req, res) => {
   try {
     const { search, tier, limit = 100, offset = 0 } = req.query;
-    let query = supabase.from('users').select('id, name, phone, email, city, couple_tier, wedding_date, created_at, discover_enabled, token_balance').order('created_at', { ascending: false });
+    let query = supabase.from('users').select('id, name, phone, email, couple_tier, wedding_date, created_at, discover_enabled, token_balance').not('dreamer_type', 'is', null).order('created_at', { ascending: false });
     if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
     if (tier && tier !== 'all') query = query.eq('couple_tier', tier);
     query = query.range(Number(offset), Number(offset) + Number(limit) - 1);
