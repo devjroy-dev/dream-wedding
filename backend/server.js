@@ -5058,6 +5058,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
     ]);
 
+    // ── Hero state ────────────────────────────────────────────────────────────
     const weddingDate = userRow?.wedding_date;
     let heroState = 'no_date';
     let daysUntil = null;
@@ -5084,66 +5085,130 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       }
     }
 
+    // ── Budget ────────────────────────────────────────────────────────────────
     const expenses = allExpenses || [];
     const committed = expenses.filter(e => ['committed','paid'].includes(e.payment_status)).reduce((s,e) => s + (e.actual_amount || 0), 0);
     const paid = expenses.filter(e => e.payment_status === 'paid').reduce((s,e) => s + (e.actual_amount || 0), 0);
 
+    // ── Three Moments — priority stack ────────────────────────────────────────
     const moments = [];
 
+    // P1: Overdue tasks
     const overdueTasks = (allTasks || []).filter(t => t.due_date && t.due_date < todayStr);
     for (const t of overdueTasks.slice(0, 2)) {
       if (moments.length >= 3) break;
-      moments.push({ type: 'overdue_task', priority: 1, title: 'Overdue task', body: t.text || t.title || 'A task needs your attention', action: 'Complete: ' + (t.text || t.title), task_id: t.id, due_date: t.due_date });
+      moments.push({
+        type: 'overdue_task',
+        priority: 1,
+        title: 'Overdue task',
+        body: t.text || t.title || 'A task needs your attention',
+        action: `Complete: ${t.text || t.title}`,
+        task_id: t.id,
+        due_date: t.due_date,
+      });
     }
 
+    // P2: Unanswered enquiries > 48h (vendor hasn't replied, couple should follow up)
     if (moments.length < 3) {
-      const staleEnquiries = (recentEnquiries || []).filter(e => e.last_message_from === 'couple' && e.last_message_at < ago48h);
+      const staleEnquiries = (recentEnquiries || []).filter(e =>
+        e.last_message_from === 'couple' &&
+        e.last_message_at < ago48h
+      );
       for (const enq of staleEnquiries.slice(0, 1)) {
         if (moments.length >= 3) break;
-        moments.push({ type: 'unanswered_enquiry', priority: 2, title: 'Awaiting reply', body: 'A vendor has not responded in over 48 hours.', action: 'Follow up', enquiry_id: enq.id });
+        moments.push({
+          type: 'unanswered_enquiry',
+          priority: 2,
+          title: 'Awaiting reply',
+          body: 'A vendor hasn\'t responded in over 48 hours.',
+          action: 'Follow up',
+          enquiry_id: enq.id,
+        });
       }
     }
 
+    // P3: Upcoming payments due within 7 days
     if (moments.length < 3) {
-      const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
+      const upcomingPayments = expenses.filter(e =>
+        e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str
+      ).sort((a,b) => a.due_date.localeCompare(b.due_date));
       for (const p of upcomingPayments.slice(0, 1)) {
         if (moments.length >= 3) break;
-        const amt = p.actual_amount ? 'Rs.' + p.actual_amount.toLocaleString('en-IN') : 'A payment';
-        moments.push({ type: 'upcoming_payment', priority: 3, title: 'Payment due', body: amt + ' due to ' + (p.vendor_name || 'vendor') + ' by ' + new Date(p.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), action: 'Pay ' + amt, expense_id: p.id, due_date: p.due_date, amount: p.actual_amount });
+        const amt = p.actual_amount ? `₹${p.actual_amount.toLocaleString('en-IN')}` : 'A payment';
+        moments.push({
+          type: 'upcoming_payment',
+          priority: 3,
+          title: 'Payment due',
+          body: `${amt} due to ${p.vendor_name || 'vendor'} by ${new Date(p.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+          action: `Pay ${amt} by ${new Date(p.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+          expense_id: p.id,
+          due_date: p.due_date,
+          amount: p.actual_amount,
+        });
       }
     }
 
+    // P4: Tasks due within 3 days
     if (moments.length < 3) {
       const imminent = (allTasks || []).filter(t => t.due_date && t.due_date >= todayStr && t.due_date <= in3Str);
       for (const t of imminent.slice(0, 1)) {
         if (moments.length >= 3) break;
-        moments.push({ type: 'imminent_task', priority: 4, title: 'Due soon', body: t.text || t.title || 'Task due in 3 days', action: 'Complete: ' + (t.text || t.title), task_id: t.id, due_date: t.due_date });
+        moments.push({
+          type: 'imminent_task',
+          priority: 4,
+          title: 'Due soon',
+          body: t.text || t.title || 'Task due in 3 days',
+          action: `Complete: ${t.text || t.title}`,
+          task_id: t.id,
+          due_date: t.due_date,
+        });
       }
     }
 
+    // P5: Event within 90 days with no vendor booked
     if (moments.length < 3) {
       const bookedVendorEventIds = new Set((myVendors || []).filter(v => v.status === 'booked' || v.status === 'paid').flatMap(v => v.events || []));
       const gapEvents = (allEvents || []).filter(e => e.event_date >= todayStr && e.event_date <= in90Str && !bookedVendorEventIds.has(e.id));
       if (gapEvents.length > 0) {
         const ev = gapEvents[0];
         const daysTo = Math.round((new Date(ev.event_date).getTime() - now.getTime()) / 86400000);
-        moments.push({ type: 'unbooked_event', priority: 5, title: 'No maker booked', body: ev.event_name + ' is ' + daysTo + ' days away with no confirmed makers.', action: 'Find makers for ' + ev.event_name, event_id: ev.id, event_name: ev.event_name });
+        moments.push({
+          type: 'unbooked_event',
+          priority: 5,
+          title: 'No maker booked',
+          body: `${ev.event_name} is ${daysTo} days away with no confirmed makers.`,
+          action: `Find makers for ${ev.event_name}`,
+          event_id: ev.id,
+          event_name: ev.event_name,
+        });
       }
     }
 
-    let museSavesEnriched = museItems || [];
-    if (museSavesEnriched.length > 0) {
-      const vendorIds = museSavesEnriched.map(m => m.vendor_id).filter(Boolean);
+    // ── Muse saves enrichment ─────────────────────────────────────────────────
+    const museSaves = museItems || [];
+    let museSavesEnriched = museSaves;
+    if (museSaves.length > 0) {
+      const vendorIds = museSaves.map(m => m.vendor_id).filter(Boolean);
       if (vendorIds.length > 0) {
         const { data: vendors } = await supabase.from('vendors').select('id, name, category, city, featured_photos, portfolio_images, starting_price').in('id', vendorIds);
         const vendorMap = Object.fromEntries((vendors || []).map(v => [v.id, v]));
-        museSavesEnriched = museSavesEnriched.map(m => ({ ...m, vendor: vendorMap[m.vendor_id] || null }));
+        museSavesEnriched = museSaves.map(m => ({ ...m, vendor: vendorMap[m.vendor_id] || null }));
       }
     }
 
+    // ── This week events ──────────────────────────────────────────────────────
     const thisWeekEvents = (allEvents || []).filter(e => e.event_date >= todayStr && e.event_date <= in7Str);
+
+    // ── Upcoming payments ─────────────────────────────────────────────────────
     const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
-    const quietActivity = (activityRows || []).slice(0, 5).map(e => ({ type: 'message', text: e.last_message_preview || 'New message', at: e.last_message_at, enquiry_id: e.id }));
+
+    // ── Quiet activity ────────────────────────────────────────────────────────
+    const quietActivity = (activityRows || []).slice(0, 5).map(e => ({
+      type: 'message',
+      text: e.last_message_preview || 'New message',
+      at: e.last_message_at,
+      enquiry_id: e.id,
+    }));
 
     res.json({
       hero: { state: heroState, days_until: daysUntil, event_name: heroLabel, wedding_date: weddingDate },
@@ -5154,6 +5219,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       budget: { total: profile?.total_budget || 0, committed, paid },
       next_event: (allEvents || []).find(e => e.event_date >= todayStr) || null,
       quiet_activity: quietActivity,
+      // Legacy fields for backward compat
       priority_tasks: (allTasks || []).filter(t => t.due_date && t.due_date >= todayStr).slice(0, 3),
     });
   } catch (err) {
@@ -6426,6 +6492,301 @@ app.post('/api/admin/create-vendor', async (req, res) => {
   }
 });
 
+// ── S34: Full vendor profile for couple-side profile page
+app.get('/api/v2/vendor/profile/:vendorId', async (req, res) => {
+  const { vendorId } = req.params;
+  const { couple_id } = req.query;
+  try {
+    const [
+      { data: vendor },
+      { data: profilePages },
+      { data: page2 },
+      { data: images },
+      { data: blocks },
+      { data: reviews },
+      { data: sub },
+    ] = await Promise.all([
+      supabase.from('vendors').select('id, name, category, city, starting_price, max_price, about, tagline, vibe_tags, instagram_url, rating, review_count, accepts_lock_date, lock_date_amount, show_whatsapp_public, phone, featured_photos, portfolio_images, is_verified, is_luxury, destination_tags, years_experience, weddings_completed, cities_served, outstation_available, travel_fee_policy, languages_spoken, max_weddings_per_year, advance_percentage, preferred_lead_time, cancellation_policy').eq('id', vendorId).maybeSingle(),
+      supabase.from('vendor_profile_pages').select('*').eq('vendor_id', vendorId).maybeSingle(),
+      supabase.from('vendor_profile_page2').select('*').eq('vendor_id', vendorId).eq('is_published', true).maybeSingle(),
+      supabase.from('vendor_images').select('id, url, tags, approved').eq('vendor_id', vendorId).eq('approved', true),
+      supabase.from('vendor_availability_blocks').select('blocked_date, start_date, end_date').eq('vendor_id', vendorId),
+      supabase.from('vendor_reviews').select('id, reviewer_name, review_text, is_verified, created_at').eq('vendor_id', vendorId).eq('approved', true).order('is_verified', { ascending: false }).order('created_at', { ascending: false }).limit(10),
+      supabase.from('vendor_subscriptions').select('tier, founding_badge').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    ]);
+
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
+
+    // Check availability against couple's wedding date
+    let isAvailable = null;
+    if (couple_id) {
+      const { data: coupleProfile } = await supabase.from('couple_profiles').select('wedding_date').eq('user_id', couple_id).maybeSingle();
+      const { data: coupleUser } = await supabase.from('users').select('wedding_date').eq('id', couple_id).maybeSingle();
+      const weddingDate = coupleProfile?.wedding_date || coupleUser?.wedding_date;
+      if (weddingDate && blocks) {
+        const wd = new Date(weddingDate);
+        isAvailable = !blocks.some(b => {
+          if (b.blocked_date) return new Date(b.blocked_date).toDateString() === wd.toDateString();
+          if (b.start_date && b.end_date) return wd >= new Date(b.start_date) && wd <= new Date(b.end_date);
+          return false;
+        });
+      }
+    }
+
+    // Filter creation images — hero, carousel, spotlight tags
+    const creationImages = (images || []).filter(img =>
+      img.tags && (img.tags.includes('hero') || img.tags.includes('carousel') || img.tags.includes('spotlight'))
+    ).map(img => img.url).filter(Boolean);
+
+    // Fallback to featured_photos / portfolio_images if no tagged images
+    const fallbackImages = vendor.featured_photos?.length
+      ? vendor.featured_photos
+      : vendor.portfolio_images || [];
+
+    res.json({
+      success: true,
+      data: {
+        vendor: {
+          ...vendor,
+          tier: sub?.tier || 'essential',
+          founding_badge: !!sub?.founding_badge,
+        },
+        profile_pages: profilePages || null,
+        page2: page2 || null,
+        creation_images: creationImages.length > 0 ? creationImages : fallbackImages,
+        reviews: reviews || [],
+        is_available: isAvailable,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── S35: Entity Links — helper + endpoints ────────────────────────────────────
+
+// Fire-and-forget graph link writer. NEVER blocks. NEVER throws to caller.
+function writeEntityLink({ from_entity_type, from_entity_id, to_entity_type, to_entity_id, link_type, couple_id }) {
+  if (!from_entity_id || !to_entity_id || !link_type) return;
+  supabase.from('entity_links').upsert([{
+    from_entity_type, from_entity_id,
+    to_entity_type, to_entity_id,
+    link_type, couple_id: couple_id || null,
+    created_at: new Date().toISOString(),
+  }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true })
+  .then(() => {}).catch(() => {});
+}
+
+// Fuzzy vendor UUID lookup for text-based resolution (Option A fallback)
+async function resolveVendorId(vendorName) {
+  if (!vendorName) return null;
+  try {
+    const { data } = await supabase.from('vendors')
+      .select('id').ilike('name', `%${vendorName.trim()}%`).limit(1).maybeSingle();
+    return data?.id || null;
+  } catch { return null; }
+}
+
+// Fuzzy event UUID lookup by name + couple
+async function resolveEventId(eventName, coupleId) {
+  if (!eventName || !coupleId) return null;
+  try {
+    const { data } = await supabase.from('couple_events')
+      .select('id').eq('couple_id', coupleId)
+      .ilike('event_name', `%${eventName.trim()}%`)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    return data?.id || null;
+  } catch { return null; }
+}
+
+// POST /api/v2/entity-links — manual insert (also used by frontend pickers)
+app.post('/api/v2/entity-links', async (req, res) => {
+  try {
+    const { from_entity_type, from_entity_id, to_entity_type, to_entity_id, link_type, couple_id } = req.body || {};
+    if (!from_entity_id || !to_entity_id || !link_type) return res.status(400).json({ success: false, error: 'from_entity_id, to_entity_id, link_type required' });
+    const { error } = await supabase.from('entity_links').upsert([{
+      from_entity_type, from_entity_id, to_entity_type, to_entity_id,
+      link_type, couple_id: couple_id || null, created_at: new Date().toISOString(),
+    }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true });
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/entity-links/:coupleId — full graph for a couple
+app.get('/api/v2/entity-links/:coupleId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('entity_links')
+      .select('*').eq('couple_id', req.params.coupleId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/entity-links/entity/:entityId — all links to/from a specific entity
+app.get('/api/v2/entity-links/entity/:entityId', async (req, res) => {
+  try {
+    const id = req.params.entityId;
+    const { data: from } = await supabase.from('entity_links').select('*').eq('from_entity_id', id);
+    const { data: to } = await supabase.from('entity_links').select('*').eq('to_entity_id', id);
+    res.json({ success: true, data: [...(from || []), ...(to || [])] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/entity-links/backfill/:coupleId — one-time backfill for existing data
+app.post('/api/v2/entity-links/backfill/:coupleId', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  const coupleId = req.params.coupleId;
+  let written = 0;
+  try {
+    // 1. moodboard_items → saved_to_muse
+    const { data: muse } = await supabase.from('moodboard_items').select('id, vendor_id').eq('user_id', coupleId).not('vendor_id', 'is', null);
+    for (const item of muse || []) {
+      writeEntityLink({ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: item.vendor_id, link_type: 'saved_to_muse', couple_id: coupleId });
+      written++;
+    }
+    // 2. vendor_enquiries → enquired_about
+    const { data: enquiries } = await supabase.from('vendor_enquiries').select('id, vendor_id').eq('couple_id', coupleId);
+    for (const enq of enquiries || []) {
+      writeEntityLink({ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'enquired_about', couple_id: coupleId });
+      written++;
+    }
+    // 3. co_planners → shared_with
+    const { data: coplanners } = await supabase.from('co_planners').select('id, co_planner_user_id').eq('primary_user_id', coupleId).not('co_planner_user_id', 'is', null);
+    for (const cp of coplanners || []) {
+      writeEntityLink({ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'co_planner', to_entity_id: cp.co_planner_user_id, link_type: 'shared_with', couple_id: coupleId });
+      written++;
+    }
+    // 4. couple_vendors with status booked/paid → considering/booked_for
+    const { data: cvs } = await supabase.from('couple_vendors').select('id, vendor_id, status').eq('couple_id', coupleId).not('vendor_id', 'is', null);
+    for (const cv of cvs || []) {
+      const lt = cv.status === 'paid' ? 'booked_for' : cv.status === 'booked' ? 'booked_for' : 'considering';
+      writeEntityLink({ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: cv.vendor_id, link_type: lt, couple_id: coupleId });
+      written++;
+    }
+    // Small delay to let fire-and-forget writes land
+    await new Promise(r => setTimeout(r, 800));
+    res.json({ success: true, written });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Admin: list all dreamers
+app.get('/api/v2/admin/couples', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, phone, dreamer_type, wedding_date, created_at')
+      .not('dreamer_type', 'eq', 'vendor')
+      .not('dreamer_type', 'is', null)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, couples: data || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin: change dreamer tier
+app.patch('/api/v2/admin/couples/:id/tier', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { tier } = req.body || {};
+    if (!tier) return res.status(400).json({ error: 'tier required' });
+    const { error } = await supabase.from('users').update({ dreamer_type: tier }).eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin: revoke dreamer (soft lock)
+app.patch('/api/v2/admin/couples/:id/revoke', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { error } = await supabase.from('users').update({ dreamer_type: 'revoked' }).eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin: delete dreamer (full cascade)
+app.delete('/api/v2/admin/couples/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  const userId = req.params.id;
+  try {
+    const tables = [
+      'moodboard_items', 'messages', 'co_planners',
+      'couple_events', 'couple_event_category_budgets', 'couple_checklist',
+      'couple_guests', 'couple_moodboard_pins', 'couple_shagun', 'couple_vendors',
+      'couple_expenses', 'couple_budget', 'couple_profiles',
+      'vendor_enquiries', 'vendor_enquiry_messages',
+      'ai_token_purchases', 'notifications', 'couple_whatsapp_templates',
+    ];
+    for (const t of tables) {
+      try { await supabase.from(t).delete().eq('user_id', userId); } catch (e) {}
+      try { await supabase.from(t).delete().eq('couple_id', userId); } catch (e) {}
+    }
+    try { await supabase.from('access_codes').update({ redeemed_user_id: null }).eq('redeemed_user_id', userId); } catch (e) {}
+    const { error } = await supabase.from('users').delete().eq('id', userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin: create couple directly (no OTP)
+app.post('/api/v2/admin/couples/create', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { name, phone, partner_name, wedding_date, tier } = req.body || {};
+    if (!phone) return res.status(400).json({ success: false, error: 'phone required' });
+    const formattedPhone = phone.startsWith('+') ? phone : '+91' + phone.replace(/\D/g, '');
+    const { data: existing } = await supabase.from('users').select('id').eq('phone', formattedPhone).maybeSingle();
+    if (existing) return res.status(400).json({ success: false, error: 'Phone already registered' });
+    const { data, error } = await supabase.from('users').insert([{
+      name: name || null,
+      phone: formattedPhone,
+      dreamer_type: tier || 'basic',
+      wedding_date: wedding_date || null,
+    }]).select().single();
+    if (error) throw error;
+    if (data?.id) {
+      try { await supabase.from('couple_profiles').insert([{ user_id: data.id, total_budget: 0 }]); } catch (e) {}
+    }
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Admin: list all vendors/makers
+app.get('/api/v2/admin/vendors/list', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { data, error } = await supabase
+      .from('vendors')
+      .select('id, name, phone, category, city, tier, created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, vendors: data || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin: delete vendor/maker (full cascade)
+app.delete('/api/v2/admin/vendors/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
+  const vendorId = req.params.id;
+  try {
+    const vendorTables = [
+      'vendor_subscriptions', 'vendor_invoices', 'vendor_contracts',
+      'vendor_payment_schedules', 'vendor_images', 'vendor_enquiries',
+      'vendor_enquiry_messages', 'featured_boards', 'vendor_availability_blocks',
+    ];
+    for (const t of vendorTables) {
+      try { await supabase.from(t).delete().eq('vendor_id', vendorId); } catch (e) {}
+    }
+    const { error } = await supabase.from('vendors').delete().eq('id', vendorId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Admin: create couple profile directly
 app.post('/api/admin/create-couple', async (req, res) => {
   try {
@@ -7429,9 +7790,18 @@ app.post('/api/couple/checklist', async (req, res) => {
       }])
       .select().single();
     if (error) throw error;
+    // S35: Write entity links fire-and-forget
     if (data?.id) {
-      if (assigned_to) { resolveVendorId(assigned_to).then(vid => { if (vid) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'vendor', to_entity_id: vid, link_type: 'assigned_to', couple_id }); }).catch(() => {}); }
-      if (event && event !== 'general') { resolveEventId(event, couple_id).then(eid => { if (eid) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eid, link_type: 'scheduled_for', couple_id }); }).catch(() => {}); }
+      // assigned_to → Vendor (UUID if picker passed, else fuzzy lookup)
+      if (assigned_to) {
+        const vendorId = req.body.vendor_id || await resolveVendorId(assigned_to);
+        if (vendorId) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'vendor', to_entity_id: vendorId, link_type: 'assigned_to', couple_id });
+      }
+      // scheduled_for → Event
+      if (event && event !== 'general') {
+        const eventId = req.body.event_id || await resolveEventId(event, couple_id);
+        if (eventId) writeEntityLink({ from_entity_type: 'task', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eventId, link_type: 'scheduled_for', couple_id });
+      }
     }
     res.json({ success: true, data });
   } catch (error) {
@@ -7439,8 +7809,6 @@ app.post('/api/couple/checklist', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-// Bulk create tasks — used for initial template seeding on first load.
 app.post('/api/couple/checklist/bulk', async (req, res) => {
   try {
     const { couple_id, tasks } = req.body || {};
@@ -7619,6 +7987,7 @@ app.patch('/api/couple/expenses/:expenseId', async (req, res) => {
       .eq('id', expenseId)
       .select().single();
     if (error) throw error;
+    // Auto-upgrade couple_vendors status when expense marked paid
     if (updates.payment_status === 'paid' && data?.couple_id && data?.vendor_id) {
       upsertCoupleVendor(data.couple_id, data.vendor_id, 'paid').catch(() => {});
     }
@@ -7772,7 +8141,14 @@ app.post('/api/couple/guests', async (req, res) => {
       }])
       .select().single();
     if (error) throw error;
-    if (data?.id && event_invites && Object.keys(event_invites).length > 0) { for (const evName of Object.keys(event_invites)) { resolveEventId(evName, couple_id).then(eid => { if (eid) writeEntityLink({ from_entity_type: 'guest', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eid, link_type: 'invited_to', couple_id }); }).catch(() => {}); } }
+    // S35: Wire invited_to links for each event the guest is invited to
+    if (data?.id && event_invites && Object.keys(event_invites).length > 0) {
+      for (const evName of Object.keys(event_invites)) {
+        resolveEventId(evName, couple_id).then(eventId => {
+          if (eventId) writeEntityLink({ from_entity_type: 'guest', from_entity_id: data.id, to_entity_type: 'event', to_entity_id: eventId, link_type: 'invited_to', couple_id });
+        }).catch(() => {});
+      }
+    }
     res.json({ success: true, data });
   } catch (error) {
     console.error('guests create error:', error.message);
@@ -8071,7 +8447,14 @@ app.patch('/api/couple/vendors/:vendorId', async (req, res) => {
       .eq('id', vendorId)
       .select().single();
     if (error) throw error;
-    if ((updates.status === 'booked' || updates.status === 'paid') && data?.couple_id && data?.vendor_id) { const eid = req.body.event_id || null; if (eid) writeEntityLink({ from_entity_type: 'vendor', from_entity_id: data.vendor_id, to_entity_type: 'event', to_entity_id: eid, link_type: 'booked_for', couple_id: data.couple_id }); }
+    // S35: booked_for → Event when status set to booked
+    if ((updates.status === 'booked' || updates.status === 'paid') && data?.couple_id && data?.vendor_id) {
+      const eventId = req.body.event_id || null;
+      const resolvedEventId = eventId || (req.body.event_name ? await resolveEventId(req.body.event_name, data.couple_id) : null);
+      if (resolvedEventId) {
+        writeEntityLink({ from_entity_type: 'vendor', from_entity_id: data.vendor_id, to_entity_type: 'event', to_entity_id: resolvedEventId, link_type: 'booked_for', couple_id: data.couple_id });
+      }
+    }
     res.json({ success: true, data });
   } catch (error) {
     console.error('vendors update error:', error.message);
@@ -8301,6 +8684,7 @@ app.post('/api/co-planner/invite', async (req, res) => {
 
     const link = 'https://thedreamwedding.in/join/' + inviteCode;
     logActivity('co_planner_invite', `Co-planner invite: ${inviteCode} (cost: ${tokenCost})`);
+    // S35: shared_with link — written when co-planner accepts (user_id known then), not at invite time
     res.json({ success: true, data: { invite_code: inviteCode, link, token_cost: tokenCost, remaining_tokens: user.token_balance - tokenCost } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -8352,8 +8736,9 @@ app.post('/api/co-planner/accept', async (req, res) => {
       co_planner_user_id: userId, name, phone: '+91' + cleanPhone, status: 'active',
     }).eq('id', invite.id);
 
+    // S35: shared_with link now that we have the co-planner's UUID
     writeEntityLink({ from_entity_type: 'couple', from_entity_id: invite.primary_user_id, to_entity_type: 'co_planner', to_entity_id: userId, link_type: 'shared_with', couple_id: invite.primary_user_id });
-    writeEntityLink({ from_entity_type: 'couple', from_entity_id: invite.primary_user_id, to_entity_type: 'co_planner', to_entity_id: userId, link_type: 'shared_with', couple_id: invite.primary_user_id });
+
     logActivity('co_planner_joined', `${name} joined as co-planner via ${invite_code}`);
     res.json({ success: true, data: { id: userId, name, type: 'co_planner', primary_user_id: invite.primary_user_id, invite_code } });
   } catch (error) {
@@ -9565,6 +9950,7 @@ app.post('/api/couple/muse/save', async (req, res) => {
     // Part D: bump vendor analytics + activity log
     bumpVendorMetric(vendor_id, 'saves').catch(() => {});
     logVendorActivity(vendor_id, 'saved_to_muse', 'A couple saved you to their Muse').catch(() => {});
+    // Auto-upsert into couple_vendors as 'considering'
     upsertCoupleVendor(couple_id, vendor_id, 'considering').catch(() => {});
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -9813,15 +10199,19 @@ app.get('/api/couple/vendor/:vendor_id/contact-status', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: Auto-upsert vendor into couple's My Vendors with status ratchet
+// Status order: considering < contacted < booked < paid — never downgrades
 async function upsertCoupleVendor(couple_id, vendor_id, newStatus) {
   const statusRank = { considering: 1, contacted: 2, booked: 3, paid: 4 };
   try {
+    // Get vendor details for the row
     const { data: vendor } = await supabase.from('vendors')
       .select('name, category, city, phone, starting_price').eq('id', vendor_id).maybeSingle();
     if (!vendor) return;
+    // Check if row already exists
     const { data: existing } = await supabase.from('couple_vendors')
       .select('id, status').eq('couple_id', couple_id).eq('vendor_id', vendor_id).maybeSingle();
     if (existing) {
+      // Only upgrade, never downgrade
       if ((statusRank[newStatus] || 0) > (statusRank[existing.status] || 0)) {
         await supabase.from('couple_vendors').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', existing.id);
       }
@@ -9836,7 +10226,7 @@ async function upsertCoupleVendor(couple_id, vendor_id, newStatus) {
         source: 'platform',
       }]);
     }
-  } catch (e) {}
+  } catch (e) { /* best-effort, never block the main flow */ }
 }
 
 // HELPER: Bump vendor metric (reuse if exists, otherwise add)
@@ -10050,7 +10440,7 @@ app.post('/api/enquiries', async (req, res) => {
       bumpVendorMetric(vendor_id, 'enquiries').catch(() => {});
       logVendorActivity(vendor_id, 'enquiry_received', 'New enquiry from a couple', { enquiry_id: enquiry.id }).catch(() => {});
     }
-    // Auto-upsert into couple_vendors as 'contacted'
+    // Auto-upsert into couple_vendors as 'contacted' (one-way ratchet — never downgrades)
     upsertCoupleVendor(couple_id, vendor_id, 'contacted').catch(() => {});
     res.json({ success: true, data: enquiry });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -10123,7 +10513,13 @@ app.post('/api/enquiries/:id/messages', async (req, res) => {
       updates.couple_unread_count = (await supabase.from('vendor_enquiries').select('couple_unread_count').eq('id', req.params.id).maybeSingle()).data?.couple_unread_count + 1 || 1;
     }
     await supabase.from('vendor_enquiries').update(updates).eq('id', req.params.id);
-    if (from_role === 'couple') { supabase.from('vendor_enquiries').select('couple_id, vendor_id').eq('id', req.params.id).maybeSingle().then(({ data: enq }) => { if (enq?.couple_id && enq?.vendor_id) writeEntityLink({ from_entity_type: 'couple', from_entity_id: enq.couple_id, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'communicated_via', couple_id: enq.couple_id }); }).catch(() => {}); }
+    // S35: communicated_via — write once per enquiry thread (fire-and-forget)
+    if (from_role === 'couple') {
+      const { data: enq } = await supabase.from('vendor_enquiries').select('couple_id, vendor_id').eq('id', req.params.id).maybeSingle();
+      if (enq?.couple_id && enq?.vendor_id) {
+        writeEntityLink({ from_entity_type: 'couple', from_entity_id: enq.couple_id, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'communicated_via', couple_id: enq.couple_id });
+      }
+    }
     res.json({ success: true, data: msg });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -11068,144 +11464,767 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
 });
 
 // GET /api/v2/vendor/clients/:vendorId
+// GET /api/v2/vendor/clients/:vendorId — S37 enriched with progress ring data
 app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
   try {
     const { vendorId } = req.params;
-    const { data, error } = await supabase.from('vendor_clients')
-      .select('id, name, phone, event_type, event_date, budget, status, notes')
+    const { data: clients, error } = await supabase.from('vendor_clients')
+      .select('id, name, phone, email, event_type, event_date, budget, status, notes')
       .eq('vendor_id', vendorId)
       .order('event_date', { ascending: true });
     if (error) throw error;
-    res.json({ success: true, data: data || [] });
+
+    // Enrich each client with ring data
+    const enriched = await Promise.all((clients || []).map(async (c) => {
+      const [
+        { data: invoices },
+        { data: contracts },
+        { data: deliveries },
+        { data: lastMsg },
+      ] = await Promise.all([
+        supabase.from('vendor_invoices').select('amount, paid_amount, status').eq('vendor_id', vendorId).eq('client_name', c.name),
+        supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
+        supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
+        supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
+      ]);
+
+      const totalInvoiced = (invoices || []).reduce((s, i) => s + (i.amount || 0), 0);
+      const totalPaid = (invoices || []).reduce((s, i) => s + (i.paid_amount || 0), 0);
+      const contractSigned = contracts?.status === 'signed';
+      const deliveriesTotal = (deliveries || []).length;
+      const deliveriesDone = (deliveries || []).filter(d => d.status === 'delivered').length;
+      const daysSinceMsg = lastMsg?.last_message_at ? Math.floor((Date.now() - new Date(lastMsg.last_message_at).getTime()) / 86400000) : 999;
+
+      // Progress ring: 4 dimensions × 25%
+      const financialPct = totalInvoiced > 0 ? Math.min(25, (totalPaid / totalInvoiced) * 25) : 0;
+      const contractPct = contractSigned ? 25 : 0;
+      const deliveryPct = deliveriesTotal > 0 ? Math.min(25, (deliveriesDone / deliveriesTotal) * 25) : 0;
+      const commsPct = daysSinceMsg <= 14 ? 25 : 0;
+      const progress = Math.round(financialPct + contractPct + deliveryPct + commsPct);
+
+      return {
+        ...c,
+        total_invoiced: totalInvoiced,
+        total_paid: totalPaid,
+        total_due: totalInvoiced - totalPaid,
+        progress,
+        last_activity: lastMsg?.last_message_at || c.event_date || null,
+      };
+    }));
+
+    res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('[Vendor Clients] error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SESSION 22 — DreamAi Deep Integration
-// ══════════════════════════════════════════════════════════════════════════════
-
-// GET /api/v2/dreamai/couple-context/:userId
-app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
+// GET /api/v2/vendor/clients/:vendorId/:clientId — full client detail
+app.get('/api/v2/vendor/clients/:vendorId/:clientId', async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { vendorId, clientId } = req.params;
+    const [
+      { data: client },
+      { data: invoices },
+      { data: contracts },
+      { data: deliveries },
+      { data: enquiry },
+    ] = await Promise.all([
+      supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle(),
+      supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
+      supabase.from('vendor_contracts').select('*').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('delivery_items').select('*').eq('vendor_id', vendorId).eq('related_client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
+      supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
+    res.json({ success: true, data: { client, invoices: invoices || [], contract: contracts || null, deliveries: deliveries || [], enquiry: enquiry || null } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
 
-    // User
-    const { data: user } = await supabase.from('users')
-      .select('id, name, wedding_date, partner_name')
-      .eq('id', userId).maybeSingle();
+// POST /api/v2/vendor/enquiries/:id/convert — Convert lead to client
+app.post('/api/v2/vendor/enquiries/:id/convert', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vendor_id } = req.body || {};
+    if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
 
-    // Events
-    const { data: events } = await supabase.from('couple_events')
-      .select('id, event_name, event_date, venue, budget_allocated, budget_spent')
-      .eq('user_id', userId)
-      .order('event_date', { ascending: true });
+    // Get enquiry + couple details
+    const { data: enq } = await supabase.from('vendor_enquiries').select('*').eq('id', id).maybeSingle();
+    if (!enq) return res.status(404).json({ success: false, error: 'Enquiry not found' });
 
-    // Tasks
-    const { data: tasks } = await supabase.from('couple_checklist')
-      .select('id, task_name, status, due_date, event_name, vendor_name, is_complete')
-      .eq('user_id', userId)
-      .order('due_date', { ascending: true });
+    const { data: couple } = await supabase.from('users').select('name, phone, wedding_date').eq('id', enq.couple_id).maybeSingle();
 
-    // Budget
-    const { data: budgetRows } = await supabase.from('couple_planner_budget')
-      .select('total_budget, committed_amount, paid_amount')
-      .eq('user_id', userId).maybeSingle();
+    // Create vendor_clients row
+    const { data: client, error: clientErr } = await supabase.from('vendor_clients').insert([{
+      vendor_id,
+      name: couple?.name || enq.couple_name || 'Client',
+      phone: couple?.phone || null,
+      event_type: enq.event_type || 'Wedding',
+      event_date: couple?.wedding_date || enq.wedding_date || null,
+      status: 'enquiry',
+      notes: `Converted from enquiry on ${new Date().toLocaleDateString('en-IN')}`,
+    }]).select().single();
+    if (clientErr) throw clientErr;
 
-    // Expenses / upcoming payments
-    const next30 = new Date(Date.now() + 30 * 86400000).toISOString();
-    const { data: expenses } = await supabase.from('couple_planner_budget')
-      .select('id, vendor_name, purpose, amount, actual_amount, due_date, status, event_name')
-      .eq('user_id', userId)
-      .order('due_date', { ascending: true });
+    // Update enquiry — mark as converted
+    await supabase.from('vendor_enquiries').update({ status: 'converted', converted_to_client_id: client.id }).eq('id', id);
 
-    // Muse (saved vendors)
-    const { data: muse } = await supabase.from('moodboard_items')
-      .select('id, vendor_id, vendors(name, category, tier)')
-      .eq('user_id', userId)
-      .limit(20);
+    res.json({ success: true, data: client });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
 
-    // Guests
-    const { data: guestRows } = await supabase.from('couple_guests')
-      .select('id, rsvp_status')
-      .eq('user_id', userId);
 
-    const guestTotal = (guestRows || []).length;
-    const guestConfirmed = (guestRows || []).filter(g => g.rsvp_status === 'confirmed').length;
-    const guestPending = (guestRows || []).filter(g => g.rsvp_status === 'pending' || !g.rsvp_status).length;
+// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// S38 — Maker Money + Studio
+// ══════════════════════════════════════════════════════════════════════════════
 
-    // Overdue tasks
-    const now = new Date().toISOString();
-    const overdueTasks = (tasks || []).filter(t => !t.is_complete && t.due_date && t.due_date < now);
+// GET /api/v2/vendor/gst-summary/:vendorId — GST from invoices with FY + quarterly breakdown
+app.get('/api/v2/vendor/gst-summary/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const fy = req.query.fy || (() => {
+      const now = new Date();
+      const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+      return `${y}-${y+1}`;
+    })();
+    const [fyStart, fyEnd] = fy.includes('-') ? [`${fy.split('-')[0]}-04-01`, `${fy.split('-')[1].length===2?'20'+fy.split('-')[1]:fy.split('-')[1]}-03-31`] : [`${fy}-04-01`, `${parseInt(fy)+1}-03-31`];
 
-    // Upcoming payments (next 30 days, unpaid)
-    const upcomingPayments = (expenses || []).filter(e =>
-      e.status !== 'paid' && e.due_date && e.due_date <= next30
-    );
+    const { data: invoices } = await supabase.from('vendor_invoices')
+      .select('id, client_name, amount, gst_amount, gst_enabled, tds_amount, tds_rate, tds_deducted_by_client, issue_date, status')
+      .eq('vendor_id', vendorId)
+      .gte('issue_date', fyStart)
+      .lte('issue_date', fyEnd)
+      .order('issue_date', { ascending: true });
 
-    // Days remaining to next event
-    let daysRemaining = null;
-    if (events && events.length > 0) {
-      const nextEv = events.find(e => e.event_date && new Date(e.event_date) >= new Date());
-      if (nextEv) {
-        daysRemaining = Math.ceil((new Date(nextEv.event_date) - new Date()) / (1000 * 60 * 60 * 24));
+    const rows = invoices || [];
+    const totalInvoiced = rows.reduce((s, i) => s + (i.amount || 0), 0);
+    const totalGST = rows.filter(i => i.gst_enabled).reduce((s, i) => s + (i.gst_amount || 0), 0);
+    const totalTDS = rows.reduce((s, i) => s + (i.tds_amount || 0), 0);
+
+    // Quarterly breakdown (Apr-Jun, Jul-Sep, Oct-Dec, Jan-Mar)
+    const fyYear = parseInt(fy.split('-')[0]);
+    const quarters = [
+      { label: 'Apr–Jun', start: `${fyYear}-04-01`, end: `${fyYear}-06-30` },
+      { label: 'Jul–Sep', start: `${fyYear}-07-01`, end: `${fyYear}-09-30` },
+      { label: 'Oct–Dec', start: `${fyYear}-10-01`, end: `${fyYear}-12-31` },
+      { label: 'Jan–Mar', start: `${fyYear+1}-01-01`, end: `${fyYear+1}-03-31` },
+    ];
+    const quarterly = quarters.map(q => {
+      const qRows = rows.filter(i => i.issue_date >= q.start && i.issue_date <= q.end);
+      return { label: q.label, invoiced: qRows.reduce((s,i)=>s+(i.amount||0),0), gst: qRows.filter(i=>i.gst_enabled).reduce((s,i)=>s+(i.gst_amount||0),0) };
+    });
+
+    // Per-client TDS ledger
+    const clientMap = {};
+    rows.forEach(i => {
+      const k = i.client_name || 'Unknown';
+      if (!clientMap[k]) clientMap[k] = { client_name: k, total_invoiced: 0, tds_rate: i.tds_rate || 10, tds_amount: 0, tds_deducted_by_client: false };
+      clientMap[k].total_invoiced += i.amount || 0;
+      clientMap[k].tds_amount += i.tds_amount || 0;
+      if (i.tds_deducted_by_client) clientMap[k].tds_deducted_by_client = true;
+    });
+
+    res.json({ success: true, data: { fy, total_invoiced: totalInvoiced, total_gst: totalGST, total_tds: totalTDS, quarterly, tds_ledger: Object.values(clientMap), invoices: rows } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/vendor/gst-export/:vendorId — CA-ready CSV from invoices
+app.get('/api/v2/vendor/gst-export/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const fy = req.query.fy || (() => { const now=new Date(); const y=now.getMonth()>=3?now.getFullYear():now.getFullYear()-1; return `${y}-${y+1}`; })();
+    const fyYear = parseInt(fy.split('-')[0]);
+    const { data: invoices } = await supabase.from('vendor_invoices')
+      .select('invoice_number, client_name, issue_date, amount, gst_enabled, gst_amount, tds_rate, tds_amount, tds_deducted_by_client, status')
+      .eq('vendor_id', vendorId)
+      .gte('issue_date', `${fyYear}-04-01`).lte('issue_date', `${fyYear+1}-03-31`)
+      .order('issue_date', { ascending: true });
+    const headers = ['Invoice Number','Client Name','Invoice Date','Amount (₹)','GST Rate (%)','GST Amount (₹)','TDS Rate (%)','TDS Amount (₹)','TDS Deducted By Client','Net Receivable (₹)','Status'];
+    const rows = (invoices||[]).map(i => [
+      i.invoice_number||'', i.client_name||'', i.issue_date||'', i.amount||0,
+      i.gst_enabled?18:0, i.gst_amount||0, i.tds_rate||0, i.tds_amount||0,
+      i.tds_deducted_by_client?'Yes':'No',
+      ((i.amount||0)+(i.gst_amount||0)-(i.tds_amount||0)),
+      i.status||''
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    res.setHeader('Content-Type','text/csv');
+    res.setHeader('Content-Disposition',`attachment; filename="tax-export-${fy}.csv"`);
+    res.send(csv);
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/vendor/payment-shield/:vendorId
+app.get('/api/v2/vendor/payment-shield/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_payment_shield')
+      .select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/vendor/payment-shield — add client to shield
+app.post('/api/v2/vendor/payment-shield', async (req, res) => {
+  try {
+    const { vendor_id, client_id, client_name, amount, wedding_date } = req.body || {};
+    if (!vendor_id || !client_name || !amount) return res.status(400).json({ success: false, error: 'vendor_id, client_name, amount required' });
+    const release_date = wedding_date ? new Date(new Date(wedding_date).getTime() + 24*60*60*1000).toISOString().split('T')[0] : null;
+    const { data, error } = await supabase.from('vendor_payment_shield').insert([{ vendor_id, client_id: client_id||null, client_name, amount, wedding_date: wedding_date||null, release_date, status: 'holding' }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/vendor/broadcast-whatsapp — send WhatsApp broadcast to client segment
+app.post('/api/v2/vendor/broadcast-whatsapp', async (req, res) => {
+  try {
+    const { vendor_id, message, segment } = req.body || {};
+    if (!vendor_id || !message) return res.status(400).json({ success: false, error: 'vendor_id and message required' });
+
+    // Get clients for segment
+    let query = supabase.from('vendor_clients').select('id, name, phone').eq('vendor_id', vendor_id).eq('broadcast_unsubscribed', false);
+    const today = new Date().toISOString().split('T')[0];
+    const in90 = new Date(Date.now()+90*86400000).toISOString().split('T')[0];
+    if (segment === 'upcoming') query = query.gte('event_date', today).lte('event_date', in90);
+    else if (segment === 'post_wedding') query = query.lt('event_date', today);
+
+    const { data: clients } = await query;
+    if (!clients || clients.length === 0) return res.json({ success: true, sent: 0, message: 'No clients in segment' });
+
+    let sent = 0; const failed = [];
+    const fullMessage = message + '\n\nReply STOP to unsubscribe.';
+    for (const client of clients) {
+      if (!client.phone) continue;
+      const phone = '+91' + normalizePhone(client.phone);
+      try {
+        await new Promise(r => setTimeout(r, 500)); // rate limit
+        const ok = await sendWhatsApp(phone, fullMessage);
+        if (ok) sent++;
+        else failed.push(client.name);
+      } catch { failed.push(client.name); }
+    }
+
+    // Log broadcast
+    await supabase.from('vendor_broadcasts').insert([{ vendor_id, message, template: segment || 'all', recipient_count: clients.length, sent_count: sent }]);
+
+    res.json({ success: true, sent, failed_count: failed.length, total: clients.length });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/vendor/contracts/generate — generate contract PDF (text-based, no pdfkit needed)
+app.post('/api/v2/vendor/contracts/generate', async (req, res) => {
+  try {
+    const { vendor_id, client_name, event_date, amount, template_type, custom_terms } = req.body || {};
+    if (!vendor_id || !client_name) return res.status(400).json({ success: false, error: 'vendor_id and client_name required' });
+
+    const { data: vendor } = await supabase.from('vendors').select('name, city, phone').eq('id', vendor_id).maybeSingle();
+
+    const templates = {
+      photography: 'Photography & Videography Agreement',
+      mua: 'Makeup Artist Services Agreement',
+      event_management: 'Event Management Agreement',
+      general: 'General Services Agreement',
+    };
+    const templateTitle = templates[template_type] || templates.general;
+    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '___________';
+    const fmtAmt = (n) => n ? '₹' + n.toLocaleString('en-IN') : '___________';
+
+    const contractText = `${templateTitle}
+
+This agreement is entered into between:
+
+SERVICE PROVIDER: ${vendor?.name || 'Service Provider'}
+Location: ${vendor?.city || ''}
+Contact: ${vendor?.phone || ''}
+
+CLIENT: ${client_name}
+Event Date: ${fmtDate(event_date)}
+
+SERVICES & COMPENSATION
+Total Fee: ${fmtAmt(amount)}
+Payment Terms: As agreed in the invoice schedule.
+
+TERMS & CONDITIONS
+1. The Service Provider agrees to deliver the services as discussed and confirmed in writing.
+2. The Client agrees to pay the agreed fee as per the payment schedule.
+3. Cancellation by Client within 30 days of event: 50% of remaining fee is forfeit.
+4. Cancellation by Client within 7 days of event: 100% of remaining fee is forfeit.
+5. Cancellation by Service Provider: Full refund of advance paid.
+6. Any additional requests beyond the agreed scope will be quoted separately.
+7. The Service Provider retains the right to use work for portfolio unless otherwise agreed in writing.
+
+${custom_terms ? 'ADDITIONAL TERMS\n' + custom_terms + '\n' : ''}
+SIGNATURES
+
+Service Provider: _______________________  Date: ___________
+
+Client: _______________________  Date: ___________
+
+Generated by The Dream Wedding · thedreamwedding.in`;
+
+    // Save to vendor_contracts
+    const { data: contract, error } = await supabase.from('vendor_contracts').insert([{
+      vendor_id, client_name, template_type: template_type || 'general',
+      event_date: event_date || null, amount: amount || null,
+      terms_json: { custom_terms: custom_terms || '' },
+      status: 'draft', contract_text: contractText,
+    }]).select().single();
+    if (error) throw error;
+
+    res.json({ success: true, data: { ...contract, contract_text: contractText } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// S39 — Couture Vertical
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/couture/designers — list all couture designers with products
+app.get('/api/v2/couture/designers', async (req, res) => {
+  try {
+    const { category } = req.query;
+    let query = supabase.from('vendors')
+      .select('id, name, category, city, about, tagline, starting_price, featured_photos, portfolio_images, rating, review_count, couture_appointment_fee, vibe_tags')
+      .eq('luxury_category', 'couture')
+      .eq('couture_approved', true);
+    if (category && category !== 'All') query = query.ilike('name', `%${category}%`);
+    const { data: designers, error } = await query.order('rating', { ascending: false });
+    if (error) throw error;
+
+    // Enrich with products
+    const enriched = await Promise.all((designers || []).map(async (d) => {
+      const { data: products } = await supabase.from('couture_products')
+        .select('id, title, category, price_from, images, is_featured, available')
+        .eq('vendor_id', d.id).eq('available', true)
+        .order('is_featured', { ascending: false }).limit(4);
+      return { ...d, products: products || [], appointment_fee: d.couture_appointment_fee || 3500 };
+    }));
+
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/couture/products/:vendorId — all products for a designer
+app.get('/api/v2/couture/products/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('couture_products')
+      .select('*').eq('vendor_id', req.params.vendorId).eq('available', true)
+      .order('is_featured', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/couture/appointments — book appointment (MVP: creates record + payment link placeholder)
+app.post('/api/v2/couture/appointments', async (req, res) => {
+  try {
+    const { vendor_id, couple_id, product_id, appointment_date, appointment_time, notes } = req.body || {};
+    if (!vendor_id || !couple_id) return res.status(400).json({ success: false, error: 'vendor_id and couple_id required' });
+
+    const { data: vendor } = await supabase.from('vendors').select('name, couture_appointment_fee').eq('id', vendor_id).maybeSingle();
+    const fee = vendor?.couture_appointment_fee || 3500;
+    const platformFee = 500;
+
+    const { data: appt, error } = await supabase.from('couture_appointments').insert([{
+      vendor_id, couple_id,
+      product_id: product_id || null,
+      appointment_date: appointment_date || null,
+      appointment_time: appointment_time || null,
+      fee, platform_fee: platformFee,
+      status: 'pending_payment',
+      notes: notes || null,
+      razorpay_payment_link: `https://rzp.io/l/tdw-couture-${Date.now()}`, // MVP placeholder
+    }]).select().single();
+    if (error) throw error;
+
+    res.json({ success: true, data: appt, payment_link: appt.razorpay_payment_link, fee, platform_fee: platformFee });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// S40 — Collab Hub
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/collab/posts — browse posts with smart filtering
+app.get('/api/v2/collab/posts', async (req, res) => {
+  try {
+    const { vendor_id, category, city, post_type, budget_min, budget_max } = req.query;
+
+    let query = supabase.from('collab_posts')
+      .select('id, vendor_id, title, description, post_type, category, city, budget, date_needed, status, created_at')
+      .eq('status', 'open')
+      .order('created_at', { ascending: false });
+
+    if (category) query = query.eq('category', category);
+    if (city) query = query.ilike('city', `%${city}%`);
+    if (post_type) query = query.eq('post_type', post_type);
+    if (budget_min) query = query.gte('budget', Number(budget_min));
+    if (budget_max) query = query.lte('budget', Number(budget_max));
+
+    const { data: posts, error } = await query.limit(50);
+    if (error) throw error;
+
+    // Enrich with poster name — exclude own posts from feed
+    const enriched = await Promise.all((posts || []).map(async (p) => {
+      const { data: v } = await supabase.from('vendors').select('name, category, city').eq('id', p.vendor_id).maybeSingle();
+      return { ...p, poster_name: v?.name || 'A Maker', poster_category: v?.category || '' };
+    }));
+
+    const filtered = vendor_id ? enriched.filter(p => p.vendor_id !== vendor_id) : enriched;
+    res.json({ success: true, data: filtered });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/collab/my-posts/:vendorId — vendor's own posts
+app.get('/api/v2/collab/my-posts/:vendorId', async (req, res) => {
+  try {
+    const { data: posts, error } = await supabase.from('collab_posts')
+      .select('*').eq('vendor_id', req.params.vendorId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    // Enrich with application counts
+    const enriched = await Promise.all((posts || []).map(async (p) => {
+      const { count } = await supabase.from('collab_applications').select('*', { count: 'exact', head: true }).eq('post_id', p.id);
+      return { ...p, application_count: count || 0 };
+    }));
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/collab/posts — create a post
+app.post('/api/v2/collab/posts', async (req, res) => {
+  try {
+    const { vendor_id, title, description, post_type, category, city, budget, date_needed } = req.body || {};
+    if (!vendor_id || !title || !post_type) return res.status(400).json({ success: false, error: 'vendor_id, title, post_type required' });
+    const { data, error } = await supabase.from('collab_posts').insert([{
+      vendor_id, title, description: description || null, post_type,
+      category: category || null, city: city || null,
+      budget: budget ? Number(budget) : null,
+      date_needed: date_needed || null, status: 'open',
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// PATCH /api/v2/collab/posts/:id — update status (close, filled)
+app.patch('/api/v2/collab/posts/:id', async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    const { data, error } = await supabase.from('collab_posts').update({ status }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/collab/applications/:postId — applications for a post
+app.get('/api/v2/collab/applications/:postId', async (req, res) => {
+  try {
+    const { data: apps, error } = await supabase.from('collab_applications')
+      .select('*').eq('post_id', req.params.postId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const enriched = await Promise.all((apps || []).map(async (a) => {
+      const { data: v } = await supabase.from('vendors').select('name, category, city, rating, portfolio_images').eq('id', a.vendor_id).maybeSingle();
+      return { ...a, applicant: v || null };
+    }));
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/collab/applications — apply to a post
+app.post('/api/v2/collab/applications', async (req, res) => {
+  try {
+    const { post_id, vendor_id, message } = req.body || {};
+    if (!post_id || !vendor_id) return res.status(400).json({ success: false, error: 'post_id and vendor_id required' });
+
+    // Check not already applied
+    const { data: existing } = await supabase.from('collab_applications').select('id').eq('post_id', post_id).eq('vendor_id', vendor_id).maybeSingle();
+    if (existing) return res.status(400).json({ success: false, error: 'Already applied' });
+
+    const { data, error } = await supabase.from('collab_applications').insert([{
+      post_id, vendor_id, message: message || null, status: 'pending', match_score: null,
+    }]).select().single();
+    if (error) throw error;
+
+    // Notify post owner — get their phone and send WhatsApp after 5min delay
+    const { data: post } = await supabase.from('collab_posts').select('vendor_id, title').eq('id', post_id).maybeSingle();
+    if (post?.vendor_id) {
+      const { data: owner } = await supabase.from('vendors').select('phone, name').eq('id', post.vendor_id).maybeSingle();
+      const { data: applicant } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
+      if (owner?.phone) {
+        setTimeout(async () => {
+          const phone = '+91' + normalizePhone(owner.phone);
+          const msg = `New application on TDW Collab!\n\n${applicant?.name || 'A Maker'} applied for "${post.title}".\n\nOpen the app to review: thedreamwedding.in/vendor/discovery/collab`;
+          sendWhatsApp(phone, msg).catch(() => {});
+        }, 5 * 60 * 1000); // 5 minute delay
       }
     }
 
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// PATCH /api/v2/collab/applications/:id — accept/reject/complete
+app.patch('/api/v2/collab/applications/:id', async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    const updates = { status };
+
+    // If marking complete — calculate match fee
+    if (status === 'completed') {
+      const { data: app } = await supabase.from('collab_applications').select('post_id').eq('id', req.params.id).maybeSingle();
+      if (app?.post_id) {
+        const { data: post } = await supabase.from('collab_posts').select('budget, post_type').eq('id', app.post_id).maybeSingle();
+        if (post?.post_type !== 'referral' && post?.budget) {
+          updates.match_fee_amount = Math.min(Math.round(post.budget * 0.05), 2000);
+          updates.match_fee_collected = false; // Admin collects manually for now
+        }
+      }
+    }
+
+    const { data, error } = await supabase.from('collab_applications').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+
+    // Notify applicant on status change
+    if (status === 'accepted' || status === 'rejected') {
+      const { data: app } = await supabase.from('collab_applications').select('vendor_id, post_id').eq('id', req.params.id).maybeSingle();
+      if (app?.vendor_id) {
+        const { data: applicant } = await supabase.from('vendors').select('phone').eq('id', app.vendor_id).maybeSingle();
+        const { data: post } = await supabase.from('collab_posts').select('title').eq('id', app.post_id).maybeSingle();
+        if (applicant?.phone) {
+          const phone = '+91' + normalizePhone(applicant.phone);
+          const msg = status === 'accepted'
+            ? `Great news! Your application for "${post?.title}" on TDW Collab has been accepted. Open the app to connect.`
+            : `Your application for "${post?.title}" on TDW Collab was not selected this time. Keep an eye out for more opportunities!`;
+          sendWhatsApp(phone, msg).catch(() => {});
+        }
+      }
+    }
+
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// S40 — Collab Hub
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/collab/posts — browse posts with smart filtering
+app.get('/api/v2/collab/posts', async (req, res) => {
+  try {
+    const { vendor_id, category, city, post_type, budget_min, budget_max } = req.query;
+    let query = supabase.from('collab_posts').select('*').eq('status', 'open').order('created_at', { ascending: false });
+    if (post_type) query = query.eq('post_type', post_type);
+
+    const { data: posts, error } = await query;
+    if (error) throw error;
+
+    // Smart filtering — if vendor_id provided, filter by their category and city
+    let filtered = posts || [];
+    if (vendor_id) {
+      const { data: vendor } = await supabase.from('vendors').select('category, city').eq('id', vendor_id).maybeSingle();
+      if (vendor) {
+        filtered = filtered.filter(p =>
+          (!p.required_category || p.required_category.toLowerCase() === vendor.category?.toLowerCase()) &&
+          (!p.city || p.city.toLowerCase() === vendor.city?.toLowerCase())
+        );
+      }
+    }
+    if (category) filtered = filtered.filter(p => p.required_category?.toLowerCase().includes(String(category).toLowerCase()));
+    if (city) filtered = filtered.filter(p => !p.city || p.city.toLowerCase().includes(String(city).toLowerCase()));
+    if (budget_min) filtered = filtered.filter(p => !p.budget || p.budget >= Number(budget_min));
+    if (budget_max) filtered = filtered.filter(p => !p.budget || p.budget <= Number(budget_max));
+
+    res.json({ success: true, data: filtered });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/collab/my-posts/:vendorId — vendor's own posts
+app.get('/api/v2/collab/my-posts/:vendorId', async (req, res) => {
+  try {
+    const { data: posts, error } = await supabase.from('collab_posts').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
+    if (error) throw error;
+    // Enrich with application count
+    const enriched = await Promise.all((posts || []).map(async p => {
+      const { count } = await supabase.from('collab_applications').select('*', { count: 'exact', head: true }).eq('post_id', p.id);
+      return { ...p, application_count: count || 0 };
+    }));
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/collab/posts — create a post
+app.post('/api/v2/collab/posts', async (req, res) => {
+  try {
+    const { vendor_id, title, description, post_type, required_category, city, budget, event_date, post_fee } = req.body || {};
+    if (!vendor_id || !title || !post_type) return res.status(400).json({ success: false, error: 'vendor_id, title, post_type required' });
+    const { data, error } = await supabase.from('collab_posts').insert([{
+      vendor_id, title, description: description || null,
+      post_type, required_category: required_category || null,
+      city: city || null, budget: budget ? Number(budget) : null,
+      event_date: event_date || null, status: 'open',
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// PATCH /api/v2/collab/posts/:id — update status (open/filled/closed)
+app.patch('/api/v2/collab/posts/:id', async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    const { data, error } = await supabase.from('collab_posts').update({ status }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// GET /api/v2/collab/applications/:postId — applications for a post
+app.get('/api/v2/collab/applications/:postId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('collab_applications').select('*').eq('post_id', req.params.postId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/collab/applications — apply to a post
+app.post('/api/v2/collab/applications', async (req, res) => {
+  try {
+    const { post_id, applicant_vendor_id, message } = req.body || {};
+    if (!post_id || !applicant_vendor_id) return res.status(400).json({ success: false, error: 'post_id and applicant_vendor_id required' });
+
+    // Check not already applied
+    const { data: existing } = await supabase.from('collab_applications').select('id').eq('post_id', post_id).eq('applicant_vendor_id', applicant_vendor_id).maybeSingle();
+    if (existing) return res.json({ success: false, error: 'Already applied' });
+
+    const { data: appl, error } = await supabase.from('collab_applications').insert([{
+      post_id, applicant_vendor_id, message: message || null, status: 'pending', match_score: null,
+    }]).select().single();
+    if (error) throw error;
+
+    // Notify post owner via WhatsApp (5-min delay not possible here — send immediately for MVP)
+    const { data: post } = await supabase.from('collab_posts').select('vendor_id, title').eq('id', post_id).maybeSingle();
+    const { data: applicant } = await supabase.from('vendors').select('name').eq('id', applicant_vendor_id).maybeSingle();
+    if (post?.vendor_id && applicant?.name) {
+      const { data: owner } = await supabase.from('vendors').select('phone').eq('id', post.vendor_id).maybeSingle();
+      if (owner?.phone) {
+        const phone = '+91' + normalizePhone(owner.phone);
+        sendWhatsApp(phone, `New application on TDW Collab!\n\n${applicant.name} applied for your post: "${post.title}"\n\nOpen the TDW app to review their application.`).catch(() => {});
+      }
+    }
+
+    res.json({ success: true, data: appl });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// PATCH /api/v2/collab/applications/:id — accept/reject/complete
+app.patch('/api/v2/collab/applications/:id', async (req, res) => {
+  try {
+    const { status, post_id, post_type } = req.body || {};
+    const updates = { status };
+
+    // Collect match fee on complete (except Referral type)
+    if (status === 'completed' && post_type !== 'referral') {
+      const { data: post } = await supabase.from('collab_posts').select('budget').eq('id', post_id).maybeSingle();
+      const matchFee = post?.budget ? Math.min(Math.round(post.budget * 0.05), 2000) : 500;
+      updates.match_fee_amount = matchFee;
+      updates.match_fee_collected = true;
+      // Mark post as filled
+      await supabase.from('collab_posts').update({ status: 'filled' }).eq('id', post_id);
+    }
+
+    // Notify applicant on accept/reject
+    if (status === 'accepted' || status === 'rejected') {
+      const { data: appl } = await supabase.from('collab_applications').select('applicant_vendor_id').eq('id', req.params.id).maybeSingle();
+      if (appl?.applicant_vendor_id) {
+        const { data: applicant } = await supabase.from('vendors').select('phone, name').eq('id', appl.applicant_vendor_id).maybeSingle();
+        if (applicant?.phone) {
+          const phone = '+91' + normalizePhone(applicant.phone);
+          const msg = status === 'accepted'
+            ? `Congratulations ${applicant.name}! Your Collab application has been accepted. Open TDW to connect with the post owner.`
+            : `Your Collab application was not selected this time. Keep an eye out for new opportunities!`;
+          sendWhatsApp(phone, msg).catch(() => {});
+        }
+      }
+    }
+
+    const { data, error } = await supabase.from('collab_applications').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// SESSION 22 — DreamAi Deep Integration
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/dreamai/couple-context/:userId — S41 graph-intelligent
+app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const now = new Date().toISOString();
+    const todayStr = now.split('T')[0];
+    const next30 = new Date(Date.now() + 30 * 86400000).toISOString();
+
+    const [
+      { data: user },
+      { data: events },
+      { data: tasks },
+      { data: expenses },
+      { data: muse },
+      { data: guests },
+      { data: enquiries },
+      { data: entityLinks },
+      { data: coupleVendors },
+      { data: profile },
+    ] = await Promise.all([
+      supabase.from('users').select('id, name, wedding_date, partner_name').eq('id', userId).maybeSingle(),
+      supabase.from('couple_events').select('id, event_name, event_date, venue').eq('couple_id', userId).order('event_date', { ascending: true }),
+      supabase.from('couple_checklist').select('id, text, is_complete, due_date, event, assigned_to, priority').eq('couple_id', userId).eq('is_complete', false).order('due_date', { ascending: true }),
+      supabase.from('couple_expenses').select('id, vendor_name, description, actual_amount, payment_status, due_date, category').eq('couple_id', userId),
+      supabase.from('moodboard_items').select('id, vendor_id, vendor_name, vendor_category, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
+      supabase.from('couple_guests').select('id, rsvp_status').eq('couple_id', userId),
+      supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
+      supabase.from('entity_links').select('from_entity_type, from_entity_id, to_entity_type, to_entity_id, link_type').eq('couple_id', userId),
+      supabase.from('couple_vendors').select('id, name, vendor_id, status, category').eq('couple_id', userId),
+      supabase.from('couple_profiles').select('total_budget').eq('user_id', userId).maybeSingle(),
+    ]);
+
+    const weddingDate = user?.wedding_date;
+    let daysRemaining = null;
+    if (weddingDate) {
+      const wd = new Date(weddingDate); const n = new Date();
+      daysRemaining = Math.ceil((wd.getTime() - n.getTime()) / 86400000);
+    }
+
+    const allExpenses = expenses || [];
+    const committed = allExpenses.filter(e=>['committed','paid'].includes(e.payment_status)).reduce((s,e)=>s+(e.actual_amount||0),0);
+    const paid = allExpenses.filter(e=>e.payment_status==='paid').reduce((s,e)=>s+(e.actual_amount||0),0);
+    const totalBudget = profile?.total_budget || 0;
+
+    const overdueTasks = (tasks||[]).filter(t=>t.due_date&&t.due_date<todayStr);
+    const upcomingPayments = allExpenses.filter(e=>e.payment_status!=='paid'&&e.due_date&&e.due_date<=next30&&e.due_date>=todayStr);
+    const unansweredEnquiries = (enquiries||[]).filter(e=>e.last_message_from==='couple'&&e.last_message_at<new Date(Date.now()-48*3600000).toISOString());
+
+    const bookedVendors = (coupleVendors||[]).filter(v=>v.status==='booked'||v.status==='paid');
+
     res.json({
-      user: {
-        name: user?.name || null,
-        partner_name: user?.partner_name || null,
-        wedding_date: user?.wedding_date || null,
-        days_remaining: daysRemaining,
-      },
-      events: (events || []).map(e => ({
-        id: e.id,
-        name: e.event_name,
-        date: e.event_date,
-        budget_allocated: e.budget_allocated || 0,
-        budget_spent: e.budget_spent || 0,
-      })),
-      tasks: (tasks || []).map(t => ({
-        id: t.id,
-        title: t.task_name,
-        status: t.is_complete ? 'done' : (t.status || 'pending'),
-        due_date: t.due_date,
-        event_name: t.event_name,
-        vendor_name: t.vendor_name,
-      })),
-      budget: {
-        total: budgetRows?.total_budget || 0,
-        committed: budgetRows?.committed_amount || 0,
-        paid: budgetRows?.paid_amount || 0,
-        remaining: (budgetRows?.total_budget || 0) - (budgetRows?.committed_amount || 0),
-      },
-      muse: (muse || []).map(m => ({
-        id: m.id,
-        vendor_name: m.vendors?.name || null,
-        category: m.vendors?.category || null,
-        tier: m.vendors?.tier || null,
-      })),
-      guests: {
-        total: guestTotal,
-        confirmed: guestConfirmed,
-        pending: guestPending,
-      },
-      overdue_tasks: overdueTasks.map(t => ({
-        id: t.id,
-        title: t.task_name,
-        due_date: t.due_date,
-        event_name: t.event_name,
-      })),
-      upcoming_payments: upcomingPayments.map(e => ({
-        vendor_name: e.vendor_name,
-        amount: e.actual_amount || e.amount || 0,
-        due_date: e.due_date,
-        purpose: e.purpose,
-      })),
+      user: { name: user?.name||null, partner_name: user?.partner_name||null, wedding_date: weddingDate||null, days_remaining: daysRemaining },
+      events: (events||[]).map(e=>({ id:e.id, name:e.event_name, date:e.event_date, venue:e.venue||null })),
+      tasks: (tasks||[]).map(t=>({ id:t.id, title:t.text, due_date:t.due_date, event:t.event, assigned_to:t.assigned_to, priority:t.priority })),
+      budget: { total:totalBudget, committed, paid, remaining:totalBudget-committed },
+      muse_saves: (muse||[]).map(m=>({ id:m.id, vendor_id:m.vendor_id, vendor_name:m.vendor_name, category:m.vendor_category })),
+      guests: { total:(guests||[]).length, confirmed:(guests||[]).filter(g=>g.rsvp_status==='confirmed').length, pending:(guests||[]).filter(g=>!g.rsvp_status||g.rsvp_status==='pending').length },
+      active_enquiries: (enquiries||[]).map(e=>({ id:e.id, vendor_id:e.vendor_id, last_message_at:e.last_message_at, last_message_from:e.last_message_from, preview:e.last_message_preview })),
+      booked_vendors: bookedVendors.map(v=>({ id:v.id, name:v.name, category:v.category, status:v.status })),
+      overdue_tasks: overdueTasks.map(t=>({ id:t.id, title:t.text, due_date:t.due_date, event:t.event })),
+      upcoming_payments: upcomingPayments.map(e=>({ id:e.id, vendor_name:e.vendor_name, amount:e.actual_amount||0, due_date:e.due_date, description:e.description })),
+      unanswered_enquiries: unansweredEnquiries.map(e=>({ id:e.id, vendor_id:e.vendor_id, last_message_at:e.last_message_at })),
+      entity_links_count: (entityLinks||[]).length,
     });
   } catch (err) {
     console.error('[DreamAi couple-context] error:', err.message);
@@ -11357,6 +12376,114 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
     console.error('[DreamAi chat] error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+
+// ── S41: Agentic Actions ──────────────────────────────────────────────────────
+
+// POST /api/v2/dreamai/action/complete-task
+app.post('/api/v2/dreamai/action/complete-task', async (req, res) => {
+  try {
+    const { task_id, couple_id } = req.body || {};
+    if (!task_id) return res.status(400).json({ success: false, error: 'task_id required' });
+    const { error } = await supabase.from('couple_checklist').update({ is_complete: true }).eq('id', task_id);
+    if (error) throw error;
+    res.json({ success: true, message: 'Task marked as complete.' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/action/add-expense
+app.post('/api/v2/dreamai/action/add-expense', async (req, res) => {
+  try {
+    const { couple_id, vendor_name, description, actual_amount, category } = req.body || {};
+    if (!couple_id || !actual_amount) return res.status(400).json({ success: false, error: 'couple_id and actual_amount required' });
+    const { data, error } = await supabase.from('couple_expenses').insert([{
+      couple_id, vendor_name: vendor_name||null, description: description||null,
+      actual_amount: Number(actual_amount), category: category||'Other',
+      payment_status: 'committed', event: 'general',
+    }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data, message: `Expense of ₹${Number(actual_amount).toLocaleString('en-IN')} logged.` });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/action/send-whatsapp-reminder
+app.post('/api/v2/dreamai/action/send-whatsapp-reminder', async (req, res) => {
+  try {
+    const { phone, message, couple_id } = req.body || {};
+    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
+    const fullPhone = '+91' + normalizePhone(phone);
+    const sent = await sendWhatsApp(fullPhone, message);
+    if (!sent) return res.status(500).json({ success: false, error: 'Could not send WhatsApp message' });
+    res.json({ success: true, message: 'WhatsApp reminder sent.' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/action/send-enquiry
+app.post('/api/v2/dreamai/action/send-enquiry', async (req, res) => {
+  try {
+    const { couple_id, vendor_id, opening_message } = req.body || {};
+    if (!couple_id || !vendor_id || !opening_message) return res.status(400).json({ success: false, error: 'couple_id, vendor_id, opening_message required' });
+    // Create enquiry thread
+    const { data: enq, error: enqErr } = await supabase.from('vendor_enquiries').insert([{
+      couple_id, vendor_id, status: 'active',
+      last_message_at: new Date().toISOString(),
+      last_message_from: 'couple',
+      last_message_preview: opening_message.slice(0, 120),
+    }]).select().single();
+    if (enqErr) throw enqErr;
+    // Create first message
+    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: enq.id, from_role: 'couple', content: opening_message }]);
+    // Fire entity link
+    writeEntityLink({ from_entity_type:'couple', from_entity_id:couple_id, to_entity_type:'vendor', to_entity_id:vendor_id, link_type:'enquired_about', couple_id });
+    res.json({ success: true, data: enq, message: 'Enquiry sent.' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/vendor-action/send-payment-reminder
+app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res) => {
+  try {
+    const { client_phone, client_name, amount, message } = req.body || {};
+    if (!client_phone || !message) return res.status(400).json({ success: false, error: 'client_phone and message required' });
+    const phone = '+91' + normalizePhone(client_phone);
+    const sent = await sendWhatsApp(phone, message);
+    if (!sent) return res.status(500).json({ success: false, error: 'Could not send' });
+    res.json({ success: true, message: `Payment reminder sent to ${client_name||'client'}.` });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/vendor-action/reply-to-enquiry
+app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
+  try {
+    const { enquiry_id, message } = req.body || {};
+    if (!enquiry_id || !message) return res.status(400).json({ success: false, error: 'enquiry_id and message required' });
+    const { data, error } = await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id, from_role: 'vendor', content: message }]).select().single();
+    if (error) throw error;
+    await supabase.from('vendor_enquiries').update({ last_message_at: new Date().toISOString(), last_message_from: 'vendor', last_message_preview: message.slice(0,120), couple_unread_count: 1 }).eq('id', enquiry_id);
+    res.json({ success: true, message: 'Reply sent.' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/vendor-action/block-date
+app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
+  try {
+    const { vendor_id, blocked_date, note } = req.body || {};
+    if (!vendor_id || !blocked_date) return res.status(400).json({ success: false, error: 'vendor_id and blocked_date required' });
+    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, note: note||null }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data, message: `${blocked_date} blocked on your calendar.` });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/vendor-action/log-expense
+app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
+  try {
+    const { vendor_id, description, amount, category } = req.body || {};
+    if (!vendor_id || !amount) return res.status(400).json({ success: false, error: 'vendor_id and amount required' });
+    const { data, error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description: description||null, amount: Number(amount), category: category||'General', expense_date: new Date().toISOString().split('T')[0] }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data, message: `₹${Number(amount).toLocaleString('en-IN')} expense logged.` });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // POST /api/v2/dreamai/whatsapp-extract
@@ -11670,374 +12797,8 @@ app.post('/api/v2/admin/cover-photos/upload', async (req, res) => {
   }
 });
 
-// S35: Entity links backfill endpoint
-app.post('/api/v2/entity-links/backfill/:coupleId', async (req, res) => {
-  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
-  const coupleId = req.params.coupleId;
-  let written = 0;
-  try {
-    const { data: muse } = await supabase.from('moodboard_items').select('id, vendor_id').eq('user_id', coupleId).not('vendor_id', 'is', null);
-    for (const item of muse || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: item.vendor_id, link_type: 'saved_to_muse', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
-    const { data: enquiries } = await supabase.from('vendor_enquiries').select('id, vendor_id').eq('couple_id', coupleId);
-    for (const enq of enquiries || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: enq.vendor_id, link_type: 'enquired_about', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
-    const { data: cvs } = await supabase.from('couple_vendors').select('id, vendor_id, status').eq('couple_id', coupleId).not('vendor_id', 'is', null);
-    for (const cv of cvs || []) { supabase.from('entity_links').upsert([{ from_entity_type: 'couple', from_entity_id: coupleId, to_entity_type: 'vendor', to_entity_id: cv.vendor_id, link_type: cv.status === 'booked' || cv.status === 'paid' ? 'booked_for' : 'considering', couple_id: coupleId, created_at: new Date().toISOString() }], { onConflict: 'from_entity_id,to_entity_id,link_type,couple_id', ignoreDuplicates: true }).then(()=>{}).catch(()=>{}); written++; }
-    await new Promise(r => setTimeout(r, 800));
-    res.json({ success: true, written });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
 // ══════════════════════════════════════════════════════════════════════════════
-// S38 — Maker Money + Studio
-// ══════════════════════════════════════════════════════════════════════════════
-
-app.get('/api/v2/vendor/gst-summary/:vendorId', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const fy = req.query.fy || (() => { const now = new Date(); const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `${y}-${y+1}`; })();
-    const fyYear = parseInt(fy.split('-')[0]);
-    const { data: invoices } = await supabase.from('vendor_invoices').select('id, client_name, amount, gst_amount, gst_enabled, tds_amount, tds_rate, tds_deducted_by_client, issue_date, status').eq('vendor_id', vendorId).gte('issue_date', `${fyYear}-04-01`).lte('issue_date', `${fyYear+1}-03-31`).order('issue_date', { ascending: true });
-    const rows = invoices || [];
-    const totalInvoiced = rows.reduce((s, i) => s + (i.amount || 0), 0);
-    const totalGST = rows.filter(i => i.gst_enabled).reduce((s, i) => s + (i.gst_amount || 0), 0);
-    const totalTDS = rows.reduce((s, i) => s + (i.tds_amount || 0), 0);
-    const quarters = [
-      { label: 'Apr–Jun', start: `${fyYear}-04-01`, end: `${fyYear}-06-30` },
-      { label: 'Jul–Sep', start: `${fyYear}-07-01`, end: `${fyYear}-09-30` },
-      { label: 'Oct–Dec', start: `${fyYear}-10-01`, end: `${fyYear}-12-31` },
-      { label: 'Jan–Mar', start: `${fyYear+1}-01-01`, end: `${fyYear+1}-03-31` },
-    ];
-    const quarterly = quarters.map(q => {
-      const qRows = rows.filter(i => i.issue_date >= q.start && i.issue_date <= q.end);
-      return { label: q.label, invoiced: qRows.reduce((s,i)=>s+(i.amount||0),0), gst: qRows.filter(i=>i.gst_enabled).reduce((s,i)=>s+(i.gst_amount||0),0) };
-    });
-    const clientMap = {};
-    rows.forEach(i => {
-      const k = i.client_name || 'Unknown';
-      if (!clientMap[k]) clientMap[k] = { client_name: k, total_invoiced: 0, tds_rate: i.tds_rate || 10, tds_amount: 0, tds_deducted_by_client: false };
-      clientMap[k].total_invoiced += i.amount || 0;
-      clientMap[k].tds_amount += i.tds_amount || 0;
-      if (i.tds_deducted_by_client) clientMap[k].tds_deducted_by_client = true;
-    });
-    res.json({ success: true, data: { fy, total_invoiced: totalInvoiced, total_gst: totalGST, total_tds: totalTDS, quarterly, tds_ledger: Object.values(clientMap), invoices: rows } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v2/vendor/gst-export/:vendorId', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const fy = req.query.fy || (() => { const now = new Date(); const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `${y}-${y+1}`; })();
-    const fyYear = parseInt(fy.split('-')[0]);
-    const { data: invoices } = await supabase.from('vendor_invoices').select('invoice_number, client_name, issue_date, amount, gst_enabled, gst_amount, tds_rate, tds_amount, tds_deducted_by_client, status').eq('vendor_id', vendorId).gte('issue_date', `${fyYear}-04-01`).lte('issue_date', `${fyYear+1}-03-31`).order('issue_date', { ascending: true });
-    const headers = ['Invoice Number','Client Name','Invoice Date','Amount','GST Rate (%)','GST Amount','TDS Rate (%)','TDS Amount','TDS Deducted By Client','Net Receivable','Status'];
-    const rows = (invoices||[]).map(i => [i.invoice_number||'',i.client_name||'',i.issue_date||'',i.amount||0,i.gst_enabled?18:0,i.gst_amount||0,i.tds_rate||0,i.tds_amount||0,i.tds_deducted_by_client?'Yes':'No',((i.amount||0)+(i.gst_amount||0)-(i.tds_amount||0)),i.status||'']);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    res.setHeader('Content-Type','text/csv');
-    res.setHeader('Content-Disposition',`attachment; filename="tax-export-${fy}.csv"`);
-    res.send(csv);
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v2/vendor/payment-shield/:vendorId', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('vendor_payment_shield').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/vendor/payment-shield', async (req, res) => {
-  try {
-    const { vendor_id, client_id, client_name, amount, wedding_date } = req.body || {};
-    if (!vendor_id || !client_name || !amount) return res.status(400).json({ success: false, error: 'vendor_id, client_name, amount required' });
-    const release_date = wedding_date ? new Date(new Date(wedding_date).getTime() + 24*60*60*1000).toISOString().split('T')[0] : null;
-    const { data, error } = await supabase.from('vendor_payment_shield').insert([{ vendor_id, client_id: client_id||null, client_name, amount, wedding_date: wedding_date||null, release_date, status: 'holding' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/vendor/broadcast-whatsapp', async (req, res) => {
-  try {
-    const { vendor_id, message, segment } = req.body || {};
-    if (!vendor_id || !message) return res.status(400).json({ success: false, error: 'vendor_id and message required' });
-    let query = supabase.from('vendor_clients').select('id, name, phone').eq('vendor_id', vendor_id);
-    const today = new Date().toISOString().split('T')[0];
-    const in90 = new Date(Date.now()+90*86400000).toISOString().split('T')[0];
-    if (segment === 'upcoming') query = query.gte('event_date', today).lte('event_date', in90);
-    else if (segment === 'post_wedding') query = query.lt('event_date', today);
-    const { data: clients } = await query;
-    if (!clients || clients.length === 0) return res.json({ success: true, sent: 0, message: 'No clients in segment' });
-    let sent = 0;
-    const fullMessage = message + '\n\nReply STOP to unsubscribe.';
-    for (const client of clients) {
-      if (!client.phone) continue;
-      await new Promise(r => setTimeout(r, 500));
-      const ok = await sendWhatsApp('+91' + normalizePhone(client.phone), fullMessage);
-      if (ok) sent++;
-    }
-    await supabase.from('vendor_broadcasts').insert([{ vendor_id, message, template: segment || 'all', recipient_count: clients.length, sent_count: sent }]);
-    res.json({ success: true, sent, total: clients.length });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/vendor/contracts/generate', async (req, res) => {
-  try {
-    const { vendor_id, client_name, event_date, amount, template_type, custom_terms } = req.body || {};
-    if (!vendor_id || !client_name) return res.status(400).json({ success: false, error: 'vendor_id and client_name required' });
-    const { data: vendor } = await supabase.from('vendors').select('name, city, phone').eq('id', vendor_id).maybeSingle();
-    const templates = { photography: 'Photography & Videography Agreement', mua: 'Makeup Artist Services Agreement', event_management: 'Event Management Agreement', general: 'General Services Agreement' };
-    const templateTitle = templates[template_type] || templates.general;
-    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '___________';
-    const fmtAmt = (n) => n ? '₹' + n.toLocaleString('en-IN') : '___________';
-    const contractText = `${templateTitle}\n\nSERVICE PROVIDER: ${vendor?.name || 'Service Provider'}\nLocation: ${vendor?.city || ''}\n\nCLIENT: ${client_name}\nEvent Date: ${fmtDate(event_date)}\n\nTotal Fee: ${fmtAmt(amount)}\n\nTERMS\n1. Service Provider delivers services as agreed.\n2. Client pays as per invoice schedule.\n3. Cancellation within 30 days: 50% forfeit.\n4. Cancellation within 7 days: 100% forfeit.\n5. Service Provider cancellation: full refund.\n\n${custom_terms ? 'ADDITIONAL TERMS\n' + custom_terms + '\n\n' : ''}SIGNATURES\n\nService Provider: _______________________  Date: ___________\n\nClient: _______________________  Date: ___________\n\nGenerated by The Dream Wedding`;
-    const { data: contract, error } = await supabase.from('vendor_contracts').insert([{ vendor_id, client_name, template_type: template_type || 'general', event_date: event_date || null, amount: amount || null, terms_json: { custom_terms: custom_terms || '' }, status: 'draft', contract_text: contractText }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data: { ...contract, contract_text: contractText } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// S39 — Couture Vertical
-// ══════════════════════════════════════════════════════════════════════════════
-
-app.get('/api/v2/couture/designers', async (req, res) => {
-  try {
-    const { data: designers, error } = await supabase.from('vendors').select('id, name, category, city, about, tagline, starting_price, featured_photos, portfolio_images, rating, review_count, couture_appointment_fee, vibe_tags').eq('luxury_category', 'couture').eq('couture_approved', true).order('rating', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((designers || []).map(async (d) => {
-      const { data: products } = await supabase.from('couture_products').select('id, title, category, price_from, images, is_featured, available').eq('vendor_id', d.id).eq('available', true).order('is_featured', { ascending: false }).limit(4);
-      return { ...d, products: products || [], appointment_fee: d.couture_appointment_fee || 3500 };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v2/couture/products/:vendorId', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('couture_products').select('*').eq('vendor_id', req.params.vendorId).eq('available', true).order('is_featured', { ascending: false });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/couture/appointments', async (req, res) => {
-  try {
-    const { vendor_id, couple_id, product_id, appointment_date, appointment_time, notes } = req.body || {};
-    if (!vendor_id || !couple_id) return res.status(400).json({ success: false, error: 'vendor_id and couple_id required' });
-    const { data: vendor } = await supabase.from('vendors').select('name, couture_appointment_fee').eq('id', vendor_id).maybeSingle();
-    const fee = vendor?.couture_appointment_fee || 3500;
-    const { data: appt, error } = await supabase.from('couture_appointments').insert([{ vendor_id, couple_id, product_id: product_id || null, appointment_date: appointment_date || null, appointment_time: appointment_time || null, fee, platform_fee: 500, status: 'pending_payment', notes: notes || null, razorpay_payment_link: `https://rzp.io/l/tdw-couture-${Date.now()}` }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data: appt, fee, platform_fee: 500 });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// S40 — Collab Hub
-// ══════════════════════════════════════════════════════════════════════════════
-
-app.get('/api/v2/collab/posts', async (req, res) => {
-  try {
-    const { vendor_id, category, city, post_type } = req.query;
-    let query = supabase.from('collab_posts').select('id, vendor_id, title, description, post_type, category, city, budget, date_needed, status, created_at').eq('status', 'open').order('created_at', { ascending: false });
-    if (category) query = query.eq('category', category);
-    if (city) query = query.ilike('city', `%${city}%`);
-    if (post_type) query = query.eq('post_type', post_type);
-    const { data: posts, error } = await query.limit(50);
-    if (error) throw error;
-    const enriched = await Promise.all((posts || []).map(async (p) => {
-      const { data: v } = await supabase.from('vendors').select('name, category, city').eq('id', p.vendor_id).maybeSingle();
-      return { ...p, poster_name: v?.name || 'A Maker', poster_category: v?.category || '' };
-    }));
-    const filtered = vendor_id ? enriched.filter(p => p.vendor_id !== vendor_id) : enriched;
-    res.json({ success: true, data: filtered });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v2/collab/my-posts/:vendorId', async (req, res) => {
-  try {
-    const { data: posts, error } = await supabase.from('collab_posts').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((posts || []).map(async (p) => {
-      const { count } = await supabase.from('collab_applications').select('*', { count: 'exact', head: true }).eq('post_id', p.id);
-      return { ...p, application_count: count || 0 };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/collab/posts', async (req, res) => {
-  try {
-    const { vendor_id, title, description, post_type, category, city, budget, date_needed } = req.body || {};
-    if (!vendor_id || !title || !post_type) return res.status(400).json({ success: false, error: 'vendor_id, title, post_type required' });
-    const { data, error } = await supabase.from('collab_posts').insert([{ vendor_id, title, description: description || null, post_type, category: category || null, city: city || null, budget: budget ? Number(budget) : null, date_needed: date_needed || null, status: 'open' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.patch('/api/v2/collab/posts/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('collab_posts').update({ status: req.body.status }).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v2/collab/applications/:postId', async (req, res) => {
-  try {
-    const { data: apps, error } = await supabase.from('collab_applications').select('*').eq('post_id', req.params.postId).order('created_at', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((apps || []).map(async (a) => {
-      const { data: v } = await supabase.from('vendors').select('name, category, city, rating, portfolio_images').eq('id', a.vendor_id).maybeSingle();
-      return { ...a, applicant: v || null };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/collab/applications', async (req, res) => {
-  try {
-    const { post_id, vendor_id, message } = req.body || {};
-    if (!post_id || !vendor_id) return res.status(400).json({ success: false, error: 'post_id and vendor_id required' });
-    const { data: existing } = await supabase.from('collab_applications').select('id').eq('post_id', post_id).eq('vendor_id', vendor_id).maybeSingle();
-    if (existing) return res.status(400).json({ success: false, error: 'Already applied' });
-    const { data, error } = await supabase.from('collab_applications').insert([{ post_id, vendor_id, message: message || null, status: 'pending', match_score: null }]).select().single();
-    if (error) throw error;
-    const { data: post } = await supabase.from('collab_posts').select('vendor_id, title').eq('id', post_id).maybeSingle();
-    if (post?.vendor_id) {
-      const { data: owner } = await supabase.from('vendors').select('phone').eq('id', post.vendor_id).maybeSingle();
-      const { data: applicant } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
-      if (owner?.phone) {
-        setTimeout(() => {
-          sendWhatsApp('+91' + normalizePhone(owner.phone), `New application on TDW Collab!\n\n${applicant?.name || 'A Maker'} applied for "${post.title}".\n\nOpen the app to review.`).catch(() => {});
-        }, 5 * 60 * 1000);
-      }
-    }
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.patch('/api/v2/collab/applications/:id', async (req, res) => {
-  try {
-    const { status } = req.body || {};
-    const updates = { status };
-    if (status === 'completed') {
-      const { data: app } = await supabase.from('collab_applications').select('post_id').eq('id', req.params.id).maybeSingle();
-      if (app?.post_id) {
-        const { data: post } = await supabase.from('collab_posts').select('budget, post_type').eq('id', app.post_id).maybeSingle();
-        if (post?.post_type !== 'referral' && post?.budget) {
-          updates.match_fee_amount = Math.min(Math.round(post.budget * 0.05), 2000);
-          updates.match_fee_collected = false;
-        }
-      }
-    }
-    const { data, error } = await supabase.from('collab_applications').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    if (status === 'accepted' || status === 'rejected') {
-      const { data: app } = await supabase.from('collab_applications').select('vendor_id, post_id').eq('id', req.params.id).maybeSingle();
-      if (app?.vendor_id) {
-        const { data: applicant } = await supabase.from('vendors').select('phone').eq('id', app.vendor_id).maybeSingle();
-        const { data: post } = await supabase.from('collab_posts').select('title').eq('id', app.post_id).maybeSingle();
-        if (applicant?.phone) {
-          const msg = status === 'accepted' ? `Your application for "${post?.title}" on TDW Collab has been accepted!` : `Your application for "${post?.title}" on TDW Collab was not selected this time.`;
-          sendWhatsApp('+91' + normalizePhone(applicant.phone), msg).catch(() => {});
-        }
-      }
-    }
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// S41 — DreamAi Agentic Actions
-// ══════════════════════════════════════════════════════════════════════════════
-
-app.post('/api/v2/dreamai/action/complete-task', async (req, res) => {
-  try {
-    const { task_id } = req.body || {};
-    if (!task_id) return res.status(400).json({ success: false, error: 'task_id required' });
-    const { error } = await supabase.from('couple_checklist').update({ is_complete: true }).eq('id', task_id);
-    if (error) throw error;
-    res.json({ success: true, message: 'Task marked as complete.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/action/add-expense', async (req, res) => {
-  try {
-    const { couple_id, vendor_name, description, actual_amount, category } = req.body || {};
-    if (!couple_id || !actual_amount) return res.status(400).json({ success: false, error: 'couple_id and actual_amount required' });
-    const { data, error } = await supabase.from('couple_expenses').insert([{ couple_id, vendor_name: vendor_name||null, description: description||null, actual_amount: Number(actual_amount), category: category||'Other', payment_status: 'committed', event: 'general' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: `Expense of Rs.${Number(actual_amount).toLocaleString('en-IN')} logged.` });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/action/send-whatsapp-reminder', async (req, res) => {
-  try {
-    const { phone, message } = req.body || {};
-    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
-    const sent = await sendWhatsApp('+91' + normalizePhone(phone), message);
-    if (!sent) return res.status(500).json({ success: false, error: 'Could not send' });
-    res.json({ success: true, message: 'WhatsApp reminder sent.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/action/send-enquiry', async (req, res) => {
-  try {
-    const { couple_id, vendor_id, opening_message } = req.body || {};
-    if (!couple_id || !vendor_id || !opening_message) return res.status(400).json({ success: false, error: 'couple_id, vendor_id, opening_message required' });
-    const { data: enq, error: enqErr } = await supabase.from('vendor_enquiries').insert([{ couple_id, vendor_id, status: 'active', last_message_at: new Date().toISOString(), last_message_from: 'couple', last_message_preview: opening_message.slice(0, 120) }]).select().single();
-    if (enqErr) throw enqErr;
-    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: enq.id, from_role: 'couple', content: opening_message }]);
-    writeEntityLink({ from_entity_type:'couple', from_entity_id:couple_id, to_entity_type:'vendor', to_entity_id:vendor_id, link_type:'enquired_about', couple_id });
-    res.json({ success: true, data: enq, message: 'Enquiry sent.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res) => {
-  try {
-    const { client_phone, client_name, message } = req.body || {};
-    if (!client_phone || !message) return res.status(400).json({ success: false, error: 'client_phone and message required' });
-    const sent = await sendWhatsApp('+91' + normalizePhone(client_phone), message);
-    if (!sent) return res.status(500).json({ success: false, error: 'Could not send' });
-    res.json({ success: true, message: `Payment reminder sent to ${client_name||'client'}.` });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
-  try {
-    const { enquiry_id, message } = req.body || {};
-    if (!enquiry_id || !message) return res.status(400).json({ success: false, error: 'enquiry_id and message required' });
-    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id, from_role: 'vendor', content: message }]);
-    await supabase.from('vendor_enquiries').update({ last_message_at: new Date().toISOString(), last_message_from: 'vendor', last_message_preview: message.slice(0,120), couple_unread_count: 1 }).eq('id', enquiry_id);
-    res.json({ success: true, message: 'Reply sent.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
-  try {
-    const { vendor_id, blocked_date, note } = req.body || {};
-    if (!vendor_id || !blocked_date) return res.status(400).json({ success: false, error: 'vendor_id and blocked_date required' });
-    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, note: note||null }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: `${blocked_date} blocked on your calendar.` });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
-  try {
-    const { vendor_id, description, amount, category } = req.body || {};
-    if (!vendor_id || !amount) return res.status(400).json({ success: false, error: 'vendor_id and amount required' });
-    const { data, error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description: description||null, amount: Number(amount), category: category||'General', expense_date: new Date().toISOString().split('T')[0] }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: `Rs.${Number(amount).toLocaleString('en-IN')} expense logged.` });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ADMIN PORTAL v3
+// ADMIN PORTAL — Complete API (Command Centre, Dreamers, Makers, Messages, Data)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const adminAuth = (req, res, next) => {
@@ -12045,17 +12806,28 @@ const adminAuth = (req, res, next) => {
   next();
 };
 
+// ── Command Centre ────────────────────────────────────────────────────────────
 app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0] + 'T00:00:00.000Z';
-    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0] + 'T00:00:00.000Z';
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
+    const todayStr = todayStart.toISOString();
+    const yesterdayStr = yesterdayStart.toISOString();
+
     const [
-      { count: totalDreamers }, { count: totalMakers },
-      { count: enquiriesToday }, { count: museSavesToday },
-      { count: enquiriesYesterday }, { count: museSavesYesterday },
-      { count: dreamersToday }, { count: dreamersYesterday },
-      { data: recentEnquiries }, { data: recentMuse },
-      { data: recentDreamers }, { data: recentVendors }, { data: flaggedMsgs },
+      { count: totalDreamers },
+      { count: totalMakers },
+      { count: enquiriesToday },
+      { count: museSavesToday },
+      { count: enquiriesYesterday },
+      { count: museSavesYesterday },
+      { count: dreamersToday },
+      { count: dreamersYesterday },
+      { data: recentEnquiries },
+      { data: recentMuse },
+      { data: recentDreamers },
+      { data: recentVendors },
+      { data: flaggedMsgs },
     ] = await Promise.all([
       supabase.from('users').select('*', { count: 'exact', head: true }).eq('dreamer_type', 'couple'),
       supabase.from('vendors').select('*', { count: 'exact', head: true }).not('name', 'is', null),
@@ -12065,12 +12837,14 @@ app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
       supabase.from('moodboard_items').select('*', { count: 'exact', head: true }).gte('created_at', yesterdayStr).lt('created_at', todayStr),
       supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', todayStr),
       supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', yesterdayStr).lt('created_at', todayStr),
-      supabase.from('vendor_enquiries').select('id, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
-      supabase.from('moodboard_items').select('id, vendor_name, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
+      supabase.from('vendor_enquiries').select('id, couple_id, vendor_id, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
+      supabase.from('moodboard_items').select('id, user_id, vendor_id, vendor_name, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
       supabase.from('users').select('id, name, city, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
       supabase.from('vendors').select('id, name, category, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
-      supabase.from('vendor_enquiry_messages').select('id, enquiry_id, created_at').ilike('content', '%[ contact hidden ]%').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
+      supabase.from('vendor_enquiry_messages').select('id, enquiry_id, content, created_at').ilike('content', '%[ contact hidden ]%').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
     ]);
+
+    // Build activity feed
     const activity = [];
     (recentDreamers || []).forEach(u => activity.push({ type: 'new_dreamer', emoji: '🟡', text: `New Dreamer joined — ${u.name||'Unknown'}${u.city?', '+u.city:''}`, at: u.created_at, id: u.id }));
     (recentVendors || []).forEach(v => activity.push({ type: 'new_maker', emoji: '🟢', text: `New Maker onboarded — ${v.name}`, at: v.created_at, id: v.id }));
@@ -12078,18 +12852,32 @@ app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
     (recentMuse || []).forEach(m => activity.push({ type: 'muse_save', emoji: '♥', text: `Muse save — ${m.vendor_name||'vendor'}`, at: m.created_at, id: m.id }));
     (flaggedMsgs || []).forEach(m => activity.push({ type: 'flagged', emoji: '⚠️', text: `Flagged message — contact details attempted`, at: m.created_at, id: m.enquiry_id }));
     activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-    res.json({ success: true, counters: { dreamers: { total: totalDreamers || 0, today_delta: (dreamersToday||0)-(dreamersYesterday||0) }, makers: { total: totalMakers || 0 }, enquiries_today: { total: enquiriesToday || 0, delta: (enquiriesToday||0)-(enquiriesYesterday||0) }, muse_saves_today: { total: museSavesToday || 0, delta: (museSavesToday||0)-(museSavesYesterday||0) } }, activity: activity.slice(0, 25) });
+
+    res.json({
+      success: true,
+      counters: {
+        dreamers: { total: totalDreamers || 0, today_delta: (dreamersToday || 0) - (dreamersYesterday || 0) },
+        makers: { total: totalMakers || 0 },
+        enquiries_today: { total: enquiriesToday || 0, delta: (enquiriesToday || 0) - (enquiriesYesterday || 0) },
+        muse_saves_today: { total: museSavesToday || 0, delta: (museSavesToday || 0) - (museSavesYesterday || 0) },
+      },
+      activity: activity.slice(0, 25),
+    });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── Admin Dreamers — full list ─────────────────────────────────────────────────
 app.get('/api/v3/admin/dreamers', adminAuth, async (req, res) => {
   try {
-    const { search, tier } = req.query;
-    let query = supabase.from('users').select('id, name, phone, email, city, couple_tier, wedding_date, created_at, discover_enabled, token_balance').order('created_at', { ascending: false }).limit(200);
+    const { search, tier, limit = 100, offset = 0 } = req.query;
+    let query = supabase.from('users').select('id, name, phone, email, city, couple_tier, wedding_date, created_at, discover_enabled, token_balance').order('created_at', { ascending: false });
     if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
     if (tier && tier !== 'all') query = query.eq('couple_tier', tier);
-    const { data, error } = await query;
+    query = query.range(Number(offset), Number(offset) + Number(limit) - 1);
+    const { data, error, count } = await query;
     if (error) throw error;
+
+    // Enrich with muse saves + enquiry counts
     const enriched = await Promise.all((data || []).map(async (u) => {
       const [{ count: museCount }, { count: enquiryCount }] = await Promise.all([
         supabase.from('moodboard_items').select('*', { count: 'exact', head: true }).eq('user_id', u.id),
@@ -12097,10 +12885,39 @@ app.get('/api/v3/admin/dreamers', adminAuth, async (req, res) => {
       ]);
       return { ...u, muse_saves: museCount || 0, enquiries_sent: enquiryCount || 0 };
     }));
-    res.json({ success: true, data: enriched });
+
+    res.json({ success: true, data: enriched, total: count || 0 });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── Admin Dreamer detail ──────────────────────────────────────────────────────
+app.get('/api/v3/admin/dreamers/:id', adminAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const [
+      { data: user },
+      { data: muse },
+      { data: enquiries },
+      { data: tasks },
+      { data: expenses },
+      { data: circle },
+      { data: entityLinks },
+    ] = await Promise.all([
+      supabase.from('users').select('*').eq('id', id).maybeSingle(),
+      supabase.from('moodboard_items').select('id, vendor_name, vendor_category, created_at').eq('user_id', id).order('created_at', { ascending: false }),
+      supabase.from('vendor_enquiries').select('id, vendor_id, status, last_message_at, last_message_preview').eq('couple_id', id).order('last_message_at', { ascending: false }),
+      supabase.from('couple_checklist').select('id, text, is_complete, due_date').eq('couple_id', id),
+      supabase.from('couple_expenses').select('id, vendor_name, actual_amount, payment_status, created_at').eq('couple_id', id),
+      supabase.from('co_planners').select('id, invitee_name, status, co_planner_user_id').eq('primary_user_id', id),
+      supabase.from('entity_links').select('*').eq('couple_id', id).order('created_at', { ascending: false }),
+    ]);
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    const totalSpent = (expenses||[]).filter(e=>e.payment_status==='paid').reduce((s,e)=>s+(e.actual_amount||0),0);
+    res.json({ success: true, data: { user, muse: muse||[], enquiries: enquiries||[], tasks: tasks||[], expenses: expenses||[], total_spent: totalSpent, circle: circle||[], entity_links: entityLinks||[] } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Admin Dreamer actions ─────────────────────────────────────────────────────
 app.patch('/api/v3/admin/dreamers/:id', adminAuth, async (req, res) => {
   try {
     const allowed = ['couple_tier', 'discover_enabled', 'token_balance', 'wedding_date', 'name', 'phone'];
@@ -12112,21 +12929,61 @@ app.patch('/api/v3/admin/dreamers/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── Admin Makers — full list ──────────────────────────────────────────────────
 app.get('/api/v3/admin/makers', adminAuth, async (req, res) => {
   try {
-    const { search, tier } = req.query;
-    let query = supabase.from('vendors').select('id, name, category, city, phone, tier, is_verified, is_luxury, subscription_active, created_at, discover_enabled').not('name', 'is', null).order('created_at', { ascending: false }).limit(200);
-    if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+    const { search, tier, verified, limit = 100, offset = 0 } = req.query;
+    let query = supabase.from('vendors').select('id, name, category, city, phone, tier, is_verified, is_luxury, luxury_approved, couture_approved, subscription_active, created_at, discover_enabled').not('name', 'is', null).order('created_at', { ascending: false });
+    if (search) query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,city.ilike.%${search}%`);
     if (tier && tier !== 'all') query = query.eq('tier', tier);
+    if (verified === 'true') query = query.eq('is_verified', true);
+    query = query.range(Number(offset), Number(offset) + Number(limit) - 1);
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ success: true, data: data || [] });
+
+    // Enrich with enquiry counts
+    const enriched = await Promise.all((data || []).map(async (v) => {
+      const [{ count: enquiryCount }, { data: pendingImgs }] = await Promise.all([
+        supabase.from('vendor_enquiries').select('*', { count: 'exact', head: true }).eq('vendor_id', v.id),
+        supabase.from('vendor_images').select('id', { count: 'exact', head: true }).eq('vendor_id', v.id).eq('approved', false),
+      ]);
+      return { ...v, enquiries_received: enquiryCount || 0, pending_images: pendingImgs?.length || 0 };
+    }));
+
+    res.json({ success: true, data: enriched });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── Admin Maker detail ────────────────────────────────────────────────────────
+app.get('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const [
+      { data: vendor },
+      { data: images },
+      { data: sub },
+      { data: enquiries },
+      { data: clients },
+      { data: invoices },
+    ] = await Promise.all([
+      supabase.from('vendors').select('*').eq('id', id).maybeSingle(),
+      supabase.from('vendor_images').select('id, url, tags, approved').eq('vendor_id', id).order('created_at', { ascending: false }),
+      supabase.from('vendor_subscriptions').select('*').eq('vendor_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('vendor_enquiries').select('id, couple_id, status, last_message_at, last_message_preview').eq('vendor_id', id).order('last_message_at', { ascending: false }).limit(20),
+      supabase.from('vendor_clients').select('id, name, event_date, status').eq('vendor_id', id),
+      supabase.from('vendor_invoices').select('id, client_name, amount, paid_amount, status').eq('vendor_id', id),
+    ]);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
+    const totalInvoiced = (invoices||[]).reduce((s,i)=>s+(i.amount||0),0);
+    const totalPaid = (invoices||[]).reduce((s,i)=>s+(i.paid_amount||0),0);
+    res.json({ success: true, data: { vendor, images: images||[], subscription: sub||null, enquiries: enquiries||[], clients: clients||[], invoices: invoices||[], total_invoiced: totalInvoiced, total_paid: totalPaid } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Admin Maker actions ───────────────────────────────────────────────────────
 app.patch('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
   try {
-    const allowed = ['tier', 'is_verified', 'is_luxury', 'luxury_approved', 'couture_approved', 'discover_enabled', 'subscription_active'];
+    const allowed = ['tier', 'is_verified', 'is_luxury', 'luxury_approved', 'couture_approved', 'discover_enabled', 'subscription_active', 'featured'];
     const patch = {};
     for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
     const { data, error } = await supabase.from('vendors').update(patch).eq('id', req.params.id).select().single();
@@ -12135,18 +12992,7 @@ app.patch('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/v3/admin/images/pending', adminAuth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('vendor_images').select('id, url, tags, vendor_id, created_at').eq('approved', false).order('created_at', { ascending: false }).limit(100);
-    if (error) throw error;
-    const enriched = await Promise.all((data||[]).map(async (img) => {
-      const { data: v } = await supabase.from('vendors').select('name, category').eq('id', img.vendor_id).maybeSingle();
-      return { ...img, vendor_name: v?.name||'Unknown', vendor_category: v?.category||'' };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
+// ── Approve/reject image ──────────────────────────────────────────────────────
 app.patch('/api/v3/admin/images/:id', adminAuth, async (req, res) => {
   try {
     const { approved, rejection_reason } = req.body || {};
@@ -12156,435 +13002,153 @@ app.patch('/api/v3/admin/images/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// Approve all images for a vendor
+app.post('/api/v3/admin/makers/:id/approve-all-images', adminAuth, async (req, res) => {
+  try {
+    const { error } = await supabase.from('vendor_images').update({ approved: true }).eq('vendor_id', req.params.id).eq('approved', false);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Pending images ────────────────────────────────────────────────────────────
+app.get('/api/v3/admin/images/pending', adminAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_images').select('id, url, tags, vendor_id, created_at').eq('approved', false).order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    // Enrich with vendor names
+    const enriched = await Promise.all((data||[]).map(async (img) => {
+      const { data: v } = await supabase.from('vendors').select('name, category').eq('id', img.vendor_id).maybeSingle();
+      return { ...img, vendor_name: v?.name||'Unknown', vendor_category: v?.category||'' };
+    }));
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Flagged messages ──────────────────────────────────────────────────────────
+app.get('/api/v3/admin/messages/flagged', adminAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_enquiry_messages').select('id, enquiry_id, content, from_role, created_at').ilike('content', '%[ contact hidden ]%').order('created_at', { ascending: false }).limit(50);
+    if (error) throw error;
+    const enriched = await Promise.all((data||[]).map(async (m) => {
+      const { data: enq } = await supabase.from('vendor_enquiries').select('couple_id, vendor_id').eq('id', m.enquiry_id).maybeSingle();
+      const [{ data: couple }, { data: vendor }] = await Promise.all([
+        enq?.couple_id ? supabase.from('users').select('name').eq('id', enq.couple_id).maybeSingle() : Promise.resolve({ data: null }),
+        enq?.vendor_id ? supabase.from('vendors').select('name').eq('id', enq.vendor_id).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      return { ...m, couple_name: couple?.name||'Unknown', vendor_name: vendor?.name||'Unknown' };
+    }));
+    res.json({ success: true, data: enriched });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── All threads ───────────────────────────────────────────────────────────────
+app.get('/api/v3/admin/messages/threads', adminAuth, async (req, res) => {
+  try {
+    const { search, limit = 50, offset = 0 } = req.query;
+    const { data, error } = await supabase.from('vendor_enquiries').select('id, couple_id, vendor_id, status, last_message_at, last_message_preview, created_at').order('last_message_at', { ascending: false }).range(Number(offset), Number(offset)+Number(limit)-1);
+    if (error) throw error;
+    res.json({ success: true, data: data||[] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Revenue overview ──────────────────────────────────────────────────────────
+app.get('/api/v3/admin/money/overview', adminAuth, async (req, res) => {
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fyStart = `${fyYear}-04-01`;
+
+    const [
+      { data: lockDates },
+      { data: subscriptions },
+      { data: appointments },
+      { data: shield },
+      { data: monthSubs },
+    ] = await Promise.all([
+      supabase.from('lock_date_holds').select('amount, status, created_at').eq('status', 'held'),
+      supabase.from('vendor_subscriptions').select('amount, tier, created_at, status').gte('created_at', fyStart),
+      supabase.from('luxury_appointments').select('appointment_fee, tdw_share, status, created_at').eq('status', 'confirmed'),
+      supabase.from('vendor_payment_shield').select('amount, status, created_at'),
+      supabase.from('vendor_subscriptions').select('amount, tier').gte('created_at', monthStart).eq('status', 'active'),
+    ]);
+
+    const lockRevenue = (lockDates||[]).reduce((s,l)=>s+(l.amount||0),0);
+    const apptRevenue = (appointments||[]).reduce((s,a)=>s+(a.tdw_share||0),0);
+    const subRevenue = (subscriptions||[]).filter(s=>s.status==='active').reduce((s,sub)=>s+(sub.amount||0),0);
+    const monthRevenue = (monthSubs||[]).reduce((s,sub)=>s+(sub.amount||0),0);
+
+    // Monthly revenue for last 12 months
+    const monthly = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const start = d.toISOString().split('T')[0];
+      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
+      const { data: mData } = await supabase.from('vendor_subscriptions').select('amount').gte('created_at', start).lte('created_at', end).eq('status', 'active');
+      monthly.push({ month: d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }), revenue: (mData||[]).reduce((s,r)=>s+(r.amount||0),0) });
+    }
+
+    res.json({ success: true, data: { lock_date_revenue: lockRevenue, appointment_revenue: apptRevenue, subscription_revenue_fy: subRevenue, this_month: monthRevenue, monthly_chart: monthly, subscriptions_by_tier: { essential: (subscriptions||[]).filter(s=>s.tier==='essential').length, signature: (subscriptions||[]).filter(s=>s.tier==='signature').length, prestige: (subscriptions||[]).filter(s=>s.tier==='prestige').length } } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Data tools: entity links stats ────────────────────────────────────────────
 app.get('/api/v3/admin/data/entity-link-stats', adminAuth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('entity_links').select('link_type');
     if (error) throw error;
     const counts = {};
     (data||[]).forEach(r => { counts[r.link_type] = (counts[r.link_type]||0) + 1; });
-    res.json({ success: true, data: Object.entries(counts).map(([link_type, count]) => ({ link_type, count })).sort((a,b) => b.count - a.count) });
+    res.json({ success: true, data: Object.entries(counts).map(([link_type, count]) => ({ link_type, count })).sort((a,b)=>b.count-a.count) });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── System health ping ────────────────────────────────────────────────────────
+app.get('/api/v3/admin/system/health', adminAuth, async (req, res) => {
+  try {
+    const start = Date.now();
+    const { error: sbErr } = await supabase.from('users').select('id').limit(1);
+    const supabaseMs = Date.now() - start;
+
+    // Check Twilio
+    let twilioOk = false;
+    try { if (twilioClient) { await twilioClient.api.accounts(process.env.TWILIO_ACCOUNT_SID).fetch(); twilioOk = true; } } catch {}
+
+    res.json({ success: true, data: { supabase: { ok: !sbErr, latency_ms: supabaseMs }, twilio: { ok: twilioOk }, railway: { ok: true, timestamp: new Date().toISOString() } } });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Admin WhatsApp send ───────────────────────────────────────────────────────
+app.post('/api/v3/admin/send-whatsapp', adminAuth, async (req, res) => {
+  try {
+    const { phone, message } = req.body || {};
+    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
+    const fullPhone = phone.startsWith('+') ? phone : '+91' + normalizePhone(phone);
+    const sent = await sendWhatsApp(fullPhone, message);
+    res.json({ success: sent, message: sent ? 'Sent.' : 'Failed.' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Backfill all entity links ─────────────────────────────────────────────────
 app.post('/api/v3/admin/data/backfill-all', adminAuth, async (req, res) => {
   try {
     const { data: couples } = await supabase.from('users').select('id').eq('dreamer_type', 'couple');
     let totalWritten = 0;
     for (const couple of couples || []) {
       const coupleId = couple.id;
-      const [{ data: muse }, { data: enquiries }, { data: cvs }] = await Promise.all([
+      const [{ data: muse }, { data: enquiries }, { data: cvs }, { data: cops }] = await Promise.all([
         supabase.from('moodboard_items').select('vendor_id').eq('user_id', coupleId).not('vendor_id', 'is', null),
         supabase.from('vendor_enquiries').select('vendor_id').eq('couple_id', coupleId),
         supabase.from('couple_vendors').select('vendor_id, status').eq('couple_id', coupleId).not('vendor_id', 'is', null),
+        supabase.from('co_planners').select('co_planner_user_id').eq('primary_user_id', coupleId).not('co_planner_user_id', 'is', null),
       ]);
       for (const m of muse||[]) { writeEntityLink({ from_entity_type:'couple', from_entity_id:coupleId, to_entity_type:'vendor', to_entity_id:m.vendor_id, link_type:'saved_to_muse', couple_id:coupleId }); totalWritten++; }
       for (const e of enquiries||[]) { writeEntityLink({ from_entity_type:'couple', from_entity_id:coupleId, to_entity_type:'vendor', to_entity_id:e.vendor_id, link_type:'enquired_about', couple_id:coupleId }); totalWritten++; }
       for (const cv of cvs||[]) { writeEntityLink({ from_entity_type:'couple', from_entity_id:coupleId, to_entity_type:'vendor', to_entity_id:cv.vendor_id, link_type:cv.status==='booked'||cv.status==='paid'?'booked_for':'considering', couple_id:coupleId }); totalWritten++; }
+      for (const cp of cops||[]) { writeEntityLink({ from_entity_type:'couple', from_entity_id:coupleId, to_entity_type:'co_planner', to_entity_id:cp.co_planner_user_id, link_type:'shared_with', couple_id:coupleId }); totalWritten++; }
     }
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
     res.json({ success: true, couples_processed: (couples||[]).length, links_attempted: totalWritten });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.get('/api/v3/admin/system/health', adminAuth, async (req, res) => {
-  try {
-    const start = Date.now();
-    const { error: sbErr } = await supabase.from('users').select('id').limit(1);
-    res.json({ success: true, data: { supabase: { ok: !sbErr, latency_ms: Date.now()-start }, twilio: { ok: !!twilioClient }, railway: { ok: true, timestamp: new Date().toISOString() } } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/v3/admin/send-whatsapp', adminAuth, async (req, res) => {
-  try {
-    const { phone, message } = req.body || {};
-    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
-    const sent = await sendWhatsApp(phone.startsWith('+') ? phone : '+91' + normalizePhone(phone), message);
-    res.json({ success: sent, message: sent ? 'Sent.' : 'Failed.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// S38 — Maker Money + Studio
-app.get('/api/v2/vendor/gst-summary/:vendorId', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const fy = req.query.fy || (() => { const now = new Date(); const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `${y}-${y+1}`; })();
-    const fyYear = parseInt(fy.split('-')[0]);
-    const { data: invoices } = await supabase.from('vendor_invoices').select('id, client_name, amount, gst_amount, gst_enabled, tds_amount, tds_rate, tds_deducted_by_client, issue_date, status').eq('vendor_id', vendorId).gte('issue_date', `${fyYear}-04-01`).lte('issue_date', `${fyYear+1}-03-31`).order('issue_date', { ascending: true });
-    const rows = invoices || [];
-    const totalInvoiced = rows.reduce((s, i) => s + (i.amount || 0), 0);
-    const totalGST = rows.filter(i => i.gst_enabled).reduce((s, i) => s + (i.gst_amount || 0), 0);
-    const totalTDS = rows.reduce((s, i) => s + (i.tds_amount || 0), 0);
-    const quarters = [{ label: 'Apr-Jun', start: `${fyYear}-04-01`, end: `${fyYear}-06-30` },{ label: 'Jul-Sep', start: `${fyYear}-07-01`, end: `${fyYear}-09-30` },{ label: 'Oct-Dec', start: `${fyYear}-10-01`, end: `${fyYear}-12-31` },{ label: 'Jan-Mar', start: `${fyYear+1}-01-01`, end: `${fyYear+1}-03-31` }];
-    const quarterly = quarters.map(q => { const qRows = rows.filter(i => i.issue_date >= q.start && i.issue_date <= q.end); return { label: q.label, invoiced: qRows.reduce((s,i)=>s+(i.amount||0),0), gst: qRows.filter(i=>i.gst_enabled).reduce((s,i)=>s+(i.gst_amount||0),0) }; });
-    const clientMap = {};
-    rows.forEach(i => { const k = i.client_name || 'Unknown'; if (!clientMap[k]) clientMap[k] = { client_name: k, total_invoiced: 0, tds_rate: i.tds_rate || 10, tds_amount: 0, tds_deducted_by_client: false }; clientMap[k].total_invoiced += i.amount || 0; clientMap[k].tds_amount += i.tds_amount || 0; if (i.tds_deducted_by_client) clientMap[k].tds_deducted_by_client = true; });
-    res.json({ success: true, data: { fy, total_invoiced: totalInvoiced, total_gst: totalGST, total_tds: totalTDS, quarterly, tds_ledger: Object.values(clientMap), invoices: rows } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v2/vendor/gst-export/:vendorId', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const fy = req.query.fy || (() => { const now = new Date(); const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `${y}-${y+1}`; })();
-    const fyYear = parseInt(fy.split('-')[0]);
-    const { data: invoices } = await supabase.from('vendor_invoices').select('invoice_number, client_name, issue_date, amount, gst_enabled, gst_amount, tds_rate, tds_amount, tds_deducted_by_client, status').eq('vendor_id', vendorId).gte('issue_date', `${fyYear}-04-01`).lte('issue_date', `${fyYear+1}-03-31`).order('issue_date', { ascending: true });
-    const headers = ['Invoice Number','Client Name','Invoice Date','Amount','GST Rate (%)','GST Amount','TDS Rate (%)','TDS Amount','TDS Deducted By Client','Net Receivable','Status'];
-    const rows = (invoices||[]).map(i => [i.invoice_number||'',i.client_name||'',i.issue_date||'',i.amount||0,i.gst_enabled?18:0,i.gst_amount||0,i.tds_rate||0,i.tds_amount||0,i.tds_deducted_by_client?'Yes':'No',((i.amount||0)+(i.gst_amount||0)-(i.tds_amount||0)),i.status||'']);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    res.setHeader('Content-Type','text/csv');
-    res.setHeader('Content-Disposition',`attachment; filename="tax-export-${fy}.csv"`);
-    res.send(csv);
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v2/vendor/payment-shield/:vendorId', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('vendor_payment_shield').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/vendor/payment-shield', async (req, res) => {
-  try {
-    const { vendor_id, client_id, client_name, amount, wedding_date } = req.body || {};
-    if (!vendor_id || !client_name || !amount) return res.status(400).json({ success: false, error: 'required fields missing' });
-    const release_date = wedding_date ? new Date(new Date(wedding_date).getTime() + 24*60*60*1000).toISOString().split('T')[0] : null;
-    const { data, error } = await supabase.from('vendor_payment_shield').insert([{ vendor_id, client_id: client_id||null, client_name, amount, wedding_date: wedding_date||null, release_date, status: 'holding' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/vendor/broadcast-whatsapp', async (req, res) => {
-  try {
-    const { vendor_id, message, segment } = req.body || {};
-    if (!vendor_id || !message) return res.status(400).json({ success: false, error: 'vendor_id and message required' });
-    let query = supabase.from('vendor_clients').select('id, name, phone').eq('vendor_id', vendor_id);
-    const today = new Date().toISOString().split('T')[0];
-    const in90 = new Date(Date.now()+90*86400000).toISOString().split('T')[0];
-    if (segment === 'upcoming') query = query.gte('event_date', today).lte('event_date', in90);
-    else if (segment === 'post_wedding') query = query.lt('event_date', today);
-    const { data: clients } = await query;
-    if (!clients || clients.length === 0) return res.json({ success: true, sent: 0, message: 'No clients in segment' });
-    let sent = 0;
-    const fullMessage = message + '\n\nReply STOP to unsubscribe.';
-    for (const client of clients) {
-      if (!client.phone) continue;
-      await new Promise(r => setTimeout(r, 500));
-      const ok = await sendWhatsApp('+91' + normalizePhone(client.phone), fullMessage);
-      if (ok) sent++;
-    }
-    await supabase.from('vendor_broadcasts').insert([{ vendor_id, message, template: segment || 'all', recipient_count: clients.length, sent_count: sent }]);
-    res.json({ success: true, sent, total: clients.length });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/vendor/contracts/generate', async (req, res) => {
-  try {
-    const { vendor_id, client_name, event_date, amount, template_type, custom_terms } = req.body || {};
-    if (!vendor_id || !client_name) return res.status(400).json({ success: false, error: 'vendor_id and client_name required' });
-    const { data: vendor } = await supabase.from('vendors').select('name, city, phone').eq('id', vendor_id).maybeSingle();
-    const templates = { photography: 'Photography & Videography Agreement', mua: 'Makeup Artist Services Agreement', event_management: 'Event Management Agreement', general: 'General Services Agreement' };
-    const templateTitle = templates[template_type] || templates.general;
-    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '___________';
-    const fmtAmt = (n) => n ? 'Rs.' + n.toLocaleString('en-IN') : '___________';
-    const contractText = templateTitle + '\n\nSERVICE PROVIDER: ' + (vendor?.name||'Service Provider') + '\nLocation: ' + (vendor?.city||'') + '\n\nCLIENT: ' + client_name + '\nEvent Date: ' + fmtDate(event_date) + '\nTotal Fee: ' + fmtAmt(amount) + '\n\nTERMS\n1. Service Provider delivers services as agreed.\n2. Client pays as per invoice schedule.\n3. Cancellation within 30 days: 50% forfeit.\n4. Cancellation within 7 days: 100% forfeit.\n5. Service Provider cancellation: full refund.\n\n' + (custom_terms ? 'ADDITIONAL TERMS\n' + custom_terms + '\n\n' : '') + 'SIGNATURES\n\nService Provider: _______________________  Date: ___________\n\nClient: _______________________  Date: ___________\n\nGenerated by The Dream Wedding';
-    const { data: contract, error } = await supabase.from('vendor_contracts').insert([{ vendor_id, client_name, template_type: template_type || 'general', event_date: event_date || null, amount: amount || null, terms_json: { custom_terms: custom_terms || '' }, status: 'draft', contract_text: contractText }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data: { ...contract, contract_text: contractText } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// S39 — Couture Vertical
-app.get('/api/v2/couture/designers', async (req, res) => {
-  try {
-    const { data: designers, error } = await supabase.from('vendors').select('id, name, category, city, about, tagline, starting_price, featured_photos, portfolio_images, rating, review_count, couture_appointment_fee, vibe_tags').eq('luxury_category', 'couture').eq('couture_approved', true).order('rating', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((designers || []).map(async (d) => {
-      const { data: products } = await supabase.from('couture_products').select('id, title, category, price_from, images, is_featured, available').eq('vendor_id', d.id).eq('available', true).order('is_featured', { ascending: false }).limit(4);
-      return { ...d, products: products || [], appointment_fee: d.couture_appointment_fee || 3500 };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v2/couture/products/:vendorId', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('couture_products').select('*').eq('vendor_id', req.params.vendorId).eq('available', true).order('is_featured', { ascending: false });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/couture/appointments', async (req, res) => {
-  try {
-    const { vendor_id, couple_id, product_id, appointment_date, appointment_time, notes } = req.body || {};
-    if (!vendor_id || !couple_id) return res.status(400).json({ success: false, error: 'vendor_id and couple_id required' });
-    const { data: vendor } = await supabase.from('vendors').select('name, couture_appointment_fee').eq('id', vendor_id).maybeSingle();
-    const fee = vendor?.couture_appointment_fee || 3500;
-    const { data: appt, error } = await supabase.from('couture_appointments').insert([{ vendor_id, couple_id, product_id: product_id || null, appointment_date: appointment_date || null, appointment_time: appointment_time || null, fee, platform_fee: 500, status: 'pending_payment', notes: notes || null, razorpay_payment_link: 'https://rzp.io/l/tdw-couture-' + Date.now() }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data: appt, fee, platform_fee: 500 });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// S40 — Collab Hub
-app.get('/api/v2/collab/posts', async (req, res) => {
-  try {
-    const { vendor_id, category, city, post_type } = req.query;
-    let query = supabase.from('collab_posts').select('id, vendor_id, title, description, post_type, category, city, budget, date_needed, status, created_at').eq('status', 'open').order('created_at', { ascending: false });
-    if (category) query = query.eq('category', category);
-    if (city) query = query.ilike('city', '%' + city + '%');
-    if (post_type) query = query.eq('post_type', post_type);
-    const { data: posts, error } = await query.limit(50);
-    if (error) throw error;
-    const enriched = await Promise.all((posts || []).map(async (p) => {
-      const { data: v } = await supabase.from('vendors').select('name, category, city').eq('id', p.vendor_id).maybeSingle();
-      return { ...p, poster_name: v?.name || 'A Maker', poster_category: v?.category || '' };
-    }));
-    const filtered = vendor_id ? enriched.filter(p => p.vendor_id !== vendor_id) : enriched;
-    res.json({ success: true, data: filtered });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v2/collab/my-posts/:vendorId', async (req, res) => {
-  try {
-    const { data: posts, error } = await supabase.from('collab_posts').select('*').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((posts || []).map(async (p) => {
-      const { count } = await supabase.from('collab_applications').select('*', { count: 'exact', head: true }).eq('post_id', p.id);
-      return { ...p, application_count: count || 0 };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/collab/posts', async (req, res) => {
-  try {
-    const { vendor_id, title, description, post_type, category, city, budget, date_needed } = req.body || {};
-    if (!vendor_id || !title || !post_type) return res.status(400).json({ success: false, error: 'vendor_id, title, post_type required' });
-    const { data, error } = await supabase.from('collab_posts').insert([{ vendor_id, title, description: description || null, post_type, category: category || null, city: city || null, budget: budget ? Number(budget) : null, date_needed: date_needed || null, status: 'open' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.patch('/api/v2/collab/posts/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('collab_posts').update({ status: req.body.status }).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v2/collab/applications/:postId', async (req, res) => {
-  try {
-    const { data: apps, error } = await supabase.from('collab_applications').select('*').eq('post_id', req.params.postId).order('created_at', { ascending: false });
-    if (error) throw error;
-    const enriched = await Promise.all((apps || []).map(async (a) => {
-      const { data: v } = await supabase.from('vendors').select('name, category, city, rating, portfolio_images').eq('id', a.vendor_id).maybeSingle();
-      return { ...a, applicant: v || null };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/collab/applications', async (req, res) => {
-  try {
-    const { post_id, vendor_id, message } = req.body || {};
-    if (!post_id || !vendor_id) return res.status(400).json({ success: false, error: 'post_id and vendor_id required' });
-    const { data: existing } = await supabase.from('collab_applications').select('id').eq('post_id', post_id).eq('vendor_id', vendor_id).maybeSingle();
-    if (existing) return res.status(400).json({ success: false, error: 'Already applied' });
-    const { data, error } = await supabase.from('collab_applications').insert([{ post_id, vendor_id, message: message || null, status: 'pending', match_score: null }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.patch('/api/v2/collab/applications/:id', async (req, res) => {
-  try {
-    const { status } = req.body || {};
-    const updates = { status };
-    const { data, error } = await supabase.from('collab_applications').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// S41 — DreamAi Agentic Actions
-app.post('/api/v2/dreamai/action/complete-task', async (req, res) => {
-  try {
-    const { task_id } = req.body || {};
-    if (!task_id) return res.status(400).json({ success: false, error: 'task_id required' });
-    const { error } = await supabase.from('couple_checklist').update({ is_complete: true }).eq('id', task_id);
-    if (error) throw error;
-    res.json({ success: true, message: 'Task marked as complete.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/action/add-expense', async (req, res) => {
-  try {
-    const { couple_id, vendor_name, description, actual_amount, category } = req.body || {};
-    if (!couple_id || !actual_amount) return res.status(400).json({ success: false, error: 'couple_id and actual_amount required' });
-    const { data, error } = await supabase.from('couple_expenses').insert([{ couple_id, vendor_name: vendor_name||null, description: description||null, actual_amount: Number(actual_amount), category: category||'Other', payment_status: 'committed', event: 'general' }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: 'Expense logged.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/action/send-whatsapp-reminder', async (req, res) => {
-  try {
-    const { phone, message } = req.body || {};
-    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
-    const sent = await sendWhatsApp('+91' + normalizePhone(phone), message);
-    res.json({ success: sent, message: sent ? 'WhatsApp reminder sent.' : 'Failed to send.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/action/send-enquiry', async (req, res) => {
-  try {
-    const { couple_id, vendor_id, opening_message } = req.body || {};
-    if (!couple_id || !vendor_id || !opening_message) return res.status(400).json({ success: false, error: 'couple_id, vendor_id, opening_message required' });
-    const { data: enq, error: enqErr } = await supabase.from('vendor_enquiries').insert([{ couple_id, vendor_id, status: 'active', last_message_at: new Date().toISOString(), last_message_from: 'couple', last_message_preview: opening_message.slice(0, 120) }]).select().single();
-    if (enqErr) throw enqErr;
-    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: enq.id, from_role: 'couple', content: opening_message }]);
-    res.json({ success: true, data: enq, message: 'Enquiry sent.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res) => {
-  try {
-    const { client_phone, client_name, message } = req.body || {};
-    if (!client_phone || !message) return res.status(400).json({ success: false, error: 'client_phone and message required' });
-    const sent = await sendWhatsApp('+91' + normalizePhone(client_phone), message);
-    res.json({ success: sent, message: sent ? 'Reminder sent to ' + (client_name||'client') + '.' : 'Failed.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
-  try {
-    const { enquiry_id, message } = req.body || {};
-    if (!enquiry_id || !message) return res.status(400).json({ success: false, error: 'enquiry_id and message required' });
-    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id, from_role: 'vendor', content: message }]);
-    await supabase.from('vendor_enquiries').update({ last_message_at: new Date().toISOString(), last_message_from: 'vendor', last_message_preview: message.slice(0,120), couple_unread_count: 1 }).eq('id', enquiry_id);
-    res.json({ success: true, message: 'Reply sent.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
-  try {
-    const { vendor_id, blocked_date, note } = req.body || {};
-    if (!vendor_id || !blocked_date) return res.status(400).json({ success: false, error: 'vendor_id and blocked_date required' });
-    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, note: note||null }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: blocked_date + ' blocked on your calendar.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
-  try {
-    const { vendor_id, description, amount, category } = req.body || {};
-    if (!vendor_id || !amount) return res.status(400).json({ success: false, error: 'vendor_id and amount required' });
-    const { data, error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description: description||null, amount: Number(amount), category: category||'General', expense_date: new Date().toISOString().split('T')[0] }]).select().single();
-    if (error) throw error;
-    res.json({ success: true, data, message: 'Expense logged.' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// Admin Portal v3
-app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
-  try {
-    const todayStr = new Date().toISOString().split('T')[0] + 'T00:00:00.000Z';
-    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0] + 'T00:00:00.000Z';
-    const [{ count: totalDreamers },{ count: totalMakers },{ count: enquiriesToday },{ count: museSavesToday },{ count: enquiriesYesterday },{ count: museSavesYesterday },{ count: dreamersToday },{ count: dreamersYesterday },{ data: recentDreamers },{ data: recentVendors },{ data: recentEnquiries },{ data: recentMuse }] = await Promise.all([supabase.from('users').select('*',{count:'exact',head:true}).eq('dreamer_type','couple'),supabase.from('vendors').select('*',{count:'exact',head:true}).not('name','is',null),supabase.from('vendor_enquiries').select('*',{count:'exact',head:true}).gte('created_at',todayStr),supabase.from('moodboard_items').select('*',{count:'exact',head:true}).gte('created_at',todayStr),supabase.from('vendor_enquiries').select('*',{count:'exact',head:true}).gte('created_at',yesterdayStr).lt('created_at',todayStr),supabase.from('moodboard_items').select('*',{count:'exact',head:true}).gte('created_at',yesterdayStr).lt('created_at',todayStr),supabase.from('users').select('*',{count:'exact',head:true}).gte('created_at',todayStr),supabase.from('users').select('*',{count:'exact',head:true}).gte('created_at',yesterdayStr).lt('created_at',todayStr),supabase.from('users').select('id,name,city,created_at').gte('created_at',todayStr).order('created_at',{ascending:false}).limit(5),supabase.from('vendors').select('id,name,category,created_at').gte('created_at',todayStr).order('created_at',{ascending:false}).limit(5),supabase.from('vendor_enquiries').select('id,created_at').gte('created_at',todayStr).order('created_at',{ascending:false}).limit(10),supabase.from('moodboard_items').select('id,vendor_name,created_at').gte('created_at',todayStr).order('created_at',{ascending:false}).limit(10)]);
-    const activity = [];
-    (recentDreamers||[]).forEach(u=>activity.push({type:'new_dreamer',emoji:'🟡',text:'New Dreamer joined — '+(u.name||'Unknown')+(u.city?', '+u.city:''),at:u.created_at,id:u.id}));
-    (recentVendors||[]).forEach(v=>activity.push({type:'new_maker',emoji:'🟢',text:'New Maker onboarded — '+v.name,at:v.created_at,id:v.id}));
-    (recentEnquiries||[]).forEach(e=>activity.push({type:'enquiry',emoji:'💬',text:'Enquiry sent',at:e.created_at,id:e.id}));
-    (recentMuse||[]).forEach(m=>activity.push({type:'muse_save',emoji:'♥',text:'Muse save — '+(m.vendor_name||'vendor'),at:m.created_at,id:m.id}));
-    activity.sort((a,b)=>new Date(b.at).getTime()-new Date(a.at).getTime());
-    res.json({success:true,counters:{dreamers:{total:totalDreamers||0,today_delta:(dreamersToday||0)-(dreamersYesterday||0)},makers:{total:totalMakers||0},enquiries_today:{total:enquiriesToday||0,delta:(enquiriesToday||0)-(enquiriesYesterday||0)},muse_saves_today:{total:museSavesToday||0,delta:(museSavesToday||0)-(museSavesYesterday||0)}},activity:activity.slice(0,25)});
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v3/admin/dreamers', adminAuth, async (req, res) => {
-  try {
-    const { search, tier } = req.query;
-    let query = supabase.from('users').select('id,name,phone,email,city,couple_tier,wedding_date,created_at,discover_enabled,token_balance').order('created_at',{ascending:false}).limit(200);
-    if (search) query = query.or('name.ilike.%' + search + '%,phone.ilike.%' + search + '%');
-    if (tier && tier !== 'all') query = query.eq('couple_tier', tier);
-    const { data, error } = await query;
-    if (error) throw error;
-    const enriched = await Promise.all((data||[]).map(async (u) => {
-      const [{ count: museCount },{ count: enquiryCount }] = await Promise.all([supabase.from('moodboard_items').select('*',{count:'exact',head:true}).eq('user_id',u.id),supabase.from('vendor_enquiries').select('*',{count:'exact',head:true}).eq('couple_id',u.id)]);
-      return { ...u, muse_saves: museCount||0, enquiries_sent: enquiryCount||0 };
-    }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.patch('/api/v3/admin/dreamers/:id', adminAuth, async (req, res) => {
-  try {
-    const allowed = ['couple_tier','discover_enabled','token_balance','wedding_date','name','phone'];
-    const patch = {};
-    for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
-    const { data, error } = await supabase.from('users').update(patch).eq('id',req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v3/admin/makers', adminAuth, async (req, res) => {
-  try {
-    const { search, tier } = req.query;
-    let query = supabase.from('vendors').select('id,name,category,city,phone,tier,is_verified,is_luxury,subscription_active,created_at,discover_enabled').not('name','is',null).order('created_at',{ascending:false}).limit(200);
-    if (search) query = query.or('name.ilike.%' + search + '%,phone.ilike.%' + search + '%');
-    if (tier && tier !== 'all') query = query.eq('tier', tier);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.patch('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
-  try {
-    const allowed = ['tier','is_verified','is_luxury','luxury_approved','couture_approved','discover_enabled','subscription_active'];
-    const patch = {};
-    for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
-    const { data, error } = await supabase.from('vendors').update(patch).eq('id',req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v3/admin/images/pending', adminAuth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('vendor_images').select('id,url,tags,vendor_id,created_at').eq('approved',false).order('created_at',{ascending:false}).limit(100);
-    if (error) throw error;
-    const enriched = await Promise.all((data||[]).map(async (img) => { const { data: v } = await supabase.from('vendors').select('name,category').eq('id',img.vendor_id).maybeSingle(); return { ...img, vendor_name: v?.name||'Unknown', vendor_category: v?.category||'' }; }));
-    res.json({ success: true, data: enriched });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.patch('/api/v3/admin/images/:id', adminAuth, async (req, res) => {
-  try {
-    const { approved, rejection_reason } = req.body || {};
-    const { data, error } = await supabase.from('vendor_images').update({ approved: !!approved, rejection_reason: rejection_reason||null }).eq('id',req.params.id).select().single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v3/admin/data/entity-link-stats', adminAuth, async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('entity_links').select('link_type');
-    if (error) throw error;
-    const counts = {};
-    (data||[]).forEach(r => { counts[r.link_type] = (counts[r.link_type]||0) + 1; });
-    res.json({ success: true, data: Object.entries(counts).map(([link_type, count]) => ({ link_type, count })).sort((a,b) => b.count - a.count) });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v3/admin/data/backfill-all', adminAuth, async (req, res) => {
-  try {
-    const { data: couples } = await supabase.from('users').select('id').eq('dreamer_type','couple');
-    let totalWritten = 0;
-    for (const couple of couples || []) {
-      const coupleId = couple.id;
-      const [{ data: muse },{ data: enquiries },{ data: cvs }] = await Promise.all([supabase.from('moodboard_items').select('vendor_id').eq('user_id',coupleId).not('vendor_id','is',null),supabase.from('vendor_enquiries').select('vendor_id').eq('couple_id',coupleId),supabase.from('couple_vendors').select('vendor_id,status').eq('couple_id',coupleId).not('vendor_id','is',null)]);
-      for (const m of muse||[]) { writeEntityLink({from_entity_type:'couple',from_entity_id:coupleId,to_entity_type:'vendor',to_entity_id:m.vendor_id,link_type:'saved_to_muse',couple_id:coupleId}); totalWritten++; }
-      for (const e of enquiries||[]) { writeEntityLink({from_entity_type:'couple',from_entity_id:coupleId,to_entity_type:'vendor',to_entity_id:e.vendor_id,link_type:'enquired_about',couple_id:coupleId}); totalWritten++; }
-      for (const cv of cvs||[]) { writeEntityLink({from_entity_type:'couple',from_entity_id:coupleId,to_entity_type:'vendor',to_entity_id:cv.vendor_id,link_type:cv.status==='booked'||cv.status==='paid'?'booked_for':'considering',couple_id:coupleId}); totalWritten++; }
-    }
-    await new Promise(r => setTimeout(r, 800));
-    res.json({ success: true, couples_processed: (couples||[]).length, links_attempted: totalWritten });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.get('/api/v3/admin/system/health', adminAuth, async (req, res) => {
-  try {
-    const start = Date.now();
-    const { error: sbErr } = await supabase.from('users').select('id').limit(1);
-    res.json({ success: true, data: { supabase: { ok: !sbErr, latency_ms: Date.now()-start }, twilio: { ok: !!twilioClient }, railway: { ok: true, timestamp: new Date().toISOString() } } });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-app.post('/api/v3/admin/send-whatsapp', adminAuth, async (req, res) => {
-  try {
-    const { phone, message } = req.body || {};
-    if (!phone || !message) return res.status(400).json({ success: false, error: 'phone and message required' });
-    const sent = await sendWhatsApp(phone.startsWith('+') ? phone : '+91' + normalizePhone(phone), message);
-    res.json({ success: sent, message: sent ? 'Sent.' : 'Failed.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
