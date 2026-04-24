@@ -9459,6 +9459,101 @@ app.get('/api/vendor-discover/status', async (req, res) => {
   }
 });
 
+// ── Profile level calculator
+// The single source of truth for where a vendor is in the discovery funnel.
+// Frontend uses this to show the correct status banner and next step hint.
+app.get('/api/v2/vendor/profile-level/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    // Fetch vendor row + image count in parallel
+    const [{ data: vendor }, { count: imageCount }, { data: sub }] = await Promise.all([
+      supabase.from('vendors').select('*').eq('id', vendorId).maybeSingle(),
+      supabase.from('vendor_images').select('*', { count: 'exact', head: true }).eq('vendor_id', vendorId),
+      supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', vendorId).maybeSingle(),
+    ]);
+
+    if (!vendor) return res.status(404).json({ success: false, error: 'vendor not found' });
+
+    const tier = sub?.tier || 'essential';
+    const hasHero = Array.isArray(vendor.featured_photos) && vendor.featured_photos.length > 0;
+    const photoCount = imageCount || 0;
+
+    // ── Level thresholds ───────────────────────────────────────────────────
+    // Level 1: basic info done
+    const level1Done = (
+      photoCount >= 4 &&
+      hasHero &&
+      !!vendor.starting_price &&
+      !!vendor.city
+    );
+
+    // Level 2: full profile done (unlocks Submit button)
+    const aboutWordCount = vendor.about ? vendor.about.trim().split(/\s+/).length : 0;
+    const level2Done = level1Done && (
+      aboutWordCount >= 80 &&
+      Array.isArray(vendor.vibe_tags) && vendor.vibe_tags.length >= 3 &&
+      !!(vendor.instagram_url || vendor.instagram)
+    );
+
+    const level = level2Done ? 2 : level1Done ? 1 : 0;
+
+    // ── Next step hint — show the single most important missing item ────────
+    let next_step = null;
+    if (!hasHero) {
+      next_step = { field: 'hero_photo', label: 'Add a hero photo', href: '/vendor/discovery/images' };
+    } else if (photoCount < 4) {
+      next_step = { field: 'photos', label: `Add ${4 - photoCount} more photo${4 - photoCount !== 1 ? 's' : ''}`, href: '/vendor/discovery/images' };
+    } else if (!vendor.starting_price) {
+      next_step = { field: 'pricing', label: 'Add your starting price', href: '/vendor/studio' };
+    } else if (!vendor.city) {
+      next_step = { field: 'city', label: 'Add your city', href: '/vendor/studio' };
+    } else if (aboutWordCount < 80) {
+      const wordsLeft = 80 - aboutWordCount;
+      next_step = { field: 'about', label: `Write your bio (${wordsLeft} more word${wordsLeft !== 1 ? 's' : ''})`, href: '/vendor/studio' };
+    } else if (!Array.isArray(vendor.vibe_tags) || vendor.vibe_tags.length < 3) {
+      next_step = { field: 'vibe_tags', label: 'Add at least 3 vibe tags', href: '/vendor/studio' };
+    } else if (!vendor.instagram_url && !vendor.instagram) {
+      next_step = { field: 'instagram', label: 'Add your Instagram handle', href: '/vendor/studio' };
+    }
+
+    // ── Discovery state ────────────────────────────────────────────────────
+    const isLive     = !!vendor.discover_listed && !!vendor.is_approved && !!vendor.vendor_discover_enabled;
+    const isSubmitted = !!vendor.discover_submitted_at;
+    const isApproved  = !!vendor.discover_approved_at;
+    const isRejected  = !!vendor.discover_rejected_reason;
+    const isPending   = isSubmitted && !isApproved && !isRejected;
+
+    // Recompute completion % so it's always fresh
+    await recomputeDiscoverCompletion(vendorId);
+    const { data: fresh } = await supabase.from('vendors')
+      .select('discover_completion_pct').eq('id', vendorId).maybeSingle();
+
+    res.json({
+      success: true,
+      level,          // 0, 1, or 2
+      tier,
+      level1Done,
+      level2Done,
+      completion_pct: fresh?.discover_completion_pct || 0,
+      next_step,      // null if nothing is missing
+      // Discovery state flags
+      is_live:         isLive,
+      is_submitted:    isSubmitted,
+      is_approved:     isApproved,
+      is_rejected:     isRejected,
+      is_pending:      isPending,
+      rejection_reason: vendor.discover_rejected_reason || null,
+      // Raw counts for frontend display
+      photo_count:     photoCount,
+      about_word_count: aboutWordCount,
+    });
+  } catch (err) {
+    console.error('[profile-level] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Request access
 app.post('/api/vendor-discover/request-access', async (req, res) => {
   try {
