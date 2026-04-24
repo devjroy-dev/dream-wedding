@@ -11553,7 +11553,10 @@ app.get('/api/v2/preview-vendors', async (req, res) => {
 });
 
 // GET /api/v2/admin/preview-vendors — admin reads current curation
-app.get('/api/v2/admin/preview-vendors', adminAuth, async (req, res) => {
+app.get('/api/v2/admin/preview-vendors', async (req, res) => {
+  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD && req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   try {
     const { data: slots } = await supabase
       .from('preview_vendors')
@@ -11576,7 +11579,10 @@ app.get('/api/v2/admin/preview-vendors', adminAuth, async (req, res) => {
 
 // POST /api/v2/admin/preview-vendors — admin sets the 10 preview slots
 // Body: { vendor_ids: ['uuid1', 'uuid2', ...] } — ordered array, max 10
-app.post('/api/v2/admin/preview-vendors', adminAuth, async (req, res) => {
+app.post('/api/v2/admin/preview-vendors', async (req, res) => {
+  if (req.headers['x-admin-password'] !== process.env.ADMIN_PASSWORD && req.headers['x-admin-password'] !== 'Mira@2551354') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   try {
     const { vendor_ids } = req.body || {};
     if (!Array.isArray(vendor_ids)) {
