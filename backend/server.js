@@ -21,7 +21,7 @@ app.use(express.json());
 // Block v1 domain - only allow v2 and local
 app.use((req, res, next) => {
   const origin = req.headers.origin || req.headers.referer || '';
-  const isV1 = origin.includes('thedreamwedding.in') && !origin.includes('app.thedreamwedding.in') && !origin.includes('tdw-2');
+  const isV1 = origin.includes('vendor.thedreamwedding.in') && !origin.includes('app.thedreamwedding.in') && !origin.includes('tdw-2');
   if (isV1) return res.status(403).json({ error: 'v1 is retired. Please use app.thedreamwedding.in' });
   next();
 });
