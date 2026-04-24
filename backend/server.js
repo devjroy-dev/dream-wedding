@@ -4994,26 +4994,35 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
   try {
     const table = (role === 'vendor') ? 'vendors' : 'users';
     let data = null;
+    const fields = role === 'vendor'
+      ? 'id, pin_hash, pin_set, name, category, tier, phone'
+      : 'id, pin_hash, pin_set, name, phone, dreamer_type';
     if (phone) {
       const bare = phone.replace(/\D/g, '').slice(-10);
       const full = '+91' + bare;
-      const { data: d1 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('phone', full).maybeSingle();
+      const { data: d1 } = await supabase.from(table).select(fields).eq('phone', full).maybeSingle();
       if (d1) data = d1;
       if (!data) {
-        const { data: d2 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('phone', bare).maybeSingle();
+        const { data: d2 } = await supabase.from(table).select(fields).eq('phone', bare).maybeSingle();
         if (d2) data = d2;
       }
     }
     if (!data && userId) {
-      const { data: d3 } = await supabase.from(table).select('id, pin_hash, pin_set').eq('id', userId).maybeSingle();
+      const { data: d3 } = await supabase.from(table).select(fields).eq('id', userId).maybeSingle();
       if (d3) data = d3;
     }
-    const error = null;
-    if (error) throw error;
     if (!data || !data.pin_set || !data.pin_hash) return res.status(400).json({ success: false, error: 'PIN not set' });
     const match = await bcrypt.compare(pin, data.pin_hash);
     if (!match) return res.status(400).json({ success: false, error: 'Incorrect PIN' });
-    res.json({ success: true, userId: data.id });
+    res.json({
+      success: true,
+      userId: data.id,
+      name: data.name || null,
+      category: data.category || null,
+      tier: data.tier || null,
+      phone: data.phone || null,
+      dreamer_type: data.dreamer_type || null,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
