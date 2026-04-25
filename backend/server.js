@@ -12840,7 +12840,7 @@ Available actions:
 - log_expense:           [ACTION:log_expense|Log Expense|Log ₹{amount} expense: {description}|{"amount":0,"description":"...","category":"General"}]
 - reply_to_enquiry:      [ACTION:reply_to_enquiry|Send Reply|Reply to {couple} enquiry|{"enquiry_id":"...","message":"..."}]
 
-Context: \${JSON.stringify(context || {})}`;
+Context: ${JSON.stringify(context || {})}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
