@@ -4620,7 +4620,7 @@ app.post('/api/notify/vendor-reply', async (req, res) => {
     const { userId, vendorName } = req.body;
     const { data: user } = await supabase
       .from('users')
-      .select('push_token')
+      .select('push_token, push_platform')
       .eq('id', userId)
       .single();
     if (user?.push_token) {
@@ -6649,7 +6649,7 @@ app.get('/api/v2/vendor/profile/:vendorId', async (req, res) => {
     // Check availability against couple's wedding date
     let isAvailable = null;
     if (couple_id) {
-      const { data: coupleProfile } = await supabase.from('couple_profiles').select('wedding_date').eq('user_id', couple_id).maybeSingle();
+      const { data: coupleProfile } = await supabase.from('couple_profiles').select('total_budget').eq('user_id', couple_id).maybeSingle();
       const { data: coupleUser } = await supabase.from('users').select('wedding_date').eq('id', couple_id).maybeSingle();
       const weddingDate = coupleProfile?.wedding_date || coupleUser?.wedding_date;
       if (weddingDate && blocks) {
@@ -11755,9 +11755,9 @@ app.post('/api/v2/razorpay/verify-payment', async (req, res) => {
     } else if (payment_type === 'couple_platinum') {
       await supabase.from('users').update({ dreamer_type: 'platinum' }).eq('id', user_id);
     } else if (payment_type === 'dreamer_tokens') {
-      const { data: cp } = await supabase.from('couple_profiles').select('token_balance').eq('user_id', user_id).maybeSingle();
+      const { data: cp } = await supabase.from('users').select('token_balance').eq('user_id', user_id).maybeSingle();
       const current = (cp && cp.token_balance) || 0;
-      await supabase.from('couple_profiles').update({ token_balance: current + 50 }).eq('user_id', user_id);
+      await supabase.from('users').update({ token_balance: current + 50 }).eq('user_id', user_id);
     } else if (payment_type === 'vendor_signature') {
       const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
       if (existing) {
@@ -11802,7 +11802,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
 
     // Needs attention — unanswered enquiries (no reply in 24h)
     const { data: openLeads } = await supabase.from('vendor_leads')
-      .select('id, couple_name, created_at, status')
+      .select('id, client_name, created_at, status')
       .eq('vendor_id', vendorId)
       .eq('status', 'new')
       .order('created_at', { ascending: false })
@@ -12040,7 +12040,7 @@ app.post('/api/v2/vendor/enquiries/:id/convert', async (req, res) => {
     if (clientErr) throw clientErr;
 
     // Update enquiry — mark as converted
-    await supabase.from('vendor_enquiries').update({ status: 'converted', converted_to_client_id: client.id }).eq('id', id);
+    await supabase.from('vendor_enquiries').update({ status: 'converted', // converted_to_client_id: client.id }).eq('id', id);
 
     res.json({ success: true, data: client });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -12740,7 +12740,7 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
 
     // Enquiries
     const { data: enquiries } = await supabase.from('vendor_leads')
-      .select('id, couple_name, message, created_at, budget, event_type, status')
+      .select('id, client_name, notes, created_at, budget, function_type, status')
       .eq('vendor_id', vendorId)
       .order('created_at', { ascending: false })
       .limit(20);
@@ -13483,7 +13483,7 @@ app.get('/api/v3/admin/command-centre', adminAuth, async (req, res) => {
       supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', yesterdayStr).lt('created_at', todayStr),
       supabase.from('vendor_enquiries').select('id, couple_id, vendor_id, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
       supabase.from('moodboard_items').select('id, user_id, vendor_id, vendor_name, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(10),
-      supabase.from('users').select('id, name, city, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
+      supabase.from('users').select('id, name, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
       supabase.from('vendors').select('id, name, category, created_at').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
       supabase.from('vendor_enquiry_messages').select('id, enquiry_id, content, created_at').ilike('content', '%[ contact hidden ]%').gte('created_at', todayStr).order('created_at', { ascending: false }).limit(5),
     ]);
@@ -13659,7 +13659,7 @@ app.post('/api/v3/admin/makers/:id/approve-all-images', adminAuth, async (req, r
 // ── Pending images ────────────────────────────────────────────────────────────
 app.get('/api/v3/admin/images/pending', adminAuth, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendor_images').select('id, url, tags, vendor_id, created_at').eq('approved', false).order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await supabase.from('vendor_images').select('id, url, tags, vendor_id, uploaded_at').eq('approved', false).order('created_at', { ascending: false }).limit(100);
     if (error) throw error;
     // Enrich with vendor names
     const enriched = await Promise.all((data||[]).map(async (img) => {
@@ -13713,7 +13713,7 @@ app.get('/api/v3/admin/money/overview', adminAuth, async (req, res) => {
       { data: monthSubs },
     ] = await Promise.all([
       supabase.from('lock_date_holds').select('amount, status, created_at').eq('status', 'held'),
-      supabase.from('vendor_subscriptions').select('amount, tier, created_at, status').gte('created_at', fyStart),
+      supabase.from('vendor_subscriptions').select('monthly_amount, tier, created_at, status').gte('created_at', fyStart),
       supabase.from('luxury_appointments').select('appointment_fee, tdw_share, status, created_at').eq('status', 'confirmed'),
       supabase.from('vendor_payment_shield').select('amount, status, created_at'),
       supabase.from('vendor_subscriptions').select('amount, tier').gte('created_at', monthStart).eq('status', 'active'),
