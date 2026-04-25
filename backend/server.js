@@ -12611,8 +12611,8 @@ app.post('/api/v2/collab/applications', async (req, res) => {
         }, 5 * 60 * 1000); // 5 minute delay
       }
       // Push notification — immediate
-      const { data: applicant } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
-      sendPushToVendor(post.vendor_id, '\u2726 New Collab Application', `${applicant?.name || 'A Maker'} applied for "${post.title}"`, '/vendor/discovery/collab').catch(() => {});
+      const { data: applicantVendor } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
+      sendPushToVendor(post.vendor_id, '\u2726 New Collab Application', `${applicantVendor?.name || 'A Maker'} applied for "${post.title}"`, '/vendor/discovery/collab').catch(() => {});
     }
 
     res.json({ success: true, data });
