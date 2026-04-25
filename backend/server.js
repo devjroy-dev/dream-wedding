@@ -3820,7 +3820,7 @@ Expense classification rules:
 - When vendor mentions studio rent, office rent → category='Studio & Rent', expense_type='business'
 - When vendor mentions paid for ads, Instagram ads, Google → category='Marketing & Ads', expense_type='business'
 - When vendor mentions software, apps, subscriptions → category='Software & Subscriptions', expense_type='business'
-- Always extract related_name if a person or vendor name is mentioned in context of the expense`;"
+- Always extract related_name if a person or vendor name is mentioned in context of the expense`;
 
 
     // Call Claude
