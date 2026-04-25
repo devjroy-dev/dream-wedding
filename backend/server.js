@@ -1443,7 +1443,7 @@ app.get('/api/expenses/:vendorId', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_expenses')
-      .select('*')
+      .select('id, description, amount, expense_date, category, expense_type, related_name, created_at')
       .eq('vendor_id', req.params.vendorId)
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -1461,6 +1461,7 @@ app.post('/api/expenses', async (req, res) => {
     const allowed = [
       'vendor_id', 'amount', 'category', 'description', 'expense_date',
       'payment_method', 'notes', 'client_id', 'client_name', 'receipt_url',
+      'expense_type', 'related_name',
     ];
     const payload = { financial_year };
     for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
@@ -3427,6 +3428,32 @@ const TDW_AI_TOOLS = [
       required: ['reply'],
     },
   },
+  {
+    name: 'log_expense',
+    description: 'Log a business or client expense. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. Distinguish between client expenses (for a specific job) and business expenses (running the business).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What the expense was for' },
+        amount: { type: 'number', description: 'Amount in rupees' },
+        category: {
+          type: 'string',
+          description: 'Expense category',
+          enum: ['Travel', 'Equipment Hire', 'Assistant / Second Shooter', 'Printing & Albums',
+                 'Props & Materials', 'Food & Hospitality', 'Procurement', 'Studio & Rent',
+                 'Marketing & Ads', 'Software & Subscriptions', 'Equipment Purchase',
+                 'Professional Development', 'Other']
+        },
+        expense_type: {
+          type: 'string',
+          description: 'client = cost for a specific job, business = cost of running the business',
+          enum: ['client', 'business']
+        },
+        related_name: { type: 'string', description: 'Client name or vendor name this expense relates to (optional)' },
+      },
+      required: ['description', 'amount'],
+    },
+  },
 ];
 
 // ─── Tool Executors ───
@@ -3572,6 +3599,26 @@ async function executeToolCall(toolName, toolInput, vendor) {
 
       case 'general_reply':
         return toolInput.reply;
+
+      case 'log_expense': {
+        const { description, amount, category, expense_type, related_name } = toolInput;
+        const now = new Date();
+        const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const financial_year = `FY ${year}-${String(year + 1).slice(-2)}`;
+        const { data, error } = await supabase.from('vendor_expenses').insert([{
+          vendor_id: vendor.id,
+          description: description || null,
+          amount: Number(amount),
+          category: category || 'Other',
+          expense_type: expense_type || 'client',
+          related_name: related_name || null,
+          expense_date: now.toISOString().split('T')[0],
+          financial_year,
+        }]).select().single();
+        if (error) throw error;
+        const typeLabel = expense_type === 'business' ? 'Business expense' : 'Expense';
+        return `✓ ${typeLabel} logged: ${description} — ₹${Number(amount).toLocaleString('en-IN')}${category ? ' (' + category + ')' : ''}${related_name ? '\nRef: ' + related_name : ''}`;
+      }
 
       default:
         return 'I didn\'t understand that. Try: "Create invoice for [name] ₹[amount]" or "What\'s my schedule today?"';
@@ -3764,7 +3811,17 @@ Your job:
 - If the vendor is making small talk or the request is unclear, use general_reply
 - Never make up data — only use tools to query or modify real data
 - For Hindi/Hinglish commands, understand and respond naturally
-- Dates: parse relative dates (today, tomorrow, next week, Saturday, Dec 15) into YYYY-MM-DD using today's date as reference`;
+- Dates: parse relative dates (today, tomorrow, next week, Saturday, Dec 15) into YYYY-MM-DD using today's date as reference
+
+Expense classification rules:
+- 'client' expense: cost incurred for a specific client's job (travel to shoot, equipment hired for event, assistant/second shooter, printing, props, food for a client's wedding)
+- 'business' expense: cost of running the business (rent, marketing, software, equipment purchased for the studio, procurement from other vendors for a collab, professional development)
+- When a vendor mentions paying another vendor for collab work → category='Procurement', expense_type='business'
+- When vendor mentions studio rent, office rent → category='Studio & Rent', expense_type='business'
+- When vendor mentions paid for ads, Instagram ads, Google → category='Marketing & Ads', expense_type='business'
+- When vendor mentions software, apps, subscriptions → category='Software & Subscriptions', expense_type='business'
+- Always extract related_name if a person or vendor name is mentioned in context of the expense`;"
+
 
     // Call Claude
     const response = await anthropic.messages.create({
@@ -12762,6 +12819,14 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
       .filter(i => i.status !== 'paid')
       .reduce((s, i) => s + (i.amount || 0), 0);
 
+    // Expenses this month
+    const firstDayOfMonth = new Date(thisMonthStart).toISOString().split('T')[0];
+    const { data: expData } = await supabase.from('vendor_expenses')
+      .select('description, amount, category, expense_type, related_name, expense_date')
+      .eq('vendor_id', vendorId)
+      .gte('expense_date', firstDayOfMonth)
+      .order('expense_date', { ascending: false });
+
     // Calendar — next 60 days
     const in60 = new Date(Date.now() + 60 * 86400000).toISOString();
     const { data: calendar } = await supabase.from('vendor_calendar_events')
@@ -12802,6 +12867,15 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
       overdue_invoices: overdueInvoices.map(i => ({
         client_name: i.client_name, amount: i.amount, due_date: i.due_date,
       })),
+      expenses_this_month: {
+        total: (expData || []).reduce((s, e) => s + (Number(e.amount) || 0), 0),
+        client_total: (expData || []).filter(e => e.expense_type === 'client').reduce((s, e) => s + (Number(e.amount) || 0), 0),
+        business_total: (expData || []).filter(e => e.expense_type === 'business').reduce((s, e) => s + (Number(e.amount) || 0), 0),
+        items: (expData || []).slice(0, 10).map(e => ({
+          description: e.description, amount: e.amount,
+          category: e.category, type: e.expense_type, related: e.related_name,
+        })),
+      },
     });
   } catch (err) {
     console.error('[DreamAi vendor-context] error:', err.message);
@@ -12966,11 +13040,17 @@ app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
 // POST /api/v2/dreamai/vendor-action/log-expense
 app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
   try {
-    const { vendor_id, description, amount, category } = req.body || {};
+    const { vendor_id, description, amount, category, expense_type, related_name } = req.body || {};
     if (!vendor_id || !amount) return res.status(400).json({ success: false, error: 'vendor_id and amount required' });
-    const { data, error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description: description||null, amount: Number(amount), category: category||'General', expense_date: new Date().toISOString().split('T')[0] }]).select().single();
+    const { data, error } = await supabase.from('vendor_expenses').insert([{
+      vendor_id, description: description||null, amount: Number(amount),
+      category: category||'Other', expense_type: expense_type||'client',
+      related_name: related_name||null,
+      expense_date: new Date().toISOString().split('T')[0],
+    }]).select().single();
     if (error) throw error;
-    res.json({ success: true, data, message: `₹${Number(amount).toLocaleString('en-IN')} expense logged.` });
+    const typeLabel = expense_type === 'business' ? 'Business expense' : 'Expense';
+    res.json({ success: true, data, message: `₹${Number(amount).toLocaleString('en-IN')} ${typeLabel} logged${category ? ' (' + category + ')' : ''}.` });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
