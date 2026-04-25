@@ -4892,15 +4892,15 @@ app.post('/api/v2/vendor/auth/verify-otp', async (req, res) => {
     const fullPhone = '+91' + bare;
     // Look up vendor by phone — try all formats
     let vendor = null;
-    const { data: v1 } = await supabase.from('vendors').select('id, name, phone, pin_set, category, tier').eq('phone', fullPhone).maybeSingle();
+    const { data: v1 } = await supabase.from('vendors').select('id, name, phone, pin_set, category').eq('phone', fullPhone).maybeSingle();
     if (v1) vendor = v1;
     if (!vendor) {
-      const { data: v2 } = await supabase.from('vendors').select('id, name, phone, pin_set, category, tier').eq('phone', bare).maybeSingle();
+      const { data: v2 } = await supabase.from('vendors').select('id, name, phone, pin_set, category').eq('phone', bare).maybeSingle();
       if (v2) vendor = v2;
     }
     if (!vendor) {
       // Try with spaces or alternate formats
-      const { data: v3 } = await supabase.from('vendors').select('id, name, phone, pin_set, category, tier').ilike('phone', '%' + bare.slice(-9)).maybeSingle();
+      const { data: v3 } = await supabase.from('vendors').select('id, name, phone, pin_set, category').ilike('phone', '%' + bare.slice(-9)).maybeSingle();
       if (v3) vendor = v3;
     }
     if (!vendor) {
@@ -4909,15 +4909,14 @@ app.post('/api/v2/vendor/auth/verify-otp', async (req, res) => {
       const { data: newVendor, error: insertErr } = await supabase.from('vendors').insert([{
         phone: fullPhone,
         created_at: new Date().toISOString(),
-        pin_set: false,
-      }]).select('id, name, phone, pin_set, category, tier').single();
+      }]).select('id, name, phone, pin_set, category').single();
       if (insertErr) {
         console.error('[v2 vendor OTP] Insert failed:', insertErr.message);
         return res.status(404).json({ success: false, error: 'No vendor account found. Please sign up via invite.' });
       }
       vendor = newVendor;
     }
-    res.json({ success: true, vendor: { id: vendor.id, name: vendor.name, phone: vendor.phone, pin_set: !!vendor.pin_set, category: vendor.category, tier: vendor.tier } });
+    res.json({ success: true, vendor: { id: vendor.id, name: vendor.name, phone: vendor.phone, pin_set: !!vendor.pin_set, category: vendor.category } });
   } catch (err) {
     console.error('[v2 vendor OTP] verify error:', err.message);
     res.status(500).json({ success: false, error: 'Verification failed' });
