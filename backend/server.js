@@ -3435,19 +3435,18 @@ async function executeToolCall(toolName, toolInput, vendor) {
     switch (toolName) {
       case 'create_invoice': {
         const { client_name, amount, advance_received = 0, event_type = 'Wedding' } = toolInput;
-        const balance = amount - advance_received;
-        const cgst = Math.round(amount * 0.09);
-        const sgst = Math.round(amount * 0.09);
-        const total_with_gst = amount + cgst + sgst;
+        const gst_amount = Math.round(amount * 0.18);
+        const total_amount = amount + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
         const { data, error } = await supabase.from('vendor_invoices').insert([{
           vendor_id: vendor.id, client_name, event_type,
-          subtotal: amount, cgst, sgst, total: total_with_gst,
-          advance: advance_received, balance: balance,
+          amount, gst_amount, total_amount,
+          paid_amount: advance_received,
           invoice_number: invNum, status: 'pending',
+          gst_enabled: true,
         }]).select().single();
         if (error) throw error;
-        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_with_gst.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance: ₹' + advance_received.toLocaleString('en-IN') + ' · Balance: ₹' + balance.toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
+        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance paid: ₹' + advance_received.toLocaleString('en-IN') + ' · Remaining: ₹' + (total_amount - advance_received).toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
       }
 
       case 'block_calendar_dates': {
