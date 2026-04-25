@@ -10,12 +10,17 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const webpush = require('web-push');
-if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(
-    'mailto:dev@thedreamwedding.in',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
+try {
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+      'mailto:dev@thedreamwedding.in',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+    console.log('VAPID configured OK');
+  }
+} catch (e) {
+  console.warn('VAPID setup failed (push disabled):', e.message);
 }
 
 const app = express();
