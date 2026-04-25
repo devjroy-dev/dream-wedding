@@ -9746,12 +9746,32 @@ app.get('/api/v2/vendor/profile-level/:vendorId', async (req, res) => {
     const { data: fresh } = await supabase.from('vendors')
       .select('discover_completion_pct').eq('id', vendorId).maybeSingle();
 
+    // Missing items for each level
+    const missing1 = [];
+    if (photoCount < 4) missing1.push(`Add ${4 - photoCount} more photo${4 - photoCount !== 1 ? 's' : ''}`);
+    if (!hasHero) missing1.push('Add a hero photo');
+    if (!vendor.starting_price) missing1.push('Add your starting price');
+    if (!vendor.city) missing1.push('Add your city');
+
+    const missing2 = [];
+    if (aboutWordCount < 80) missing2.push(`Write your bio (${80 - aboutWordCount} more words needed)`);
+    if (!Array.isArray(vendor.vibe_tags) || vendor.vibe_tags.length < 3) missing2.push(`Add ${3 - Math.min(3, (vendor.vibe_tags||[]).length)} more vibe tags`);
+    if (!vendor.instagram_url && !vendor.instagram) missing2.push('Add your Instagram handle');
+
     res.json({
       success: true,
-      level,          // 0, 1, or 2
+      level,          // 0, 1, or 2, or 3 if live
       tier,
       level1Done,
       level2Done,
+      // New canonical fields
+      level1_complete: level1Done,
+      level2_complete: level2Done,
+      level3_complete: isLive,
+      missing_for_level1: missing1,
+      missing_for_level2: level1Done ? missing2 : [...missing1, ...missing2],
+      submitted: isSubmitted,
+      rejected: isRejected,
       completion_pct: fresh?.discover_completion_pct || 0,
       next_step,      // null if nothing is missing
       // Discovery state flags
@@ -9767,6 +9787,38 @@ app.get('/api/v2/vendor/profile-level/:vendorId', async (req, res) => {
     });
   } catch (err) {
     console.error('[profile-level] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/vendor/leads/:leadId/convert — Convert lead to client
+app.post('/api/v2/vendor/leads/:leadId/convert', async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { vendor_id } = req.body;
+
+    const { data: lead } = await supabase.from('vendor_leads')
+      .select('*').eq('id', leadId).maybeSingle();
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    const { data: client, error } = await supabase.from('vendor_clients').insert([{
+      vendor_id: vendor_id || lead.vendor_id,
+      name: lead.client_name || lead.name || 'Unknown',
+      phone: lead.phone || null,
+      event_date: lead.event_date || null,
+      event_type: lead.function_type || lead.event_type || 'Wedding',
+      budget: lead.budget || null,
+      status: 'active',
+      notes: lead.notes || null,
+    }]).select().single();
+
+    if (error) throw error;
+
+    // Mark lead as converted
+    await supabase.from('vendor_leads').update({ status: 'converted' }).eq('id', leadId);
+
+    res.json({ success: true, client, message: `${lead.client_name || lead.name || 'Client'} added to your clients.` });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -13064,53 +13116,100 @@ ${JSON.stringify(context || {}, null, 2)}`;
 
     const tools = isVendor ? TDW_AI_TOOLS : TDW_COUPLE_TOOLS;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools,
-        messages,
-      }),
-    });
+    // Multi-turn tool execution loop
+    const allMessages = [...messages];
+    let iterations = 0;
+    const MAX_ITERATIONS = 5;
+    let finalReply = '';
+    let pendingAction = null;
 
-    const data = await response.json();
-    if (!data.content) return res.status(500).json({ success: false, error: 'No response from DreamAi' });
+    while (iterations < MAX_ITERATIONS) {
+      iterations++;
 
-    let replyText = '';
-    let action = null;
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          system: systemPrompt,
+          tools,
+          messages: allMessages,
+        }),
+      });
 
-    for (const block of data.content) {
-      if (block.type === 'text') {
-        replyText += block.text;
+      const data = await response.json();
+      if (!data.content) break;
+
+      // Collect text from this turn
+      const textBlocks = data.content.filter(b => b.type === 'text');
+      if (textBlocks.length > 0) {
+        finalReply += (finalReply ? '\n' : '') + textBlocks.map(b => b.text).join('');
       }
-      if (block.type === 'tool_use' && !action) {
-        const toolName = block.name;
-        const toolInput = block.input || {};
-        action = mapToolToAction(toolName, toolInput, isVendor);
-      }
-    }
 
-    if (action) {
-      if (action.requiresConfirmation) {
-        const actionTag = `[ACTION:${action.type}|${action.label}|${action.preview}|${JSON.stringify(action.params)}]`;
-        res.json({ success: true, reply: (replyText || action.description) + '\n' + actionTag });
-      } else {
-        try {
-          const result = await executeToolCall(action.type, action.params, { id: userId });
-          res.json({ success: true, reply: replyText || result });
-        } catch (e) {
-          res.json({ success: true, reply: replyText || 'Could not fetch that data right now.' });
+      // If no tool use — we're done
+      if (data.stop_reason !== 'tool_use') break;
+
+      // Find tool_use blocks
+      const toolUseBlocks = data.content.filter(b => b.type === 'tool_use');
+      if (toolUseBlocks.length === 0) break;
+
+      // Add assistant turn to messages
+      allMessages.push({ role: 'assistant', content: data.content });
+
+      // Execute query tools immediately, collect mutation tools for confirmation
+      const toolResults = [];
+      const QUERY_TOOLS = ['query_schedule', 'query_revenue', 'query_clients', 'general_reply'];
+
+      for (const toolBlock of toolUseBlocks) {
+        const { id: toolUseId, name: toolName, input: toolInput } = toolBlock;
+
+        if (QUERY_TOOLS.includes(toolName)) {
+          // Execute immediately
+          try {
+            const result = await executeToolCall(toolName, toolInput, { id: userId });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUseId,
+              content: result,
+            });
+          } catch (e) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUseId,
+              content: `Error: ${e.message}`,
+              is_error: true,
+            });
+          }
+        } else {
+          // Mutation tool — map to action for confirmation
+          if (!pendingAction) {
+            pendingAction = mapToolToAction(toolName, toolInput, isVendor);
+          }
+          // Tell Claude this tool is pending user confirmation
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: 'Action queued for user confirmation.',
+          });
         }
       }
+
+      // Add tool results to messages for next iteration
+      allMessages.push({ role: 'user', content: toolResults });
+    }
+
+    // Build final response
+    if (pendingAction) {
+      const actionTag = `[ACTION:${pendingAction.type}|${pendingAction.label}|${pendingAction.preview}|${JSON.stringify(pendingAction.params)}]`;
+      const replyWithAction = (finalReply || pendingAction.description || '') + '\n' + actionTag;
+      res.json({ success: true, reply: replyWithAction });
     } else {
-      res.json({ success: true, reply: replyText.trim() || 'Could not process your request.' });
+      res.json({ success: true, reply: finalReply.trim() || 'Done.' });
     }
 
   } catch (err) {
