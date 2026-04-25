@@ -13093,6 +13093,32 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
     const { userId, userType, message, context, history } = req.body || {};
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
 
+    // PHASE 5: Token quota enforcement for in-app DreamAi chat
+    if (userId && userType === 'vendor') {
+      const { data: vendorQuota } = await supabase.from('vendors')
+        .select('ai_commands_used, ai_extra_tokens, tier')
+        .eq('id', userId).maybeSingle();
+
+      if (vendorQuota) {
+        const quota = getAiQuota(vendorQuota);
+        const used = vendorQuota.ai_commands_used || 0;
+        const extra = vendorQuota.ai_extra_tokens || 0;
+        const totalRemaining = Math.max(0, quota - used) + extra;
+
+        if (totalRemaining <= 0) {
+          return res.json({
+            success: true,
+            reply: "You've used all your DreamAi commands this month. Top up at Settings → DreamAi Tokens.\n\n50 commands for ₹100 · 200 for ₹350 · 500 for ₹800",
+          });
+        }
+
+        // Increment usage
+        await supabase.from('vendors')
+          .update({ ai_commands_used: used + 1 })
+          .eq('id', userId);
+      }
+    }
+
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
     if (!ANTHROPIC_API_KEY) return res.status(500).json({ success: false, error: 'DreamAi not configured' });
 
@@ -14227,6 +14253,68 @@ app.post('/api/v2/vendor/push-subscribe', async (req, res) => {
     await supabase.from('vendor_push_subscriptions')
       .upsert([{ vendor_id, subscription }], { onConflict: 'vendor_id' });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PHASE 5: Morning briefing cron endpoint
+// Called by Railway cron at 8AM IST (2:30 AM UTC) daily
+// Railway cron command: curl -X POST https://dream-wedding-production-89ae.up.railway.app/api/v2/dreamai/morning-briefing -H "x-cron-secret: $CRON_SECRET"
+app.post('/api/v2/dreamai/morning-briefing', async (req, res) => {
+  const secret = req.headers['x-cron-secret'];
+  if (secret !== process.env.CRON_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { data: vendors } = await supabase.from('vendors')
+      .select('id, name, phone, ai_enabled, ai_commands_used, tier')
+      .eq('ai_enabled', true)
+      .not('phone', 'is', null)
+      .limit(500);
+
+    let sent = 0;
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const vendor of (vendors || [])) {
+      try {
+        const { data: clients } = await supabase.from('vendor_clients')
+          .select('name, event_date').eq('vendor_id', vendor.id)
+          .eq('event_date', today);
+
+        const { data: invoices } = await supabase.from('vendor_invoices')
+          .select('client_name, amount').eq('vendor_id', vendor.id)
+          .eq('status', 'pending')
+          .lt('due_date', today);
+
+        const { data: enquiries } = await supabase.from('vendor_leads')
+          .select('client_name').eq('vendor_id', vendor.id)
+          .eq('status', 'open')
+          .gte('created_at', new Date(Date.now() - 48 * 3600000).toISOString());
+
+        const lines = [];
+        const firstName = vendor.name?.split(' ')[0] || 'there';
+
+        if (clients?.length > 0) {
+          lines.push(`📅 Today: ${clients.map(c => c.name).join(', ')}`);
+        }
+        if (invoices?.length > 0) {
+          lines.push(`⚠️ ${invoices.length} overdue invoice${invoices.length > 1 ? 's' : ''}`);
+        }
+        if (enquiries?.length > 0) {
+          lines.push(`✉️ ${enquiries.length} new enquir${enquiries.length > 1 ? 'ies' : 'y'} waiting`);
+        }
+
+        if (lines.length === 0) continue;
+
+        const message = `Good morning, ${firstName}! ✦\n\n${lines.join('\n')}\n\nReply with anything — I'm here to help.`;
+        const phone = '+91' + vendor.phone.replace(/\D/g, '').slice(-10);
+        await sendWhatsApp(phone, message);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+      } catch {} // Non-fatal per vendor
+    }
+
+    res.json({ success: true, sent });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
