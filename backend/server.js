@@ -5010,7 +5010,7 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
     const table = (role === 'vendor') ? 'vendors' : 'users';
     let data = null;
     const fields = role === 'vendor'
-      ? 'id, pin_hash, pin_set, name, category, tier, phone'
+      ? 'id, pin_hash, pin_set, name, category, phone'
       : 'id, pin_hash, pin_set, name, phone, dreamer_type';
     if (phone) {
       const bare = phone.replace(/\D/g, '').slice(-10);
@@ -5034,7 +5034,6 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
       userId: data.id,
       name: data.name || null,
       category: data.category || null,
-      tier: data.tier || null,
       phone: data.phone || null,
       dreamer_type: data.dreamer_type || null,
     });
