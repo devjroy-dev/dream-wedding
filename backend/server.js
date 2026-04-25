@@ -12850,7 +12850,7 @@ Context: \${JSON.stringify(context || {})}`;
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1000,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }],
@@ -13064,7 +13064,7 @@ app.post('/api/v2/dreamai/whatsapp-extract', async (req, res) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1000,
         system: 'Extract wedding lead details from this WhatsApp message. Return ONLY valid JSON with these exact fields: { "name": string|null, "phone": string|null, "wedding_date": string|null, "event_type": string|null, "budget": string|null, "city": string|null }. If a field cannot be found, use null. No preamble. No explanation. Just the JSON object.',
         messages: [{ role: 'user', content: message }],
