@@ -4230,7 +4230,7 @@ app.post('/api/pai/confirm', async (req, res) => {
             .limit(1).maybeSingle();
           if (!existing) throw new Error(`Vendor "${data.vendor_name}" not found in your list`);
           const { data: upd, error } = await supabase
-            .from('couple_vendors').update({ stage: data.new_stage })
+            .from('couple_vendors').update({ status: data.new_stage })
             .eq('id', existing.id).select().single();
           if (error) throw error; createdId = upd?.id;
         } else {
@@ -4548,7 +4548,7 @@ app.post('/api/vendors/push-token', async (req, res) => {
     const { vendorId, token, platform } = req.body;
     const { data, error } = await supabase
       .from('vendors')
-      .update({ push_token: token, push_platform: platform })
+      .update({ last_whatsapp_activity: new Date().toISOString() }) // push_token not on vendors
       .eq('id', vendorId)
       .select()
       .single();
@@ -4589,7 +4589,7 @@ app.post('/api/notify/new-enquiry', async (req, res) => {
     const { vendorId, coupleName, category } = req.body;
     const { data: vendor } = await supabase
       .from('vendors')
-      .select('push_token, name')
+      .select('name')
       .eq('id', vendorId)
       .single();
     if (vendor?.push_token) {
@@ -5183,7 +5183,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       supabase.from('couple_profiles').select('total_budget').eq('user_id', userId).maybeSingle(),
       supabase.from('moodboard_items').select('id, vendor_id, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(3),
       supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, vendor_unread_count').eq('couple_id', userId).eq('status', 'active').order('last_message_at', { ascending: false }),
-      supabase.from('couple_vendors').select('vendor_id, status, events').eq('couple_id', userId),
+      supabase.from('couple_vendors').select('id, name, category, status, events').eq('couple_id', userId),
       supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
     ]);
 
@@ -6890,7 +6890,7 @@ app.get('/api/v2/admin/vendors/list', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendors')
-      .select('id, name, phone, category, city, tier, created_at')
+      .select('id, name, phone, category, city, created_at')
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json({ success: true, vendors: data || [] });
@@ -10507,7 +10507,7 @@ app.get('/api/couple/vendor/:vendor_id/contact-status', async (req, res) => {
       // Fetch vendor contact details
       const { data: vendor } = await supabase
         .from('vendors')
-        .select('phone, email, instagram_handle, show_whatsapp_public')
+        .select('phone, email, instagram_url, show_whatsapp_public')
         .eq('id', vendor_id)
         .maybeSingle();
 
@@ -12259,7 +12259,7 @@ app.get('/api/v2/couture/designers', async (req, res) => {
   try {
     const { category } = req.query;
     let query = supabase.from('vendors')
-      .select('id, name, category, city, about, tagline, starting_price, featured_photos, portfolio_images, rating, review_count, couture_appointment_fee, vibe_tags')
+      .select('id, name, category, city, about, tagline, starting_price, featured_photos, portfolio_images, rating, review_count, appointment_fee, vibe_tags')
       .eq('luxury_category', 'couture')
       .eq('couture_approved', true);
     if (category && category !== 'All') query = query.ilike('name', `%${category}%`);
@@ -12659,7 +12659,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       supabase.from('couple_events').select('id, event_name, event_date, venue').eq('couple_id', userId).order('event_date', { ascending: true }),
       supabase.from('couple_checklist').select('id, text, is_complete, due_date, event, assigned_to, priority').eq('couple_id', userId).eq('is_complete', false).order('due_date', { ascending: true }),
       supabase.from('couple_expenses').select('id, vendor_name, description, actual_amount, payment_status, due_date, category').eq('couple_id', userId),
-      supabase.from('moodboard_items').select('id, vendor_id, vendor_name, vendor_category, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
+      supabase.from('moodboard_items').select('id, vendor_id, function_tag, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
       supabase.from('couple_guests').select('id, rsvp_status').eq('couple_id', userId),
       supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
       supabase.from('entity_links').select('from_entity_type, from_entity_id, to_entity_type, to_entity_id, link_type').eq('couple_id', userId),
