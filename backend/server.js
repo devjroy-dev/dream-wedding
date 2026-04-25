@@ -2533,7 +2533,7 @@ app.post('/api/vendor/onboard', async (req, res) => {
         await supabase.from('vendor_subscriptions').insert([{
           vendor_id: vendorRow.id,
           tier, status: 'active',
-          trial_ends_at: trialEnd.toISOString(),
+          trial_end_date: trialEnd.toISOString(),
         }]);
       }
     } catch (e) {
@@ -3441,7 +3441,6 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const { data, error } = await supabase.from('vendor_invoices').insert([{
           vendor_id: vendor.id, client_name, event_type,
           amount, gst_amount, total_amount,
-          paid_amount: advance_received,
           invoice_number: invNum, status: 'pending',
           gst_enabled: true,
         }]).select().single();
@@ -3501,7 +3500,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
 
       case 'query_revenue': {
         const { period = 'this_month', client_name } = toolInput;
-        let query = supabase.from('vendor_invoices').select('client_name, total, advance, balance, status, created_at').eq('vendor_id', vendor.id);
+        let query = supabase.from('vendor_invoices').select('client_name, amount, total_amount, status, created_at').eq('vendor_id', vendor.id);
         if (client_name) query = query.ilike('client_name', '%' + client_name + '%');
         const now = new Date();
         if (period === 'this_month') {
@@ -7005,7 +7004,7 @@ app.post('/api/v2/admin/vendors/create', async (req, res) => {
     // Create subscription row with trial until Aug 1 2026 (founding period)
     const trialEnd = new Date('2026-08-01').toISOString();
     await supabase.from('vendor_subscriptions').insert([{
-      vendor_id: vendor.id, tier: finalTier, status: 'active', trial_ends_at: trialEnd,
+      vendor_id: vendor.id, tier: finalTier, status: 'active', trial_end_date: trialEnd,
     }]);
 
     res.json({ success: true, data: vendor });
@@ -10005,7 +10004,7 @@ app.post('/api/vendor-discover/submit', async (req, res) => {
       // Mark all pending photos approved
       await supabase.from('vendor_photo_approvals').update({
         approval_status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: 'auto-prestige',
-      }).eq('vendor_id', vendor_id).eq('approval_status', 'pending');
+      }).eq('vendor_id', vendor_id).eq('is_approved', 'pending');
       logActivity('vendor_discover_auto_approved', `Prestige vendor ${vendor.name} auto-listed`);
       return res.json({ success: true, auto_approved: true });
     }
@@ -10026,10 +10025,10 @@ app.post('/api/vendor-discover/submit', async (req, res) => {
     // Ensure photo approvals exist for every portfolio+featured image
     const photoRows = [];
     for (const url of (vendor.portfolio_images || [])) {
-      photoRows.push({ vendor_id, image_url: url, context: 'portfolio', approval_status: 'pending' });
+      photoRows.push({ vendor_id, url, context: 'portfolio', is_approved: false });
     }
     for (const url of (vendor.featured_photos || [])) {
-      photoRows.push({ vendor_id, image_url: url, context: 'featured', approval_status: 'pending' });
+      photoRows.push({ vendor_id, url, context: 'featured', is_approved: false });
     }
     if (photoRows.length > 0) {
       await supabase.from('vendor_photo_approvals').upsert(photoRows, {
@@ -10039,7 +10038,7 @@ app.post('/api/vendor-discover/submit', async (req, res) => {
 
     // Mark packages as pending
     await supabase.from('vendor_packages').update({ approval_status: 'pending' })
-      .eq('vendor_id', vendor_id).eq('approval_status', 'draft');
+      .eq('vendor_id', vendor_id).eq('is_approved', 'draft');
 
     logActivity('vendor_discover_submitted', `${tier} vendor ${vendor.name} submitted for Discovery review`);
     res.json({ success: true, submission });
@@ -10129,10 +10128,10 @@ app.post('/api/vendor-discover/admin/submission/finalize', async (req, res) => {
       // Auto-approve any still-pending photos (if admin didn't touch them, treat as accepted)
       await supabase.from('vendor_photo_approvals').update({
         approval_status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: 'admin-bulk',
-      }).eq('vendor_id', sub.vendor_id).eq('approval_status', 'pending');
+      }).eq('vendor_id', sub.vendor_id).eq('is_approved', 'pending');
       // Auto-approve pending packages
       await supabase.from('vendor_packages').update({ approval_status: 'approved', reviewed_at: new Date().toISOString() })
-        .eq('vendor_id', sub.vendor_id).eq('approval_status', 'pending');
+        .eq('vendor_id', sub.vendor_id).eq('is_approved', 'pending');
       logActivity('vendor_discover_listed', `Vendor ${sub.vendor_id} listed in Discovery (${status})`);
     } else {
       // Rejected — don't list
@@ -10963,7 +10962,7 @@ app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
     // Trial tracking — gracefully default if columns don't exist yet
     const basicsCompletedAt = v.discovery_basics_completed_at || null;
     const trialStartedAt = v.discovery_trial_started_at || null;
-    const trialDeadline = v.discovery_trial_deadline ? new Date(v.discovery_trial_deadline) : null;
+    const trialDeadline = v.discovery_trial_end_date ? new Date(v.discovery_trial_end_date) : null;
     let trialStatus = v.discovery_trial_status || 'not_started';
     const completionPct = v.discover_completion_pct || 0;
 
@@ -10984,7 +10983,7 @@ app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
         basics_completed_at: basicsCompletedAt,
         missing_basics: missingBasics,
         trial_started_at: trialStartedAt,
-        trial_deadline: v.discovery_trial_deadline || null,
+        trial_end_date: v.discovery_trial_end_date || null,
         trial_status: trialStatus,
         days_left: daysLeft,
         completion_pct: completionPct,
@@ -11048,7 +11047,7 @@ app.post('/api/vendor-discover/onboard/:vendor_id', async (req, res) => {
     if (!trialStartedAt) {
       const now = new Date().toISOString();
       optionalUpdates.push({ col: 'discovery_trial_started_at', val: now });
-      optionalUpdates.push({ col: 'discovery_trial_deadline', val: computeTrialDeadline(now, tier) });
+      optionalUpdates.push({ col: 'discovery_trial_end_date', val: computeTrialDeadline(now, tier) });
       optionalUpdates.push({ col: 'discovery_trial_status', val: tier.toLowerCase() === 'prestige' ? 'exempt' : 'active' });
     }
 
@@ -11756,9 +11755,9 @@ app.post('/api/v2/razorpay/verify-payment', async (req, res) => {
     } else if (payment_type === 'couple_platinum') {
       await supabase.from('users').update({ dreamer_type: 'platinum' }).eq('id', user_id);
     } else if (payment_type === 'dreamer_tokens') {
-      const { data: cp } = await supabase.from('couple_profiles').select('dreamai_tokens').eq('user_id', user_id).maybeSingle();
-      const current = (cp && cp.dreamai_tokens) || 0;
-      await supabase.from('couple_profiles').update({ dreamai_tokens: current + 50 }).eq('user_id', user_id);
+      const { data: cp } = await supabase.from('couple_profiles').select('token_balance').eq('user_id', user_id).maybeSingle();
+      const current = (cp && cp.token_balance) || 0;
+      await supabase.from('couple_profiles').update({ token_balance: current + 50 }).eq('user_id', user_id);
     } else if (payment_type === 'vendor_signature') {
       const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
       if (existing) {
@@ -11956,14 +11955,14 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        supabase.from('vendor_invoices').select('amount, paid_amount, status').eq('vendor_id', vendorId).eq('client_name', c.name),
+        supabase.from('vendor_invoices').select('amount, total_amount, status').eq('vendor_id', vendorId).eq('client_name', c.name),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
       ]);
 
       const totalInvoiced = (invoices || []).reduce((s, i) => s + (i.amount || 0), 0);
-      const totalPaid = (invoices || []).reduce((s, i) => s + (i.paid_amount || 0), 0);
+      const totalPaid = (invoices || []).filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount || 0), 0);
       const contractSigned = contracts?.status === 'signed';
       const deliveriesTotal = (deliveries || []).length;
       const deliveriesDone = (deliveries || []).filter(d => d.status === 'delivered').length;
@@ -13528,11 +13527,11 @@ app.get('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
       supabase.from('vendor_subscriptions').select('*').eq('vendor_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('vendor_enquiries').select('id, couple_id, status, last_message_at, last_message_preview').eq('vendor_id', id).order('last_message_at', { ascending: false }).limit(20),
       supabase.from('vendor_clients').select('id, name, event_date, status').eq('vendor_id', id),
-      supabase.from('vendor_invoices').select('id, client_name, amount, paid_amount, status').eq('vendor_id', id),
+      supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status').eq('vendor_id', id),
     ]);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
     const totalInvoiced = (invoices||[]).reduce((s,i)=>s+(i.amount||0),0);
-    const totalPaid = (invoices||[]).reduce((s,i)=>s+(i.paid_amount||0),0);
+    const totalPaid = (invoices||[]).filter(i=>i.status==='paid').reduce((s,i)=>s+(i.amount||0),0);
     res.json({ success: true, data: { vendor, images: images||[], subscription: sub||null, enquiries: enquiries||[], clients: clients||[], invoices: invoices||[], total_invoiced: totalInvoiced, total_paid: totalPaid } });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
