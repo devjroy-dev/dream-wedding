@@ -13102,6 +13102,93 @@ app.get('/api/v2/admin/invites', async (req, res) => {
 
 
 
+// ─── MISSING ENDPOINTS — Added Session 15 ────────────────────────────────────
+
+// POST /api/v2/vendor/onboarding — save name + category for new vendors
+app.post('/api/v2/vendor/onboarding', async (req, res) => {
+  try {
+    const { vendorId, phone, name, category } = req.body || {};
+    if (!name) return res.status(400).json({ success: false, error: 'name required' });
+
+    let query = supabase.from('vendors').update({ name, category: category || null });
+
+    if (vendorId) {
+      query = query.eq('id', vendorId);
+    } else if (phone) {
+      const bare = phone.replace(/\D/g, '').slice(-10);
+      const full = '+91' + bare;
+      // Try full phone first, then bare
+      const { data: v1 } = await supabase.from('vendors').select('id').eq('phone', full).maybeSingle();
+      const { data: v2 } = await supabase.from('vendors').select('id').eq('phone', bare).maybeSingle();
+      const vendor = v1 || v2;
+      if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
+      query = supabase.from('vendors').update({ name, category: category || null }).eq('id', vendor.id);
+    } else {
+      return res.status(400).json({ success: false, error: 'vendorId or phone required' });
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[vendor/onboarding] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/couple/profile/:userId — tier, wedding date, name for Me page
+app.get('/api/v2/couple/profile/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, partner_name, wedding_date, couple_tier, dreamer_type, token_balance, founding_bride')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({
+      success: true,
+      couple: {
+        id: data.id,
+        name: data.name || null,
+        partner_name: data.partner_name || null,
+        wedding_date: data.wedding_date || null,
+        couple_tier: data.couple_tier || 'free',
+        dreamer_type: data.dreamer_type || 'free',
+        tier: data.couple_tier || data.dreamer_type || 'free',
+        token_balance: data.token_balance || 0,
+        founding_bride: data.founding_bride || false,
+      }
+    });
+  } catch (err) {
+    console.error('[couple/profile] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/couple/tokens/:userId — DreamAi token balance for Me page
+app.get('/api/v2/couple/tokens/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { data, error } = await supabase
+      .from('users')
+      .select('token_balance')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    const balance = data?.token_balance || 0;
+    res.json({
+      success: true,
+      balance,
+      remaining: balance,
+    });
+  } catch (err) {
+    console.error('[couple/tokens] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 app.post('/api/v2/couple/upsert', async (req, res) => {
   const { phone, invite_code } = req.body;
