@@ -3456,6 +3456,46 @@ const TDW_AI_TOOLS = [
   },
 ];
 
+const TDW_COUPLE_TOOLS = [
+  {
+    name: 'complete_task',
+    description: 'Mark a wedding checklist task as complete.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID from checklist' },
+        task_description: { type: 'string', description: 'Description of the task being completed' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'add_expense',
+    description: 'Log a wedding expense.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string', description: 'Vendor or payee name' },
+        description: { type: 'string', description: 'What the expense was for' },
+        actual_amount: { type: 'number', description: 'Amount in rupees' },
+        category: { type: 'string', description: 'Category: Venue, Photography, Makeup, Decor, Catering, Attire, Jewellery, Entertainment, Other' },
+      },
+      required: ['actual_amount', 'description'],
+    },
+  },
+  {
+    name: 'general_reply',
+    description: 'Conversational reply when no action is needed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string', description: 'Response to the couple' },
+      },
+      required: ['reply'],
+    },
+  },
+];
+
 // ─── Tool Executors ───
 async function executeToolCall(toolName, toolInput, vendor) {
   try {
@@ -12853,8 +12893,8 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
         amount: i.amount, paid: i.status === 'paid', due_date: i.due_date,
       })),
       enquiries: (enquiries || []).map(e => ({
-        id: e.id, name: e.couple_name, message: e.message,
-        date: e.created_at, budget: e.budget, event_type: e.event_type,
+        id: e.id, name: e.client_name, message: e.notes,
+        date: e.created_at, budget: e.budget, event_type: e.function_type,
       })),
       revenue: {
         this_month: thisMonthRev,
@@ -12883,36 +12923,146 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
   }
 });
 
+// Maps tool_use response to ACTION format for in-app chat
+function mapToolToAction(toolName, input, isVendor) {
+  const QUERY_TOOLS = ['query_schedule', 'query_revenue', 'query_clients', 'general_reply'];
+  const requiresConfirmation = !QUERY_TOOLS.includes(toolName);
+
+  const actionMap = {
+    create_invoice: {
+      type: 'create_invoice', requiresConfirmation: true,
+      label: 'Create Invoice',
+      preview: `Create invoice for ${input.client_name} ₹${(input.amount||0).toLocaleString('en-IN')}`,
+      params: input,
+      description: `I'll create a ₹${(input.amount||0).toLocaleString('en-IN')} invoice for ${input.client_name}.`,
+    },
+    add_client: {
+      type: 'add_client', requiresConfirmation: true,
+      label: 'Add Client',
+      preview: `Add ${input.client_name} as a new client`,
+      params: input,
+      description: `I'll add ${input.client_name} to your client list.`,
+    },
+    block_calendar_dates: {
+      type: 'block_date', requiresConfirmation: true,
+      label: 'Block Date',
+      preview: `Block ${(input.dates || []).join(', ')} for ${input.client_name}`,
+      params: { client_name: input.client_name, dates: input.dates },
+      description: `I'll block those dates for ${input.client_name}.`,
+    },
+    create_task: {
+      type: 'create_task', requiresConfirmation: true,
+      label: 'Create Task',
+      preview: `Create task: ${input.task}`,
+      params: input,
+      description: `I'll create this task for you.`,
+    },
+    send_client_reminder: {
+      type: 'send_client_reminder', requiresConfirmation: true,
+      label: 'Send Reminder',
+      preview: `Send ${input.reminder_type} reminder to ${input.client_name}`,
+      params: input,
+      description: `I'll send a ${input.reminder_type} reminder to ${input.client_name} via WhatsApp.`,
+    },
+    log_expense: {
+      type: 'log_expense', requiresConfirmation: true,
+      label: 'Log Expense',
+      preview: `Log ₹${(input.amount||0).toLocaleString('en-IN')} ${input.category || ''} expense: ${input.description}`,
+      params: input,
+      description: `I'll log this expense for you.`,
+    },
+    reply_to_enquiry: {
+      type: 'reply_to_enquiry', requiresConfirmation: true,
+      label: 'Send Reply',
+      preview: `Reply to enquiry: ${(input.message || '').slice(0, 60)}...`,
+      params: input,
+      description: `I'll send this reply to the enquiry.`,
+    },
+    query_schedule: { type: 'query_schedule', requiresConfirmation: false, params: input },
+    query_revenue: { type: 'query_revenue', requiresConfirmation: false, params: input },
+    query_clients: { type: 'query_clients', requiresConfirmation: false, params: input },
+    general_reply: { type: 'general_reply', requiresConfirmation: false, params: input },
+    complete_task: {
+      type: 'complete_task', requiresConfirmation: true,
+      label: 'Complete Task',
+      preview: `Mark task as done`,
+      params: input,
+      description: `I'll mark this task as complete.`,
+    },
+    add_expense: {
+      type: 'add_expense', requiresConfirmation: true,
+      label: 'Log Expense',
+      preview: `Log ₹${(input.actual_amount||0).toLocaleString('en-IN')} expense`,
+      params: input,
+      description: `I'll log this wedding expense.`,
+    },
+  };
+
+  return actionMap[toolName] || null;
+}
+
 // POST /api/v2/dreamai/chat
 app.post('/api/v2/dreamai/chat', async (req, res) => {
   try {
-    const { userId, userType, message, context } = req.body || {};
+    const { userId, userType, message, context, history } = req.body || {};
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-    if (!ANTHROPIC_API_KEY) {
-      return res.status(500).json({ success: false, error: 'DreamAi not configured' });
+    if (!ANTHROPIC_API_KEY) return res.status(500).json({ success: false, error: 'DreamAi not configured' });
+
+    const isVendor = userType === 'vendor';
+    const today = new Date().toISOString().slice(0, 10);
+
+    const systemPrompt = isVendor
+      ? `You are DreamAi, the AI business companion for The Dream Wedding — a premium Indian wedding vendor CRM.
+You help wedding vendors manage their business via the TDW app.
+Today's date: ${today}
+Vendor: ${context?.vendor?.name || 'Maker'}
+Category: ${context?.vendor?.category || 'wedding professional'}
+City: ${context?.vendor?.city || 'India'}
+Tier: ${context?.vendor?.tier || 'essential'}
+
+Your job:
+- Understand natural language requests (English, Hindi, Hinglish)
+- Use the appropriate tool to take action or answer
+- Keep responses brief and professional (2-4 sentences)
+- Indian currency: use ₹ and Indian number formatting
+- Dates: parse relative dates (today, tomorrow, next saturday) into YYYY-MM-DD using today's date
+- Never make up data — only use what's in the context provided
+
+Expense classification:
+- client expense: cost for a specific job (travel, equipment hired for event, assistant, printing, props)
+- business expense: running the business (procurement from other vendors, rent, marketing, software, equipment purchase)
+
+Current business context:
+${JSON.stringify(context || {}, null, 2)}`
+      : `You are DreamAi, the AI wedding companion for The Dream Wedding.
+You help couples plan their wedding via the TDW app.
+Today's date: ${today}
+Couple: ${context?.couple?.name || 'Dreamer'}
+Wedding date: ${context?.couple?.wedding_date || 'not set'}
+Days to wedding: ${context?.days_to_wedding || 'unknown'}
+
+Your job:
+- Answer questions about their wedding plan
+- Help them take actions (complete tasks, log expenses, send enquiries)
+- Be warm, supportive, specific — never generic
+- Use their actual data from context
+
+Wedding context:
+${JSON.stringify(context || {}, null, 2)}`;
+
+    // Build conversation messages with history for multi-turn
+    const messages = [];
+    if (history && Array.isArray(history)) {
+      for (const h of history) {
+        if (h.role === 'user') messages.push({ role: 'user', content: h.text });
+        if (h.role === 'assistant' || h.role === 'ai') messages.push({ role: 'assistant', content: h.text });
+      }
     }
+    messages.push({ role: 'user', content: message });
 
-    const isCouple = userType === 'couple';
-    const systemPrompt = isCouple
-      ? `You are DreamAi, the AI wedding companion for The Dream Wedding. You have complete knowledge of this couple's wedding. Speak like a warm, intelligent wedding planner — concise, specific, never generic. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message. If asked to draft a WhatsApp message, reply with just the draft, no preamble.\n\nContext: ${JSON.stringify(context || {})}`
-      : `You are DreamAi, the AI business companion for The Dream Wedding. You have complete knowledge of this Maker's business. Speak like a sharp, professional business assistant — concise, data-driven. Always use their actual data from the context below. Answer in 2-4 sentences max unless drafting a message.
-
-When the vendor asks you to DO something (not just query), end your reply with an action tag in this exact format:
-[ACTION:action_type|Button Label|Preview of what will happen|{"param":"value"}]
-
-Available actions:
-- create_invoice:        [ACTION:create_invoice|Create Invoice|Create invoice for {client} ₹{amount}|{"client_name":"...","amount":0,"advance_received":0,"event_type":"Wedding"}]
-- add_client:            [ACTION:add_client|Add Client|Add {name} as a new client|{"client_name":"...","event_type":"Wedding","event_date":"","budget":0}]
-- create_task:           [ACTION:create_task|Create Task|Create task: {task}|{"task":"...","assignee":"","due_date":""}]
-- block_date:            [ACTION:block_date|Block Date|Block {date} for {client}|{"client_name":"...","dates":["YYYY-MM-DD"]}]
-- send_payment_reminder: [ACTION:send_payment_reminder|Send Reminder|Send payment reminder to {client}|{"client_name":"...","amount":0}]
-- send_client_reminder:  [ACTION:send_client_reminder|Send Reminder|Send {type} reminder to {client}|{"client_name":"...","reminder_type":"payment"}]
-- log_expense:           [ACTION:log_expense|Log Expense|Log ₹{amount} expense: {description}|{"amount":0,"description":"...","category":"General"}]
-- reply_to_enquiry:      [ACTION:reply_to_enquiry|Send Reply|Reply to {couple} enquiry|{"enquiry_id":"...","message":"..."}]
-
-Context: ${JSON.stringify(context || {})}`;
+    const tools = isVendor ? TDW_AI_TOOLS : TDW_COUPLE_TOOLS;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -12923,17 +13073,46 @@ Context: ${JSON.stringify(context || {})}`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
+        max_tokens: 1024,
         system: systemPrompt,
-        messages: [{ role: 'user', content: message }],
+        tools,
+        messages,
       }),
     });
 
     const data = await response.json();
-    const reply = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('').trim();
-    if (!reply) return res.status(500).json({ success: false, error: 'No reply from DreamAi' });
+    if (!data.content) return res.status(500).json({ success: false, error: 'No response from DreamAi' });
 
-    res.json({ success: true, reply });
+    let replyText = '';
+    let action = null;
+
+    for (const block of data.content) {
+      if (block.type === 'text') {
+        replyText += block.text;
+      }
+      if (block.type === 'tool_use' && !action) {
+        const toolName = block.name;
+        const toolInput = block.input || {};
+        action = mapToolToAction(toolName, toolInput, isVendor);
+      }
+    }
+
+    if (action) {
+      if (action.requiresConfirmation) {
+        const actionTag = `[ACTION:${action.type}|${action.label}|${action.preview}|${JSON.stringify(action.params)}]`;
+        res.json({ success: true, reply: (replyText || action.description) + '\n' + actionTag });
+      } else {
+        try {
+          const result = await executeToolCall(action.type, action.params, { id: userId });
+          res.json({ success: true, reply: replyText || result });
+        } catch (e) {
+          res.json({ success: true, reply: replyText || 'Could not fetch that data right now.' });
+        }
+      }
+    } else {
+      res.json({ success: true, reply: replyText.trim() || 'Could not process your request.' });
+    }
+
   } catch (err) {
     console.error('[DreamAi chat] error:', err.message);
     res.status(500).json({ success: false, error: err.message });
