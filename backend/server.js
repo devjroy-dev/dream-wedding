@@ -3352,7 +3352,7 @@ const TDW_AI_TOOLS = [
       properties: {
         client_name: { type: 'string', description: 'Client or couple name' },
         amount: { type: 'number', description: 'Total amount in rupees' },
-        advance_received: { type: 'number', description: 'Advance or partial payment already received. Use this when vendor says "X received", "X paid", "X advance", "X milaa". Set to 0 if nothing received yet. If full amount received, set equal to amount.' },
+        advance_received: { type: 'number', description: 'Advance already received AT THE TIME OF BOOKING. Example: "1 lakh total, 20k advance" → amount=100000, advance_received=20000. "2 lakh received" with no total mentioned → amount=200000, advance_received=200000. Set to 0 if no advance mentioned.' },
         event_type: { type: 'string', description: 'Wedding, engagement, shoot, etc.' },
       },
       required: ['client_name', 'amount'],
@@ -3456,8 +3456,20 @@ const TDW_AI_TOOLS = [
     },
   },
   {
+    name: 'record_payment',
+    description: 'Record a payment received against an EXISTING invoice. Use ONLY when the client already has an invoice and the vendor says they received payment, e.g. "Salil paid 20k", "received 50k from Priya", "20k milaa Salil se". Do NOT use this to create a new invoice — use create_invoice for new work. This updates the existing invoice status.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: { type: 'string', description: 'Client name whose invoice to update' },
+        amount_received: { type: 'number', description: 'Amount received in rupees' },
+      },
+      required: ['client_name', 'amount_received'],
+    },
+  },
+  {
     name: 'log_expense',
-    description: 'Log a business or client expense — money the vendor SPENT or PAID OUT. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. NEVER use this when money is received FROM a client — use create_invoice for that instead.',
+    description: 'Log a business or client expense — money the vendor SPENT or PAID OUT. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. NEVER use this when money is received FROM a client — use record_payment or create_invoice for that instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -3746,6 +3758,58 @@ async function executeToolCall(toolName, toolInput, vendor) {
 
       case 'general_reply':
         return toolInput.reply;
+
+      case 'record_payment': {
+        const { client_name, amount_received } = toolInput;
+        // Find the most recent unpaid/pending invoice for this client
+        const { data: existingInvoices } = await supabase
+          .from('vendor_invoices')
+          .select('id, amount, total_amount, status, description')
+          .eq('vendor_id', vendor.id)
+          .ilike('client_name', client_name.trim())
+          .in('status', ['pending', 'sent'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (!existingInvoices || existingInvoices.length === 0) {
+          // No existing invoice — create a new one for the received amount
+          const gst_amount = Math.round(amount_received * 0.18);
+          const total_amount = amount_received + gst_amount;
+          const invNum = 'INV-' + Date.now().toString().slice(-6);
+          await supabase.from('vendor_invoices').insert([{
+            vendor_id: vendor.id,
+            client_name,
+            amount: amount_received,
+            gst_amount,
+            total_amount,
+            invoice_number: invNum,
+            status: 'paid',
+            paid_date: new Date().toISOString().split('T')[0],
+            gst_enabled: true,
+            description: 'Payment received',
+          }]);
+          return `✓ Payment of ₹${amount_received.toLocaleString('en-IN')} recorded for ${client_name}\nNew invoice created and marked paid.`;
+        }
+
+        const inv = existingInvoices[0];
+        const isFullyPaid = amount_received >= inv.amount;
+        const balanceDue = inv.amount - amount_received;
+        const newDesc = isFullyPaid
+          ? 'Fully paid'
+          : `Advance received: ₹${amount_received.toLocaleString('en-IN')} · Balance due: ₹${balanceDue.toLocaleString('en-IN')}`;
+
+        await supabase.from('vendor_invoices')
+          .update({
+            status: isFullyPaid ? 'paid' : 'pending',
+            paid_date: isFullyPaid ? new Date().toISOString().split('T')[0] : null,
+            description: newDesc,
+          })
+          .eq('id', inv.id);
+
+        return isFullyPaid
+          ? `✓ Invoice for ${client_name} marked as fully paid ✓\n₹${inv.amount.toLocaleString('en-IN')} received.`
+          : `✓ Payment recorded for ${client_name}\nAdvance: ₹${amount_received.toLocaleString('en-IN')} · Balance: ₹${balanceDue.toLocaleString('en-IN')} pending.`;
+      }
 
       case 'log_expense': {
         const { description, amount, category, expense_type, related_name } = toolInput;
@@ -13409,6 +13473,13 @@ function mapToolToAction(toolName, input, isVendor) {
       params: input,
       description: `I'll send a ${input.reminder_type} reminder to ${input.client_name} via WhatsApp.`,
     },
+    record_payment: {
+      type: 'record_payment', requiresConfirmation: true,
+      label: 'Record Payment',
+      preview: `Record ₹${(input.amount_received||0).toLocaleString('en-IN')} payment from ${input.client_name}`,
+      params: input,
+      description: `I'll record ₹${(input.amount_received||0).toLocaleString('en-IN')} received from ${input.client_name} against their existing invoice.`,
+    },
     log_expense: {
       type: 'log_expense', requiresConfirmation: true,
       label: 'Log Expense',
@@ -13756,6 +13827,22 @@ app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
 // These 4 endpoints complete the set. The first 4 (send-payment-reminder,
 // reply-to-enquiry, block-date, log-expense) already exist above.
 // Together all 8 match the WhatsApp DreamAi tool set exactly.
+
+// POST /api/v2/dreamai/vendor-action/record-payment
+app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
+  try {
+    const { vendor_id, client_name, amount_received } = req.body || {};
+    if (!vendor_id || !client_name || !amount_received) {
+      return res.status(400).json({ success: false, error: 'vendor_id, client_name and amount_received required' });
+    }
+    const result = await executeToolCall(
+      'record_payment',
+      { client_name, amount_received: Number(amount_received) },
+      { id: vendor_id }
+    );
+    res.json({ success: true, message: result });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
 
 // POST /api/v2/dreamai/vendor-action/create-invoice
 app.post('/api/v2/dreamai/vendor-action/create-invoice', async (req, res) => {
