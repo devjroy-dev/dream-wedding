@@ -12432,7 +12432,7 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
   try {
     const { vendorId } = req.params;
     const { data: clients, error } = await supabase.from('vendor_clients')
-      .select('id, name, phone, email, event_type, event_date, budget, status, notes')
+      .select('id, name, phone, email, event_type, event_date, budget, status, notes, profile_incomplete')
       .eq('vendor_id', vendorId)
       .order('event_date', { ascending: true });
     if (error) throw error;
@@ -12445,7 +12445,7 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        supabase.from('vendor_invoices').select('amount, total_amount, status').eq('vendor_id', vendorId).eq('client_name', c.name),
+        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).or(`client_id.eq.${c.id},client_name.ilike.${c.name}`),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
