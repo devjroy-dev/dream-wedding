@@ -3585,6 +3585,15 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'block_calendar_dates': {
         const { client_name, dates, notes = '' } = toolInput;
         for (const date of dates) {
+          // Write to vendor_calendar_events so it appears on the calendar
+          await supabase.from('vendor_calendar_events').insert([{
+            vendor_id: vendor.id,
+            title: `${client_name} — Booking`,
+            event_date: date + 'T09:00:00.000Z',
+            client_name: client_name,
+            notes: notes || null,
+          }]).select();
+          // Also write to blocked_dates for availability checks
           await supabase.from('blocked_dates').insert([{
             vendor_id: vendor.id, date, reason: `${client_name} wedding`, notes,
           }]).select();
@@ -3701,11 +3710,22 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'create_task': {
         const { task, assignee = '', due_date = null } = toolInput;
         try {
+          // Write to both team_tasks and vendor_calendar_events so task appears in app
           await supabase.from('team_tasks').insert([{
             vendor_id: vendor.id, title: task, description: task,
             assignee_name: assignee || vendor.name, due_date,
             status: 'pending', priority: 'medium',
           }]);
+          // Also add as a calendar event if due date provided
+          if (due_date) {
+            await supabase.from('vendor_calendar_events').insert([{
+              vendor_id: vendor.id,
+              title: `Task: ${task}`,
+              event_date: due_date + 'T09:00:00.000Z',
+              client_name: assignee || null,
+              notes: task,
+            }]);
+          }
         } catch (e) {}
         return `✓ Task created: ${task}${assignee ? '\nAssigned to: ' + assignee : ''}${due_date ? '\nDue: ' + due_date : ''}`;
       }
