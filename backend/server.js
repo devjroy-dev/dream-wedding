@@ -3346,7 +3346,7 @@ async function incrementAiCommands(vendorId) {
 const TDW_AI_TOOLS = [
   {
     name: 'create_invoice',
-    description: 'Create a GST-compliant invoice for a client. Use when vendor asks to create an invoice OR when money is received FROM a client ("X received from client", "client paid X", "X mila", "X payment aaya"). NEVER use log_expense for money received from clients — that is always an invoice.',
+    description: 'Create a NEW GST-compliant invoice for a client. Use for NEW work or NEW bookings. Examples: "create invoice for Priya 2 lakh", "new booking for Salil 1 lakh", "bill Sharma for wedding". If the vendor mentions a total amount AND an advance received together — create the invoice with advance_received field. NEVER use for updating an existing invoice — use record_payment for that.',
     input_schema: {
       type: 'object',
       properties: {
@@ -3457,7 +3457,7 @@ const TDW_AI_TOOLS = [
   },
   {
     name: 'record_payment',
-    description: 'Record a payment received against an EXISTING invoice. Use ONLY when the client already has an invoice and the vendor says they received payment, e.g. "Salil paid 20k", "received 50k from Priya", "20k milaa Salil se". Do NOT use this to create a new invoice — use create_invoice for new work. This updates the existing invoice status.',
+    description: 'Record a payment against an EXISTING invoice for an EXISTING client. Use ONLY for standalone payment messages like "Priya paid 50k", "Sharma ne 20k diya", "collected payment from X" — where NO new booking or new work is being created. NEVER use when creating a new booking or new invoice. If unsure, use create_invoice instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -12550,8 +12550,8 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        // Fetch invoices by client_name (primary) — safe, no broken .or() syntax
-        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).ilike('client_name', c.name),
+        // Fetch invoices by client_name — include description for advance parsing
+        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id, description').eq('vendor_id', vendorId).ilike('client_name', c.name),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
