@@ -12445,7 +12445,7 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).or(`client_id.eq.${c.id},client_name.ilike.${c.name}`),
+        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).or(`client_id.eq.${c.id},client_name.ilike.${encodeURIComponent(c.name)}`),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
@@ -12490,10 +12490,15 @@ app.get('/api/v2/vendor/clients/:vendorId/:clientId', async (req, res) => {
     const { data: client } = await supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle();
     if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
     const clientName = client.name || '';
-    // Fetch invoices by client_id first, fall back to client_name match
+    // Fetch invoices by client_id OR by client_name (dedup by id)
     const { data: invoicesById } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_id', clientId);
-    const { data: invoicesByName } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).ilike('client_name', clientName).is('client_id', null);
-    const invoices = [...(invoicesById || []), ...(invoicesByName || [])];
+    const { data: invoicesByName } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).ilike('client_name', clientName);
+    const seenIds = new Set();
+    const invoices = [...(invoicesById || []), ...(invoicesByName || [])].filter(inv => {
+      if (seenIds.has(inv.id)) return false;
+      seenIds.add(inv.id);
+      return true;
+    });
     const [
       { data: contracts },
       { data: deliveries },
