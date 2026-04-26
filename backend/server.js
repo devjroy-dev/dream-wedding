@@ -3528,18 +3528,37 @@ async function executeToolCall(toolName, toolInput, vendor) {
   try {
     switch (toolName) {
       case 'create_invoice': {
-        const { client_name, amount, advance_received = 0, event_type = 'Wedding' } = toolInput;
+        const { client_name, amount, advance_received = 0, event_type = 'Wedding', due_date } = toolInput;
         const gst_amount = Math.round(amount * 0.18);
         const total_amount = amount + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
+        const isFullyPaid = advance_received >= amount;
+        const invoiceStatus = isFullyPaid ? 'paid' : (advance_received > 0 ? 'pending' : 'pending');
+        // Try to find matching client_id for this vendor + client_name
+        const { data: matchedClient } = await supabase
+          .from('vendor_clients')
+          .select('id')
+          .eq('vendor_id', vendor.id)
+          .ilike('name', client_name.trim())
+          .maybeSingle();
+        const client_id = matchedClient?.id || null;
         const { data, error } = await supabase.from('vendor_invoices').insert([{
-          vendor_id: vendor.id, client_name, event_type,
-          amount, gst_amount, total_amount,
-          invoice_number: invNum, status: 'pending',
+          vendor_id: vendor.id,
+          client_id,
+          client_name,
+          event_type,
+          amount,
+          gst_amount,
+          total_amount,
+          invoice_number: invNum,
+          status: invoiceStatus,
+          paid_date: isFullyPaid ? new Date().toISOString().split('T')[0] : null,
+          due_date: due_date || null,
           gst_enabled: true,
         }]).select().single();
         if (error) throw error;
-        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance paid: ₹' + advance_received.toLocaleString('en-IN') + ' · Remaining: ₹' + (total_amount - advance_received).toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
+        const paidNote = isFullyPaid ? 'Marked as paid ✓' : (advance_received > 0 ? `Advance: ₹${advance_received.toLocaleString('en-IN')} · Remaining: ₹${(total_amount - advance_received).toLocaleString('en-IN')}` : '');
+        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${paidNote ? paidNote + '\n' : ''}Invoice #${invNum}`;
       }
 
       case 'block_calendar_dates': {
