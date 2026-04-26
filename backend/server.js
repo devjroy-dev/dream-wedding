@@ -13517,7 +13517,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
     let iterations = 0;
     const MAX_ITERATIONS = 5;
     let finalReply = '';
-    let pendingAction = null;
+    const pendingActions = [];
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
@@ -13582,10 +13582,8 @@ ${JSON.stringify(context || {}, null, 2)}`;
             });
           }
         } else {
-          // Mutation tool — map to action for confirmation
-          if (!pendingAction) {
-            pendingAction = mapToolToAction(toolName, toolInput, isVendor);
-          }
+          // Mutation tool — collect ALL actions for confirmation
+          pendingActions.push(mapToolToAction(toolName, toolInput, isVendor));
           // Tell Claude this tool is pending user confirmation
           toolResults.push({
             type: 'tool_result',
@@ -13599,10 +13597,13 @@ ${JSON.stringify(context || {}, null, 2)}`;
       allMessages.push({ role: 'user', content: toolResults });
     }
 
-    // Build final response
-    if (pendingAction) {
-      const actionTag = `[ACTION:${pendingAction.type}|${pendingAction.label}|${pendingAction.preview}|${JSON.stringify(pendingAction.params)}]`;
-      const replyWithAction = (finalReply || pendingAction.description || '') + '\n' + actionTag;
+    // Build final response — include ALL pending actions as sequential tags
+    if (pendingActions.length > 0) {
+      const actionTags = pendingActions.map(a =>
+        `[ACTION:${a.type}|${a.label}|${a.preview}|${JSON.stringify(a.params)}]`
+      ).join('\n');
+      const description = pendingActions.map(a => a.description).join(' Then ');
+      const replyWithAction = (finalReply || description || '') + '\n' + actionTags;
       res.json({ success: true, reply: replyWithAction });
     } else {
       res.json({ success: true, reply: finalReply.trim() || 'Done.' });
