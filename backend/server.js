@@ -5221,6 +5221,96 @@ app.get('/api/v2/cover-photos', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HOT DATES — Auspicious Hindu wedding muhurat dates
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Public — vendor calendar fetches this
+app.get('/api/v2/hot-dates', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let query = supabase
+      .from('hot_dates')
+      .select('id, date, label, intensity')
+      .eq('active', true)
+      .order('date', { ascending: true });
+    if (from) query = query.gte('date', from);
+    if (to) query = query.lte('date', to);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.json({ success: false, data: [] });
+  }
+});
+
+// Admin — read all
+app.get('/api/v2/admin/hot-dates', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
+  try {
+    const { data, error } = await supabase
+      .from('hot_dates')
+      .select('*')
+      .order('date', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Admin — add single date
+app.post('/api/v2/admin/hot-dates', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
+  try {
+    const { date, label, intensity } = req.body;
+    if (!date) return res.status(400).json({ success: false, error: 'date required' });
+    const { data, error } = await supabase
+      .from('hot_dates')
+      .insert([{ date, label: label || 'Vivah Muhurat', intensity: intensity || 'high', active: true }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Admin — update label/intensity/active
+app.patch('/api/v2/admin/hot-dates/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
+  try {
+    const { label, intensity, active } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+    if (label !== undefined) updates.label = label;
+    if (intensity !== undefined) updates.intensity = intensity;
+    if (active !== undefined) updates.active = active;
+    const { data, error } = await supabase
+      .from('hot_dates')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Admin — delete date
+app.delete('/api/v2/admin/hot-dates/:id', async (req, res) => {
+  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
+  try {
+    const { error } = await supabase.from('hot_dates').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/v2/admin/cover-photos', async (req, res) => {
   if (req.headers['x-admin-password'] !== 'Mira@2551354' && req.body?.admin_password !== 'Mira@2551354') {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -12189,6 +12279,41 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
         cta: 'Confirm team',
       });
     });
+
+    // Hot Dates — upcoming in next 30 days with no booking
+    const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const { data: upcomingHotDates } = await supabase
+      .from('hot_dates')
+      .select('date, label, intensity')
+      .eq('active', true)
+      .gte('date', today)
+      .lte('date', in30Days)
+      .order('date', { ascending: true })
+      .limit(2);
+
+    if (upcomingHotDates && upcomingHotDates.length > 0) {
+      for (const hd of upcomingHotDates) {
+        if (attention.length >= 3) break;
+        const { data: existingBooking } = await supabase
+          .from('vendor_calendar_events')
+          .select('id')
+          .eq('vendor_id', vendorId)
+          .eq('event_date', hd.date)
+          .maybeSingle();
+        if (!existingBooking) {
+          const hdDate = new Date(hd.date);
+          const daysAway = Math.ceil((hdDate - new Date()) / 86400000);
+          attention.push({
+            id: 'hotdate_' + hd.date,
+            type: 'hot_date',
+            title: '🔥 ' + (hd.label || 'Hot Date') + ' — ' + daysAway + ' days away',
+            subtitle: 'High demand day. Consider premium pricing.',
+            cta: 'View calendar',
+            intensity: hd.intensity,
+          });
+        }
+      }
+    }
 
     // Today's schedule
     const { data: todayEvents } = await supabase.from('vendor_calendar_events')
