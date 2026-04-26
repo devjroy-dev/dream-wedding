@@ -12486,21 +12486,24 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
 app.get('/api/v2/vendor/clients/:vendorId/:clientId', async (req, res) => {
   try {
     const { vendorId, clientId } = req.params;
+    // Fetch client first so we have name for fallback queries
+    const { data: client } = await supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle();
+    if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
+    const clientName = client.name || '';
+    // Fetch invoices by client_id first, fall back to client_name match
+    const { data: invoicesById } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_id', clientId);
+    const { data: invoicesByName } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).ilike('client_name', clientName).is('client_id', null);
+    const invoices = [...(invoicesById || []), ...(invoicesByName || [])];
     const [
-      { data: client },
-      { data: invoices },
       { data: contracts },
       { data: deliveries },
       { data: enquiry },
     ] = await Promise.all([
-      supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle(),
-      supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
       supabase.from('vendor_contracts').select('*').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('delivery_items').select('*').eq('vendor_id', vendorId).eq('related_client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
+      supabase.from('delivery_items').select('*').eq('vendor_id', vendorId).eq('related_client_name', clientName),
       supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
-    if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
-    res.json({ success: true, data: { client, invoices: invoices || [], contract: contracts || null, deliveries: deliveries || [], enquiry: enquiry || null } });
+    res.json({ success: true, data: { client, invoices, contract: contracts || null, deliveries: deliveries || [], enquiry: enquiry || null } });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
