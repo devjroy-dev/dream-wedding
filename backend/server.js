@@ -3352,7 +3352,7 @@ const TDW_AI_TOOLS = [
       properties: {
         client_name: { type: 'string', description: 'Client or couple name' },
         amount: { type: 'number', description: 'Total amount in rupees' },
-        advance_received: { type: 'number', description: 'Advance amount already paid (0 if not mentioned)' },
+        advance_received: { type: 'number', description: 'Advance or partial payment already received. Use this when vendor says "X received", "X paid", "X advance", "X milaa". Set to 0 if nothing received yet. If full amount received, set equal to amount.' },
         event_type: { type: 'string', description: 'Wedding, engagement, shoot, etc.' },
       },
       required: ['client_name', 'amount'],
@@ -3552,7 +3552,9 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const total_amount = amount + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
         const isFullyPaid = advance_received >= amount;
-        const invoiceStatus = isFullyPaid ? 'paid' : (advance_received > 0 ? 'pending' : 'pending');
+        const hasAdvance = advance_received > 0 && !isFullyPaid;
+        const invoiceStatus = isFullyPaid ? 'paid' : 'pending';
+        const advanceNote = hasAdvance ? `Advance received: ₹${Number(advance_received).toLocaleString('en-IN')} · Balance due: ₹${(amount - advance_received).toLocaleString('en-IN')}` : null;
         // Try to find matching client_id for this vendor + client_name
         const { data: matchedClient } = await supabase
           .from('vendor_clients')
@@ -3575,7 +3577,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
           gst_enabled: true,
         }]).select().single();
         if (error) throw error;
-        const paidNote = isFullyPaid ? 'Marked as paid ✓' : (advance_received > 0 ? `Advance: ₹${advance_received.toLocaleString('en-IN')} · Remaining: ₹${(total_amount - advance_received).toLocaleString('en-IN')}` : '');
+        const paidNote = isFullyPaid ? 'Fully paid ✓' : (hasAdvance ? `Advance ₹${Number(advance_received).toLocaleString('en-IN')} received · Balance ₹${(amount - advance_received).toLocaleString('en-IN')} pending` : 'Payment pending');
         return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${paidNote ? paidNote + '\n' : ''}Invoice #${invNum}`;
       }
 
