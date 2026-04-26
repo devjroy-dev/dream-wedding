@@ -3575,6 +3575,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
           paid_date: isFullyPaid ? new Date().toISOString().split('T')[0] : null,
           due_date: due_date || null,
           gst_enabled: true,
+          description: advanceNote,
         }]).select().single();
         if (error) throw error;
         const paidNote = isFullyPaid ? 'Fully paid ✓' : (hasAdvance ? `Advance ₹${Number(advance_received).toLocaleString('en-IN')} received · Balance ₹${(amount - advance_received).toLocaleString('en-IN')} pending` : 'Payment pending');
