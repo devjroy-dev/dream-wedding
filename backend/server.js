@@ -12558,7 +12558,16 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
       ]);
 
       const totalInvoiced = (invoices || []).reduce((s, i) => s + (i.amount || 0), 0);
-      const totalPaid = (invoices || []).filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount || 0), 0);
+      // Include advance payments stored in description field
+      const getInvoicePaid = (inv) => {
+        if (inv.status === 'paid') return inv.amount || 0;
+        if (inv.description) {
+          const m = inv.description.match(/Advance received[:\s]*[\u20B9]?([\d,]+)/i);
+          if (m) return parseInt(m[1].replace(/,/g, '')) || 0;
+        }
+        return 0;
+      };
+      const totalPaid = (invoices || []).reduce((s, i) => s + getInvoicePaid(i), 0);
       const contractSigned = contracts?.status === 'signed';
       const deliveriesTotal = (deliveries || []).length;
       const deliveriesDone = (deliveries || []).filter(d => d.status === 'delivered').length;
