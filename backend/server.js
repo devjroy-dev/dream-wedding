@@ -3553,26 +3553,33 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'add_client': {
-        const { name, phone, event_type, event_date, budget, notes, city, venue } = toolInput;
+        const { name, client_name, phone, event_type, event_date, budget, notes, venue } = toolInput;
+        const clientName = (name || client_name || '').trim();
+        if (!clientName) throw new Error('Client name is required. Please provide the client name.');
+        const hasAllFields = !!(clientName && phone && event_date && budget);
         const { data, error } = await supabase
           .from('vendor_clients')
           .insert([{
             vendor_id: vendor.id,
-            name: name || toolInput.client_name || 'Unknown',
+            name: clientName,
             phone: phone || null,
-            event_type: event_type || null,
+            event_type: event_type || 'Wedding',
             event_date: event_date || null,
             budget: budget ? Number(budget) : null,
             notes: notes || null,
-            city: city || null,
             venue: venue || null,
             status: 'active',
+            profile_incomplete: !hasAllFields,
           }])
           .select()
           .single();
         if (error) throw error;
-        const clientName = name || toolInput.client_name || 'Client';
-        return `✓ Client added: ${clientName}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + Number(budget).toLocaleString('en-IN') : ''}`;
+        const missing = [];
+        if (!phone) missing.push('phone');
+        if (!event_date) missing.push('event date');
+        if (!budget) missing.push('budget');
+        const note = missing.length ? ` · Profile incomplete — missing: ${missing.join(', ')}` : '';
+        return `✓ Client added: ${clientName}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + Number(budget).toLocaleString('en-IN') : ''}${note}`;
       }
 
       case 'query_schedule': {
