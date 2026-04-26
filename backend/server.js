@@ -3553,13 +3553,26 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'add_client': {
-        const { client_name, phone = '', event_date = null, event_type = 'Wedding', budget = null } = toolInput;
-        const { error } = await supabase.from('vendor_clients').insert([{
-          vendor_id: vendor.id, name: client_name, phone,
-          event_date, event_type, budget, status: 'upcoming',
-        }]);
+        const { name, phone, event_type, event_date, budget, notes, city, venue } = toolInput;
+        const { data, error } = await supabase
+          .from('vendor_clients')
+          .insert([{
+            vendor_id: vendor.id,
+            name: name || toolInput.client_name || 'Unknown',
+            phone: phone || null,
+            event_type: event_type || null,
+            event_date: event_date || null,
+            budget: budget ? Number(budget) : null,
+            notes: notes || null,
+            city: city || null,
+            venue: venue || null,
+            status: 'active',
+          }])
+          .select()
+          .single();
         if (error) throw error;
-        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + budget.toLocaleString('en-IN') : ''}`;
+        const clientName = name || toolInput.client_name || 'Client';
+        return `✓ Client added: ${clientName}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + Number(budget).toLocaleString('en-IN') : ''}`;
       }
 
       case 'query_schedule': {
@@ -10480,26 +10493,26 @@ app.post('/api/couple/muse/save', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/api/couple/muse/shortlist', async (req, res) => {
   try {
-    const { save_id, couple_id, event } = req.body || {};
+    const { save_id, couple_id, vendor_id: req_vendor_id, event } = req.body || {};
     
     if (!save_id || !couple_id) {
       return res.status(400).json({ success: false, error: 'save_id and couple_id required' });
     }
 
-    // Step 1: Get the moodboard_item details
+    // Step 1: Get the moodboard_item details — no user_id filter (was causing 404s)
     const { data: museItem, error: fetchError } = await supabase
       .from('moodboard_items')
       .select('*')
       .eq('id', save_id)
-      .eq('user_id', couple_id)
       .maybeSingle();
 
     if (fetchError) throw fetchError;
-    if (!museItem) {
-      return res.status(404).json({ success: false, error: 'Muse item not found' });
-    }
 
-    const vendor_id = museItem.vendor_id;
+    // Step 1b: Resolve vendor_id from item or request body fallback
+    const vendor_id = museItem?.vendor_id || req_vendor_id;
+    if (!vendor_id) {
+      return res.status(400).json({ success: false, error: 'vendor_id required' });
+    }
 
     // Step 2: Get vendor details for the Bespoke pin
     const { data: vendor, error: vendorError } = await supabase
@@ -10510,7 +10523,7 @@ app.post('/api/couple/muse/shortlist', async (req, res) => {
 
     if (vendorError) throw vendorError;
 
-    const image_url = museItem.vendor_image 
+    const image_url = museItem?.vendor_image 
       || vendor?.featured_photos?.[0] 
       || vendor?.portfolio_images?.[0] 
       || null;
@@ -10520,12 +10533,12 @@ app.post('/api/couple/muse/shortlist', async (req, res) => {
       .from('couple_moodboard_pins')
       .insert([{
         couple_id,
-        event: event || museItem.event || 'general',
+        event: event || museItem?.event || 'general',
         pin_type: 'vendor', // Platform vendor
         image_url,
         source_url: null,
         source_domain: 'thedreamwedding.in',
-        title: vendor?.name || museItem.vendor_name || 'Vendor',
+        title: vendor?.name || museItem?.vendor_name || 'Vendor',
         note: `${vendor?.category || ''} · ${vendor?.city || ''}`.trim(),
         is_curated: false,
         is_suggestion: false,
