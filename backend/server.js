@@ -12550,7 +12550,8 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).or(`client_id.eq.${c.id},client_name.ilike.${encodeURIComponent(c.name)}`),
+        // Fetch invoices by client_name (primary) — safe, no broken .or() syntax
+        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id').eq('vendor_id', vendorId).ilike('client_name', c.name),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
