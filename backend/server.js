@@ -3524,6 +3524,25 @@ const TDW_COUPLE_TOOLS = [
 ];
 
 // ─── Tool Executors ───
+// Safe column whitelist per table — unknown fields from Claude are silently ignored
+const TABLE_COLUMNS = {
+  vendor_clients: ['vendor_id','name','phone','email','event_type','event_date','venue','budget','status','notes','profile_incomplete'],
+  vendor_invoices: ['vendor_id','client_id','client_name','client_phone','client_email','amount','description','invoice_number','status','issue_date','due_date','gst_enabled','gst_amount','total_amount','tds_applicable','tds_deducted_by_client','tds_rate','tds_amount','paid_date','booking_id'],
+  vendor_calendar_events: ['vendor_id','title','event_date','client_name','notes'],
+  vendor_tasks: ['vendor_id','task','assignee','due_date','status','notes'],
+  vendor_expenses: ['vendor_id','amount','category','description','expense_date','payment_method','notes','client_id','client_name','receipt_url','expense_type','related_name','financial_year'],
+};
+
+function safeInsert(table, payload) {
+  const allowed = TABLE_COLUMNS[table];
+  if (!allowed) return payload; // unknown table — pass through as-is
+  const safe = {};
+  for (const key of allowed) {
+    if (payload[key] !== undefined) safe[key] = payload[key];
+  }
+  return safe;
+}
+
 async function executeToolCall(toolName, toolInput, vendor) {
   try {
     switch (toolName) {
@@ -3577,7 +3596,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const hasAllFields = !!(clientName && phone && event_date && budget);
         const { data, error } = await supabase
           .from('vendor_clients')
-          .insert([{
+          .insert([safeInsert('vendor_clients', {
             vendor_id: vendor.id,
             name: clientName,
             phone: phone || null,
@@ -3588,7 +3607,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
             venue: venue || null,
             status: 'active',
             profile_incomplete: !hasAllFields,
-          }])
+          })])
           .select()
           .single();
         if (error) throw error;
