@@ -3346,7 +3346,7 @@ async function incrementAiCommands(vendorId) {
 const TDW_AI_TOOLS = [
   {
     name: 'create_invoice',
-    description: 'Create a GST-compliant invoice for a client. Use when vendor asks to create, generate, or make an invoice.',
+    description: 'Create a GST-compliant invoice for a client. Use when vendor asks to create an invoice OR when money is received FROM a client ("X received from client", "client paid X", "X mila", "X payment aaya"). NEVER use log_expense for money received from clients — that is always an invoice.',
     input_schema: {
       type: 'object',
       properties: {
@@ -3457,7 +3457,7 @@ const TDW_AI_TOOLS = [
   },
   {
     name: 'log_expense',
-    description: 'Log a business or client expense. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. Distinguish between client expenses (for a specific job) and business expenses (running the business).',
+    description: 'Log a business or client expense — money the vendor SPENT or PAID OUT. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. NEVER use this when money is received FROM a client — use create_invoice for that instead.',
     input_schema: {
       type: 'object',
       properties: {
