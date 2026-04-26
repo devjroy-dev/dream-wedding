@@ -3546,7 +3546,6 @@ async function executeToolCall(toolName, toolInput, vendor) {
           vendor_id: vendor.id,
           client_id,
           client_name,
-          event_type,
           amount,
           gst_amount,
           total_amount,
