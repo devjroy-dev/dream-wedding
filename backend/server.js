@@ -11042,7 +11042,7 @@ app.post('/api/couple/events', async (req, res) => {
 
 app.patch('/api/couple/events/:id', async (req, res) => {
   try {
-    const allowed = ['event_name', 'event_date', 'event_city', 'budget_total', 'vibe_tags', 'guest_count_range', 'is_active', 'notes', 'sort_order'];
+    const allowed = ['event_name', 'event_date', 'event_city', 'venue', 'budget_total', 'vibe_tags', 'guest_count_range', 'is_active', 'notes', 'sort_order'];
     const updates = { updated_at: new Date().toISOString() };
     for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
     const { data, error } = await supabase.from('couple_events').update(updates).eq('id', req.params.id).select().single();
