@@ -3844,180 +3844,58 @@ app.post('/api/whatsapp/incoming', async (req, res) => {
       return;
     }
 
-    // ── Smart couple router ────────────────────────────────────
+    // Couple sent text or image — handle muse saving + DreamAi
     if (couple) {
       const bodyLower = body.toLowerCase();
-      const apiKey = process.env.ANTHROPIC_API_KEY || '';
-      const { data: profile } = await supabase.from('users').select('name, wedding_date').eq('id', couple.id).maybeSingle();
-      const coupleName = profile?.name?.split(' ')[0] || 'there';
 
-      // ── Collect image URLs from media ──
-      const imageUrls = [];
-      for (let i = 0; i < numMedia; i++) {
-        const ct = (req.body[`MediaContentType${i}`] || '').toLowerCase();
-        const mu = req.body[`MediaUrl${i}`] || '';
-        if (mu && ct.startsWith('image/')) imageUrls.push(mu);
-      }
-
-      // ── Hard keyword overrides (no AI needed) ──
-      const isExplicitMuse = bodyLower.includes('muse') || bodyLower.includes('inspo') || bodyLower.includes('inspiration') || bodyLower.includes('save to board');
-      const isExplicitReceipt = bodyLower.includes('receipt') || bodyLower.includes('expense') || bodyLower.includes('paid') || bodyLower.includes('payment') || bodyLower.includes('bill');
-      const isGuestIntent = bodyLower.includes('import') || bodyLower.includes('contact') || bodyLower.includes('guest');
-      const urlMatch = body.match(/https?:\/\/[^\s]+/);
-      const isSocialUrl = urlMatch && /instagram|pinterest|behance|wedmegood|vogue|brides|wedding|shaadi|style|look|decor/i.test(urlMatch[0]);
-
-      // ── Guest import ──
-      if (isGuestIntent && numMedia > 0) {
-        // Handled above in vCard branch — shouldn't reach here
-        return;
-      }
-      if (isGuestIntent && numMedia === 0) {
-        await sendWhatsApp(fromPhone, `Hi ${coupleName}! To add guests, forward me their contacts from WhatsApp:
-
-1. Long-press any chat
-2. Tap Attach → Contact
-3. Select up to 50 at a time
-4. Send them here
-
-I'll add them to your Guest Ledger automatically.`);
-        return;
-      }
-
-      // ── Explicit muse: URL or image ──
-      if (isExplicitMuse) {
-        if (imageUrls.length > 0) {
+      // Image media — save to muse if intent detected
+      if (numMedia > 0) {
+        const isMuseIntent = bodyLower.includes('muse') || bodyLower.includes('save') || bodyLower.includes('inspo') || body.trim() === '';
+        const imageUrls = [];
+        for (let i = 0; i < numMedia; i++) {
+          const ct = (req.body[`MediaContentType${i}`] || '').toLowerCase();
+          const mu = req.body[`MediaUrl${i}`] || '';
+          if (mu && ct.startsWith('image/')) imageUrls.push(mu);
+        }
+        if (imageUrls.length > 0 && isMuseIntent) {
           for (const url of imageUrls) {
             await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' }]);
           }
-          await sendWhatsApp(fromPhone, `Saved ${imageUrls.length > 1 ? imageUrls.length + ' images' : 'that'} to your Muse board ✨
-
-Open TDW → Muse to see it.`);
-          return;
-        }
-        if (urlMatch) {
-          await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-          await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+          await sendWhatsApp(fromPhone, `Saved ${imageUrls.length > 1 ? imageUrls.length + ' images' : 'that'} to your Muse board ✨\n\nOpen TDW → Plan → Muse to see it.`);
           return;
         }
       }
 
-      // ── Social/inspiration URL — auto muse (no keyword needed) ──
-      if (isSocialUrl && !isExplicitReceipt) {
+      // URL in message — save to muse if intent detected
+      const urlMatch = body.match(/https?:\/\/[^\s]+/);
+      if (urlMatch && (bodyLower.includes('muse') || bodyLower.includes('save') || bodyLower.includes('add') || bodyLower.includes('pin') || bodyLower.includes('inspo'))) {
         await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-        await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+        await sendWhatsApp(fromPhone, `Saved to your Muse board ✨\n\nOpen TDW → Plan → Muse to see it.`);
         return;
       }
 
-      // ── Image sent — use Haiku to classify ──
-      if (imageUrls.length > 0 && apiKey) {
-        try {
-          const classifyRes = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5-20251001', max_tokens: 100,
-              messages: [{ role: 'user', content: [
-                { type: 'image', source: { type: 'url', url: imageUrls[0] } },
-                { type: 'text', text: 'Classify this image in one word: RECEIPT (if it shows a bill, invoice, payment receipt, price quote, or financial document) or MUSE (if it shows fashion, decor, wedding inspiration, venue, photography, makeup, or anything visually inspirational). Reply with only one word.' }
-              ]}]
-            })
-          });
-          const classifyData = await classifyRes.json();
-          const classification = (classifyData.content?.[0]?.text || '').trim().toUpperCase();
-
-          if (classification === 'RECEIPT' || isExplicitReceipt) {
-            // OCR the receipt
-            const ocrRes = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-              body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001', max_tokens: 300,
-                messages: [{ role: 'user', content: [
-                  { type: 'image', source: { type: 'url', url: imageUrls[0] } },
-                  { type: 'text', text: 'Extract from this receipt. Return ONLY JSON: {"vendor_name":"...","total_amount":number,"date":"YYYY-MM-DD or null","category":"Photography/Decor/Catering/MUA/Attire/Venue/Entertainment/Other","notes":"what was paid for"}' }
-                ]}]
-              })
-            });
-            const ocrData = await ocrRes.json();
-            let parsed = {};
-            try { parsed = JSON.parse((ocrData.content?.[0]?.text || '').replace(/```json|```/g, '').trim()); } catch {}
-
-            const vendorName = parsed.vendor_name || 'Unknown vendor';
-            const amount = parsed.total_amount ? `₹${Number(parsed.total_amount).toLocaleString('en-IN')}` : 'unknown amount';
-            const notes = parsed.notes || '';
-
-            // Store pending OCR in a temp table or just ask for confirmation via simple reply tracking
-            // For now: confirm and auto-log
-            await supabase.from('couple_expenses').insert([{
-              couple_id: couple.id,
-              vendor_name: vendorName,
-              description: notes || 'Receipt scanned via WhatsApp',
-              actual_amount: parsed.total_amount || 0,
-              category: parsed.category || 'Other',
-              payment_status: 'paid',
-              event: 'general',
-            }]);
-
-            const receiptMsg = '📋 Receipt logged!\n\n' + vendorName + ' — ' + amount + (notes ? '\n' + notes : '') + '\n\nLogged as paid in your Money tab. Open TDW → Plan → Money to review.\n\nWrong? Reply with the correct amount.';
-            await sendWhatsApp(fromPhone, receiptMsg);
-            return;
-          } else {
-            // MUSE classification
-            for (const url of imageUrls) {
-              await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' }]);
-            }
-            await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
-            return;
-          }
-        } catch (e) {
-          console.error('[WhatsApp classify]', e.message);
-          // Fallback — ask the couple
-          await sendWhatsApp(fromPhone, `Got your image! Should I:
-
-1️⃣ Save to your *Muse board* (inspiration)
-2️⃣ Log as an *expense* (receipt/payment)
-
-Reply 1 or 2.`);
-          return;
-        }
-      }
-
-      // ── Bare URL (non-social) — save to muse ──
-      if (urlMatch && !isExplicitReceipt) {
-        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-        await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+      // Guest import help
+      if (bodyLower.includes('import') || bodyLower.includes('contact') || bodyLower.includes('guest') || bodyLower.includes('help')) {
+        await sendWhatsApp(fromPhone, `Hi ${couple.name?.split(' ')[0] || 'there'}! To add guests, forward me their contacts from WhatsApp:\n\n1. Long-press any chat\n2. Tap Attach → Contact\n3. Select up to 50 at a time\n4. Send them here\n\nI'll add them to your Guest Ledger automatically.`);
         return;
       }
 
-      // ── Everything else — DreamAi conversation ──
-      if (apiKey) {
-        try {
+      // Everything else — route to DreamAi
+      try {
+        const apiKey = process.env.ANTHROPIC_API_KEY || '';
+        if (apiKey) {
+          const { data: profile } = await supabase.from('users').select('name, wedding_date').eq('id', couple.id).maybeSingle();
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5-20251001', max_tokens: 300,
-              system: `You are DreamAi, the AI wedding companion for The Dream Wedding (TDW).
-You're chatting via WhatsApp with ${coupleName}, who is planning their wedding${profile?.wedding_date ? ' on ' + profile.wedding_date : ''}.
-Be warm, brief (max 3 sentences), and helpful. Indian wedding context. Use ₹ for currency.
-To save inspiration: send a link or image with the word "muse" or "save".
-To log a receipt: send a photo of the receipt.
-To add guests: forward contacts from WhatsApp.`,
-              messages: [{ role: 'user', content: body }]
-            }),
+            body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+              system: `You are DreamAi for The Dream Wedding. Help ${profile?.name || 'this couple'} plan their wedding. Wedding: ${profile?.wedding_date || 'TBD'}. Be brief, warm, Indian context. ₹ for currency.`,
+              messages: [{ role: 'user', content: body }] }),
           });
           const data = await response.json();
           await sendWhatsApp(fromPhone, data.content?.[0]?.text || 'How can I help with your wedding planning?');
-        } catch (e) { console.error('[WhatsApp DreamAi couple]', e.message); }
-      }
+        }
+      } catch (e) { console.error('[WhatsApp DreamAi couple]', e.message); }
       return;
     }
 
