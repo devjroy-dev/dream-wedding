@@ -8971,7 +8971,9 @@ app.post('/api/couple/vendors', async (req, res) => {
 app.patch('/api/couple/vendors/:vendorId', async (req, res) => {
   try {
     const { vendorId } = req.params;
-    const updates = { ...(req.body || {}), updated_at: new Date().toISOString() };
+    // Strip fields that aren't columns in couple_vendors
+    const { event_id, event_name, ...rest } = req.body || {};
+    const updates = { ...rest, updated_at: new Date().toISOString() };
     const { data, error } = await supabase
       .from('couple_vendors')
       .update(updates)
