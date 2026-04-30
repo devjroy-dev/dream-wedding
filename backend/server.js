@@ -8378,6 +8378,13 @@ app.patch('/api/couple/budget/:coupleId', async (req, res) => {
       .eq('couple_id', coupleId)
       .select().single();
     if (error) throw error;
+    // Keep couple_profiles in sync so money dashboard reflects new total
+    if (total_budget !== undefined) {
+      await supabase.from('couple_profiles').upsert(
+        { user_id: coupleId, total_budget },
+        { onConflict: 'user_id' }
+      );
+    }
     res.json({ success: true, data });
   } catch (error) {
     console.error('budget update error:', error.message);
