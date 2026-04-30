@@ -13687,7 +13687,7 @@ app.post('/api/v2/couple/receipt-scan', async (req, res) => {
 // POST /api/v2/dreamai/chat
 app.post('/api/v2/dreamai/chat', async (req, res) => {
   try {
-    const { userId, userType, message, context, history } = req.body || {};
+    const { userId, userType, message, context, history, image_base64, image_media_type } = req.body || {};
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
 
     // PHASE 5: Token quota enforcement for in-app DreamAi chat
@@ -13769,7 +13769,14 @@ ${JSON.stringify(context || {}, null, 2)}`;
         if (h.role === 'assistant' || h.role === 'ai') messages.push({ role: 'assistant', content: h.text });
       }
     }
-    messages.push({ role: 'user', content: message });
+    if (image_base64) {
+      messages.push({ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: image_media_type || 'image/jpeg', data: image_base64 } },
+        { type: 'text', text: message || 'What is in this image? If it looks like a receipt or invoice, use add_expense to log it. If it looks like wedding inspiration (decor, fashion, makeup, venue, photography), use save_to_muse to save it to my Muse board.' }
+      ]});
+    } else {
+      messages.push({ role: 'user', content: message });
+    }
 
     const tools = isVendor ? TDW_AI_TOOLS : TDW_COUPLE_TOOLS;
 
