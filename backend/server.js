@@ -8284,7 +8284,6 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
       couple_id: coupleId,
       event: t.event,
       text: t.text,
-      title: t.text,
       priority: t.priority,
       is_complete: false,
       is_custom: false,
