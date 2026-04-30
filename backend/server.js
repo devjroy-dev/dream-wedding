@@ -5157,6 +5157,18 @@ app.post('/api/v2/couple/guests/broadcast', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+// DELETE a single guest
+app.delete('/api/v2/couple/guests/:guestId', async (req, res) => {
+  try {
+    const { guestId } = req.params;
+    const { error } = await supabase.from('couple_guests').delete().eq('id', guestId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get("/api/v2/couple/guests/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
