@@ -63,6 +63,10 @@ io.on('connection', (socket) => {
     const { data, error } = await supabase.from('messages').insert([messageData]).select().single();
     if (!error) io.to(room).emit('receive_message', data);
   });
+  // Circle group chat room
+  socket.on('join_circle', ({ coupleId }) => {
+    socket.join(`circle_${coupleId}`);
+  });
   socket.on('disconnect', () => console.log('User disconnected:', socket.id));
 });
 
@@ -9575,6 +9579,85 @@ app.post('/api/co-planner/remove', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Circle Reactions ──────────────────────────────────────────────────────────
+
+app.get('/api/circle/reactions/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { data, error } = await supabase
+      .from('circle_reactions')
+      .select('*')
+      .eq('couple_id', coupleId);
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/circle/reactions', async (req, res) => {
+  try {
+    const { couple_id, item_id, emoji, actor_name } = req.body;
+    if (!couple_id || !item_id || !emoji) return res.status(400).json({ success: false, error: 'couple_id, item_id, emoji required' });
+    // Toggle: if same actor+item+emoji exists, remove it
+    const { data: existing } = await supabase
+      .from('circle_reactions')
+      .select('id')
+      .eq('couple_id', couple_id)
+      .eq('item_id', item_id)
+      .eq('emoji', emoji)
+      .eq('actor_name', actor_name || 'You')
+      .maybeSingle();
+    if (existing) {
+      await supabase.from('circle_reactions').delete().eq('id', existing.id);
+      return res.json({ success: true, action: 'removed' });
+    }
+    const { data, error } = await supabase
+      .from('circle_reactions')
+      .insert([{ couple_id, item_id, emoji, actor_name: actor_name || 'You' }])
+      .select().single();
+    if (error) throw error;
+    res.json({ success: true, action: 'added', data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Circle Messages ────────────────────────────────────────────────────────────
+
+app.get('/api/circle/messages/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { data, error } = await supabase
+      .from('circle_messages')
+      .select('*')
+      .eq('couple_id', coupleId)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/circle/messages', async (req, res) => {
+  try {
+    const { couple_id, sender_user_id, sender_name, sender_role, content } = req.body;
+    if (!couple_id || !content?.trim()) return res.status(400).json({ success: false, error: 'couple_id and content required' });
+    const { data, error } = await supabase
+      .from('circle_messages')
+      .insert([{ couple_id, sender_user_id: sender_user_id || null, sender_name: sender_name || 'Someone', sender_role: sender_role || 'inner_circle', content: content.trim() }])
+      .select().single();
+    if (error) throw error;
+    // Broadcast to circle room
+    io.to(`circle_${couple_id}`).emit('circle_message', data);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
