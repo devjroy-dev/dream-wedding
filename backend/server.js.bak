@@ -3679,10 +3679,18 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'save_to_muse': {
         const { source_url, function_tag = 'muse_save' } = toolInput;
         const coupleId = vendor?.id || userId;
+        // Try to scrape OG image
+        const ogImage = await fetchOgImage(source_url);
         await supabase.from('moodboard_items').insert([{
-          user_id: coupleId, vendor_id: null, image_url: source_url, function_tag,
+          user_id: coupleId, vendor_id: null,
+          image_url: ogImage || source_url,
+          function_tag,
         }]);
-        return '✓ Saved to your Muse board! Open Plan → Muse to see it.';
+        if (ogImage) {
+          return "Saved to your Muse board with preview! Open Plan > Muse to see it.";
+        } else {
+          return "Link saved to your Muse board, but I could not generate a preview for this site. For the best experience, take a screenshot and send it to me - I will save that image directly.";
+        }
       }
 
       case 'complete_task': {
@@ -3895,20 +3903,26 @@ Open TDW → Muse to see it.`);
           return;
         }
         if (urlMatch) {
-          await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-          await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+          const ogImg = await fetchOgImage(urlMatch[0]);
+          await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+          if (ogImg) {
+            await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
+          } else {
+            await sendWhatsApp(fromPhone, "Saved the link, but I could not get a preview for this site. Take a screenshot and send it here for a proper image on your board!");
+          }
           return;
         }
       }
 
       // ── Social/inspiration URL — auto muse (no keyword needed) ──
       if (isSocialUrl && !isExplicitReceipt) {
-        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-        await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+        const ogImg = await fetchOgImage(urlMatch[0]);
+        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+        if (ogImg) {
+          await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
+        } else {
+          await sendWhatsApp(fromPhone, "Saved the link to your Muse board, but I could not generate a preview for this site. For better results, take a screenshot and send it here - I will save that image directly!");
+        }
         return;
       }
 
@@ -3990,10 +4004,13 @@ Reply 1 or 2.`);
 
       // ── Bare URL (non-social) — save to muse ──
       if (urlMatch && !isExplicitReceipt) {
-        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: urlMatch[0], function_tag: 'muse_save' }]);
-        await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
-
-Open TDW → Muse to see it.`);
+        const ogImg = await fetchOgImage(urlMatch[0]);
+        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+        if (ogImg) {
+          await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
+        } else {
+          await sendWhatsApp(fromPhone, "Saved the link, but I could not get a preview for this site. For a proper image on your board, take a screenshot and send it here!");
+        }
         return;
       }
 
@@ -13598,6 +13615,29 @@ function mapToolToAction(toolName, input, isVendor) {
   };
 
   return actionMap[toolName] || null;
+}
+
+// ── OG image scraper ──────────────────────────────────────────────────────────
+async function fetchOgImage(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)' },
+    });
+    clearTimeout(timeout);
+    const html = await res.text();
+    // Try og:image first
+    const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
+                 || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
+    if (ogMatch) return ogMatch[1];
+    // Try twitter:image
+    const twMatch = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i)
+                 || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
+    if (twMatch) return twMatch[1];
+    return null;
+  } catch { return null; }
 }
 
 // POST /api/v2/couple/receipt-scan — OCR a receipt image via Claude Haiku vision
