@@ -3346,13 +3346,13 @@ async function incrementAiCommands(vendorId) {
 const TDW_AI_TOOLS = [
   {
     name: 'create_invoice',
-    description: 'Create a NEW GST-compliant invoice for a client. Use for NEW work or NEW bookings. Examples: "create invoice for Priya 2 lakh", "new booking for Salil 1 lakh", "bill Sharma for wedding". If the vendor mentions a total amount AND an advance received together — create the invoice with advance_received field. NEVER use for updating an existing invoice — use record_payment for that.',
+    description: 'Create a GST-compliant invoice for a client. Use when vendor asks to create, generate, or make an invoice.',
     input_schema: {
       type: 'object',
       properties: {
         client_name: { type: 'string', description: 'Client or couple name' },
         amount: { type: 'number', description: 'Total amount in rupees' },
-        advance_received: { type: 'number', description: 'Advance already received AT THE TIME OF BOOKING. Example: "1 lakh total, 20k advance" → amount=100000, advance_received=20000. "2 lakh received" with no total mentioned → amount=200000, advance_received=200000. Set to 0 if no advance mentioned.' },
+        advance_received: { type: 'number', description: 'Advance amount already paid (0 if not mentioned)' },
         event_type: { type: 'string', description: 'Wedding, engagement, shoot, etc.' },
       },
       required: ['client_name', 'amount'],
@@ -3456,20 +3456,8 @@ const TDW_AI_TOOLS = [
     },
   },
   {
-    name: 'record_payment',
-    description: 'Record a payment against an EXISTING invoice for an EXISTING client. Use ONLY for standalone payment messages like "Priya paid 50k", "Sharma ne 20k diya", "collected payment from X" — where NO new booking or new work is being created. NEVER use when creating a new booking or new invoice. If unsure, use create_invoice instead.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        client_name: { type: 'string', description: 'Client name whose invoice to update' },
-        amount_received: { type: 'number', description: 'Amount received in rupees' },
-      },
-      required: ['client_name', 'amount_received'],
-    },
-  },
-  {
     name: 'log_expense',
-    description: 'Log a business or client expense — money the vendor SPENT or PAID OUT. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. NEVER use this when money is received FROM a client — use record_payment or create_invoice for that instead.',
+    description: 'Log a business or client expense. Use when vendor mentions paying for something, spending money, procurement, studio rent, marketing, travel, assistants, or any cost. Distinguish between client expenses (for a specific job) and business expenses (running the business).',
     input_schema: {
       type: 'object',
       properties: {
@@ -3536,76 +3524,27 @@ const TDW_COUPLE_TOOLS = [
 ];
 
 // ─── Tool Executors ───
-// Safe column whitelist per table — unknown fields from Claude are silently ignored
-const TABLE_COLUMNS = {
-  vendor_clients: ['vendor_id','name','phone','email','event_type','event_date','venue','budget','status','notes','profile_incomplete'],
-  vendor_invoices: ['vendor_id','client_id','client_name','client_phone','client_email','amount','description','invoice_number','status','issue_date','due_date','gst_enabled','gst_amount','total_amount','tds_applicable','tds_deducted_by_client','tds_rate','tds_amount','paid_date','booking_id'],
-  vendor_calendar_events: ['vendor_id','title','event_date','client_name','notes'],
-  vendor_tasks: ['vendor_id','task','assignee','due_date','status','notes'],
-  vendor_expenses: ['vendor_id','amount','category','description','expense_date','payment_method','notes','client_id','client_name','receipt_url','expense_type','related_name','financial_year'],
-};
-
-function safeInsert(table, payload) {
-  const allowed = TABLE_COLUMNS[table];
-  if (!allowed) return payload; // unknown table — pass through as-is
-  const safe = {};
-  for (const key of allowed) {
-    if (payload[key] !== undefined) safe[key] = payload[key];
-  }
-  return safe;
-}
-
 async function executeToolCall(toolName, toolInput, vendor) {
   try {
     switch (toolName) {
       case 'create_invoice': {
-        const { client_name, amount, advance_received = 0, event_type = 'Wedding', due_date } = toolInput;
+        const { client_name, amount, advance_received = 0, event_type = 'Wedding' } = toolInput;
         const gst_amount = Math.round(amount * 0.18);
         const total_amount = amount + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
-        const isFullyPaid = advance_received >= amount;
-        const hasAdvance = advance_received > 0 && !isFullyPaid;
-        const invoiceStatus = isFullyPaid ? 'paid' : 'pending';
-        const advanceNote = hasAdvance ? `Advance received: ₹${Number(advance_received).toLocaleString('en-IN')} · Balance due: ₹${(amount - advance_received).toLocaleString('en-IN')}` : null;
-        // Try to find matching client_id for this vendor + client_name
-        const { data: matchedClient } = await supabase
-          .from('vendor_clients')
-          .select('id')
-          .eq('vendor_id', vendor.id)
-          .ilike('name', client_name.trim())
-          .maybeSingle();
-        const client_id = matchedClient?.id || null;
         const { data, error } = await supabase.from('vendor_invoices').insert([{
-          vendor_id: vendor.id,
-          client_id,
-          client_name,
-          amount,
-          gst_amount,
-          total_amount,
-          invoice_number: invNum,
-          status: invoiceStatus,
-          paid_date: isFullyPaid ? new Date().toISOString().split('T')[0] : null,
-          due_date: due_date || null,
+          vendor_id: vendor.id, client_name, event_type,
+          amount, gst_amount, total_amount,
+          invoice_number: invNum, status: 'pending',
           gst_enabled: true,
-          description: advanceNote,
         }]).select().single();
         if (error) throw error;
-        const paidNote = isFullyPaid ? 'Fully paid ✓' : (hasAdvance ? `Advance ₹${Number(advance_received).toLocaleString('en-IN')} received · Balance ₹${(amount - advance_received).toLocaleString('en-IN')} pending` : 'Payment pending');
-        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${paidNote ? paidNote + '\n' : ''}Invoice #${invNum}`;
+        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance paid: ₹' + advance_received.toLocaleString('en-IN') + ' · Remaining: ₹' + (total_amount - advance_received).toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
       }
 
       case 'block_calendar_dates': {
         const { client_name, dates, notes = '' } = toolInput;
         for (const date of dates) {
-          // Write to vendor_calendar_events so it appears on the calendar
-          await supabase.from('vendor_calendar_events').insert([{
-            vendor_id: vendor.id,
-            title: `${client_name} — Booking`,
-            event_date: date + 'T09:00:00.000Z',
-            client_name: client_name,
-            notes: notes || null,
-          }]).select();
-          // Also write to blocked_dates for availability checks
           await supabase.from('blocked_dates').insert([{
             vendor_id: vendor.id, date, reason: `${client_name} wedding`, notes,
           }]).select();
@@ -3614,33 +3553,13 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'add_client': {
-        const { name, client_name, phone, event_type, event_date, budget, notes, venue } = toolInput;
-        const clientName = (name || client_name || '').trim();
-        if (!clientName) throw new Error('Client name is required. Please provide the client name.');
-        const hasAllFields = !!(clientName && phone && event_date && budget);
-        const { data, error } = await supabase
-          .from('vendor_clients')
-          .insert([safeInsert('vendor_clients', {
-            vendor_id: vendor.id,
-            name: clientName,
-            phone: phone || null,
-            event_type: event_type || 'Wedding',
-            event_date: event_date || null,
-            budget: budget ? Number(budget) : null,
-            notes: notes || null,
-            venue: venue || null,
-            status: 'active',
-            profile_incomplete: !hasAllFields,
-          })])
-          .select()
-          .single();
+        const { client_name, phone = '', event_date = null, event_type = 'Wedding', budget = null } = toolInput;
+        const { error } = await supabase.from('vendor_clients').insert([{
+          vendor_id: vendor.id, name: client_name, phone,
+          event_date, event_type, budget, status: 'upcoming',
+        }]);
         if (error) throw error;
-        const missing = [];
-        if (!phone) missing.push('phone');
-        if (!event_date) missing.push('event date');
-        if (!budget) missing.push('budget');
-        const note = missing.length ? ` · Profile incomplete — missing: ${missing.join(', ')}` : '';
-        return `✓ Client added: ${clientName}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + Number(budget).toLocaleString('en-IN') : ''}${note}`;
+        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + budget.toLocaleString('en-IN') : ''}`;
       }
 
       case 'query_schedule': {
@@ -3722,22 +3641,11 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'create_task': {
         const { task, assignee = '', due_date = null } = toolInput;
         try {
-          // Write to both team_tasks and vendor_calendar_events so task appears in app
           await supabase.from('team_tasks').insert([{
             vendor_id: vendor.id, title: task, description: task,
             assignee_name: assignee || vendor.name, due_date,
             status: 'pending', priority: 'medium',
           }]);
-          // Also add as a calendar event if due date provided
-          if (due_date) {
-            await supabase.from('vendor_calendar_events').insert([{
-              vendor_id: vendor.id,
-              title: `Task: ${task}`,
-              event_date: due_date + 'T09:00:00.000Z',
-              client_name: assignee || null,
-              notes: task,
-            }]);
-          }
         } catch (e) {}
         return `✓ Task created: ${task}${assignee ? '\nAssigned to: ' + assignee : ''}${due_date ? '\nDue: ' + due_date : ''}`;
       }
@@ -3758,58 +3666,6 @@ async function executeToolCall(toolName, toolInput, vendor) {
 
       case 'general_reply':
         return toolInput.reply;
-
-      case 'record_payment': {
-        const { client_name, amount_received } = toolInput;
-        // Find the most recent unpaid/pending invoice for this client
-        const { data: existingInvoices } = await supabase
-          .from('vendor_invoices')
-          .select('id, amount, total_amount, status, description')
-          .eq('vendor_id', vendor.id)
-          .ilike('client_name', client_name.trim())
-          .in('status', ['pending', 'sent'])
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (!existingInvoices || existingInvoices.length === 0) {
-          // No existing invoice — create a new one for the received amount
-          const gst_amount = Math.round(amount_received * 0.18);
-          const total_amount = amount_received + gst_amount;
-          const invNum = 'INV-' + Date.now().toString().slice(-6);
-          await supabase.from('vendor_invoices').insert([{
-            vendor_id: vendor.id,
-            client_name,
-            amount: amount_received,
-            gst_amount,
-            total_amount,
-            invoice_number: invNum,
-            status: 'paid',
-            paid_date: new Date().toISOString().split('T')[0],
-            gst_enabled: true,
-            description: 'Payment received',
-          }]);
-          return `✓ Payment of ₹${amount_received.toLocaleString('en-IN')} recorded for ${client_name}\nNew invoice created and marked paid.`;
-        }
-
-        const inv = existingInvoices[0];
-        const isFullyPaid = amount_received >= inv.amount;
-        const balanceDue = inv.amount - amount_received;
-        const newDesc = isFullyPaid
-          ? 'Fully paid'
-          : `Advance received: ₹${amount_received.toLocaleString('en-IN')} · Balance due: ₹${balanceDue.toLocaleString('en-IN')}`;
-
-        await supabase.from('vendor_invoices')
-          .update({
-            status: isFullyPaid ? 'paid' : 'pending',
-            paid_date: isFullyPaid ? new Date().toISOString().split('T')[0] : null,
-            description: newDesc,
-          })
-          .eq('id', inv.id);
-
-        return isFullyPaid
-          ? `✓ Invoice for ${client_name} marked as fully paid ✓\n₹${inv.amount.toLocaleString('en-IN')} received.`
-          : `✓ Payment recorded for ${client_name}\nAdvance: ₹${amount_received.toLocaleString('en-IN')} · Balance: ₹${balanceDue.toLocaleString('en-IN')} pending.`;
-      }
 
       case 'log_expense': {
         const { description, amount, category, expense_type, related_name } = toolInput;
@@ -5349,96 +5205,6 @@ app.get('/api/v2/cover-photos', async (req, res) => {
   } catch (err) {
     console.error('GET cover-photos:', err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HOT DATES — Auspicious Hindu wedding muhurat dates
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Public — vendor calendar fetches this
-app.get('/api/v2/hot-dates', async (req, res) => {
-  try {
-    const { from, to } = req.query;
-    let query = supabase
-      .from('hot_dates')
-      .select('id, date, label, intensity')
-      .eq('active', true)
-      .order('date', { ascending: true });
-    if (from) query = query.gte('date', from);
-    if (to) query = query.lte('date', to);
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) {
-    res.json({ success: false, data: [] });
-  }
-});
-
-// Admin — read all
-app.get('/api/v2/admin/hot-dates', async (req, res) => {
-  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
-  try {
-    const { data, error } = await supabase
-      .from('hot_dates')
-      .select('*')
-      .order('date', { ascending: true });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Admin — add single date
-app.post('/api/v2/admin/hot-dates', async (req, res) => {
-  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
-  try {
-    const { date, label, intensity } = req.body;
-    if (!date) return res.status(400).json({ success: false, error: 'date required' });
-    const { data, error } = await supabase
-      .from('hot_dates')
-      .insert([{ date, label: label || 'Vivah Muhurat', intensity: intensity || 'high', active: true }])
-      .select()
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Admin — update label/intensity/active
-app.patch('/api/v2/admin/hot-dates/:id', async (req, res) => {
-  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
-  try {
-    const { label, intensity, active } = req.body;
-    const updates = { updated_at: new Date().toISOString() };
-    if (label !== undefined) updates.label = label;
-    if (intensity !== undefined) updates.intensity = intensity;
-    if (active !== undefined) updates.active = active;
-    const { data, error } = await supabase
-      .from('hot_dates')
-      .update(updates)
-      .eq('id', req.params.id)
-      .select()
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Admin — delete date
-app.delete('/api/v2/admin/hot-dates/:id', async (req, res) => {
-  if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorised' });
-  try {
-    const { error } = await supabase.from('hot_dates').delete().eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -10714,26 +10480,26 @@ app.post('/api/couple/muse/save', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/api/couple/muse/shortlist', async (req, res) => {
   try {
-    const { save_id, couple_id, vendor_id: req_vendor_id, event } = req.body || {};
+    const { save_id, couple_id, event } = req.body || {};
     
     if (!save_id || !couple_id) {
       return res.status(400).json({ success: false, error: 'save_id and couple_id required' });
     }
 
-    // Step 1: Get the moodboard_item details — no user_id filter (was causing 404s)
+    // Step 1: Get the moodboard_item details
     const { data: museItem, error: fetchError } = await supabase
       .from('moodboard_items')
       .select('*')
       .eq('id', save_id)
+      .eq('user_id', couple_id)
       .maybeSingle();
 
     if (fetchError) throw fetchError;
-
-    // Step 1b: Resolve vendor_id from item or request body fallback
-    const vendor_id = museItem?.vendor_id || req_vendor_id;
-    if (!vendor_id) {
-      return res.status(400).json({ success: false, error: 'vendor_id required' });
+    if (!museItem) {
+      return res.status(404).json({ success: false, error: 'Muse item not found' });
     }
+
+    const vendor_id = museItem.vendor_id;
 
     // Step 2: Get vendor details for the Bespoke pin
     const { data: vendor, error: vendorError } = await supabase
@@ -10744,7 +10510,7 @@ app.post('/api/couple/muse/shortlist', async (req, res) => {
 
     if (vendorError) throw vendorError;
 
-    const image_url = museItem?.vendor_image 
+    const image_url = museItem.vendor_image 
       || vendor?.featured_photos?.[0] 
       || vendor?.portfolio_images?.[0] 
       || null;
@@ -10754,12 +10520,12 @@ app.post('/api/couple/muse/shortlist', async (req, res) => {
       .from('couple_moodboard_pins')
       .insert([{
         couple_id,
-        event: event || museItem?.event || 'general',
+        event: event || museItem.event || 'general',
         pin_type: 'vendor', // Platform vendor
         image_url,
         source_url: null,
         source_domain: 'thedreamwedding.in',
-        title: vendor?.name || museItem?.vendor_name || 'Vendor',
+        title: vendor?.name || museItem.vendor_name || 'Vendor',
         note: `${vendor?.category || ''} · ${vendor?.city || ''}`.trim(),
         is_curated: false,
         is_suggestion: false,
@@ -12411,41 +12177,6 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
       });
     });
 
-    // Hot Dates — upcoming in next 30 days with no booking
-    const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
-    const { data: upcomingHotDates } = await supabase
-      .from('hot_dates')
-      .select('date, label, intensity')
-      .eq('active', true)
-      .gte('date', today)
-      .lte('date', in30Days)
-      .order('date', { ascending: true })
-      .limit(2);
-
-    if (upcomingHotDates && upcomingHotDates.length > 0) {
-      for (const hd of upcomingHotDates) {
-        if (attention.length >= 3) break;
-        const { data: existingBooking } = await supabase
-          .from('vendor_calendar_events')
-          .select('id')
-          .eq('vendor_id', vendorId)
-          .eq('event_date', hd.date)
-          .maybeSingle();
-        if (!existingBooking) {
-          const hdDate = new Date(hd.date);
-          const daysAway = Math.ceil((hdDate - new Date()) / 86400000);
-          attention.push({
-            id: 'hotdate_' + hd.date,
-            type: 'hot_date',
-            title: '🔥 ' + (hd.label || 'Hot Date') + ' — ' + daysAway + ' days away',
-            subtitle: 'High demand day. Consider premium pricing.',
-            cta: 'View calendar',
-            intensity: hd.intensity,
-          });
-        }
-      }
-    }
-
     // Today's schedule
     const { data: todayEvents } = await supabase.from('vendor_calendar_events')
       .select('id, title, event_date, client_name')
@@ -12537,7 +12268,7 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
   try {
     const { vendorId } = req.params;
     const { data: clients, error } = await supabase.from('vendor_clients')
-      .select('id, name, phone, email, event_type, event_date, budget, status, notes, profile_incomplete')
+      .select('id, name, phone, email, event_type, event_date, budget, status, notes')
       .eq('vendor_id', vendorId)
       .order('event_date', { ascending: true });
     if (error) throw error;
@@ -12550,24 +12281,14 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
         { data: deliveries },
         { data: lastMsg },
       ] = await Promise.all([
-        // Fetch invoices by client_name — include description for advance parsing
-        supabase.from('vendor_invoices').select('amount, total_amount, status, client_id, description').eq('vendor_id', vendorId).ilike('client_name', c.name),
+        supabase.from('vendor_invoices').select('amount, total_amount, status').eq('vendor_id', vendorId).eq('client_name', c.name),
         supabase.from('vendor_contracts').select('id, status').eq('vendor_id', vendorId).eq('client_name', c.name).limit(1).maybeSingle(),
         supabase.from('delivery_items').select('id, status').eq('vendor_id', vendorId).eq('related_client_name', c.name),
         supabase.from('vendor_enquiries').select('last_message_at').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
       ]);
 
       const totalInvoiced = (invoices || []).reduce((s, i) => s + (i.amount || 0), 0);
-      // Include advance payments stored in description field
-      const getInvoicePaid = (inv) => {
-        if (inv.status === 'paid') return inv.amount || 0;
-        if (inv.description) {
-          const m = inv.description.match(/Advance received[:\s]*[\u20B9]?([\d,]+)/i);
-          if (m) return parseInt(m[1].replace(/,/g, '')) || 0;
-        }
-        return 0;
-      };
-      const totalPaid = (invoices || []).reduce((s, i) => s + getInvoicePaid(i), 0);
+      const totalPaid = (invoices || []).filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount || 0), 0);
       const contractSigned = contracts?.status === 'signed';
       const deliveriesTotal = (deliveries || []).length;
       const deliveriesDone = (deliveries || []).filter(d => d.status === 'delivered').length;
@@ -12601,29 +12322,21 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
 app.get('/api/v2/vendor/clients/:vendorId/:clientId', async (req, res) => {
   try {
     const { vendorId, clientId } = req.params;
-    // Fetch client first so we have name for fallback queries
-    const { data: client } = await supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle();
-    if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
-    const clientName = client.name || '';
-    // Fetch invoices by client_id OR by client_name (dedup by id)
-    const { data: invoicesById } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_id', clientId);
-    const { data: invoicesByName } = await supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).ilike('client_name', clientName);
-    const seenIds = new Set();
-    const invoices = [...(invoicesById || []), ...(invoicesByName || [])].filter(inv => {
-      if (seenIds.has(inv.id)) return false;
-      seenIds.add(inv.id);
-      return true;
-    });
     const [
+      { data: client },
+      { data: invoices },
       { data: contracts },
       { data: deliveries },
       { data: enquiry },
     ] = await Promise.all([
+      supabase.from('vendor_clients').select('*').eq('id', clientId).eq('vendor_id', vendorId).maybeSingle(),
+      supabase.from('vendor_invoices').select('*').eq('vendor_id', vendorId).eq('client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
       supabase.from('vendor_contracts').select('*').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('delivery_items').select('*').eq('vendor_id', vendorId).eq('related_client_name', clientName),
+      supabase.from('delivery_items').select('*').eq('vendor_id', vendorId).eq('related_client_name', (await supabase.from('vendor_clients').select('name').eq('id', clientId).maybeSingle()).data?.name || ''),
       supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('vendor_id', vendorId).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
-    res.json({ success: true, data: { client, invoices, contract: contracts || null, deliveries: deliveries || [], enquiry: enquiry || null } });
+    if (!client) return res.status(404).json({ success: false, error: 'Client not found' });
+    res.json({ success: true, data: { client, invoices: invoices || [], contract: contracts || null, deliveries: deliveries || [], enquiry: enquiry || null } });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
@@ -13483,13 +13196,6 @@ function mapToolToAction(toolName, input, isVendor) {
       params: input,
       description: `I'll send a ${input.reminder_type} reminder to ${input.client_name} via WhatsApp.`,
     },
-    record_payment: {
-      type: 'record_payment', requiresConfirmation: true,
-      label: 'Record Payment',
-      preview: `Record ₹${(input.amount_received||0).toLocaleString('en-IN')} payment from ${input.client_name}`,
-      params: input,
-      description: `I'll record ₹${(input.amount_received||0).toLocaleString('en-IN')} received from ${input.client_name} against their existing invoice.`,
-    },
     log_expense: {
       type: 'log_expense', requiresConfirmation: true,
       label: 'Log Expense',
@@ -13621,7 +13327,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
     let iterations = 0;
     const MAX_ITERATIONS = 5;
     let finalReply = '';
-    const pendingActions = [];
+    let pendingAction = null;
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
@@ -13686,8 +13392,10 @@ ${JSON.stringify(context || {}, null, 2)}`;
             });
           }
         } else {
-          // Mutation tool — collect ALL actions for confirmation
-          pendingActions.push(mapToolToAction(toolName, toolInput, isVendor));
+          // Mutation tool — map to action for confirmation
+          if (!pendingAction) {
+            pendingAction = mapToolToAction(toolName, toolInput, isVendor);
+          }
           // Tell Claude this tool is pending user confirmation
           toolResults.push({
             type: 'tool_result',
@@ -13701,13 +13409,10 @@ ${JSON.stringify(context || {}, null, 2)}`;
       allMessages.push({ role: 'user', content: toolResults });
     }
 
-    // Build final response — include ALL pending actions as sequential tags
-    if (pendingActions.length > 0) {
-      const actionTags = pendingActions.map(a =>
-        `[ACTION:${a.type}|${a.label}|${a.preview}|${JSON.stringify(a.params)}]`
-      ).join('\n');
-      const description = pendingActions.map(a => a.description).join(' Then ');
-      const replyWithAction = (finalReply || description || '') + '\n' + actionTags;
+    // Build final response
+    if (pendingAction) {
+      const actionTag = `[ACTION:${pendingAction.type}|${pendingAction.label}|${pendingAction.preview}|${JSON.stringify(pendingAction.params)}]`;
+      const replyWithAction = (finalReply || pendingAction.description || '') + '\n' + actionTag;
       res.json({ success: true, reply: replyWithAction });
     } else {
       res.json({ success: true, reply: finalReply.trim() || 'Done.' });
@@ -13837,22 +13542,6 @@ app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
 // These 4 endpoints complete the set. The first 4 (send-payment-reminder,
 // reply-to-enquiry, block-date, log-expense) already exist above.
 // Together all 8 match the WhatsApp DreamAi tool set exactly.
-
-// POST /api/v2/dreamai/vendor-action/record-payment
-app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
-  try {
-    const { vendor_id, client_name, amount_received } = req.body || {};
-    if (!vendor_id || !client_name || !amount_received) {
-      return res.status(400).json({ success: false, error: 'vendor_id, client_name and amount_received required' });
-    }
-    const result = await executeToolCall(
-      'record_payment',
-      { client_name, amount_received: Number(amount_received) },
-      { id: vendor_id }
-    );
-    res.json({ success: true, message: result });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
 
 // POST /api/v2/dreamai/vendor-action/create-invoice
 app.post('/api/v2/dreamai/vendor-action/create-invoice', async (req, res) => {
