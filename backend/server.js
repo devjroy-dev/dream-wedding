@@ -14819,6 +14819,33 @@ app.get('/api/v2/vendor/calendar.ics/:vendorId', async (req, res) => {
   }
 });
 
+// GET /api/admin/all-vendors — returns ALL vendors for admin dashboard (no discovery filters)
+app.get('/api/admin/all-vendors', async (req, res) => {
+  try {
+    const { search } = req.query;
+    let q = supabase.from('vendors').select('id, name, phone, email, category, city, instagram, is_approved, subscription_active, discover_listed, vendor_discover_enabled, created_at');
+    if (search) q = q.or('name.ilike.%' + search + '%,category.ilike.%' + search + '%,city.ilike.%' + search + '%');
+    q = q.order('created_at', { ascending: false });
+    const { data, error } = await q;
+    if (error) throw error;
+    // Enrich with tier from vendor_subscriptions
+    const ids = (data || []).map(function(v) { return v.id; });
+    let subMap = {};
+    if (ids.length > 0) {
+      const { data: subs } = await supabase.from('vendor_subscriptions').select('vendor_id, tier, status').in('vendor_id', ids);
+      (subs || []).forEach(function(s) { subMap[s.vendor_id] = s; });
+    }
+    const enriched = (data || []).map(function(v) {
+      const sub = subMap[v.id] || {};
+      return Object.assign({}, v, { tier: sub.tier || 'essential', sub_status: sub.status || null });
+    });
+    res.json({ success: true, data: enriched });
+  } catch (err) {
+    console.error('[admin/all-vendors]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/v2/dreamai/whatsapp-extract
 app.post('/api/v2/dreamai/whatsapp-extract', async (req, res) => {
   try {
