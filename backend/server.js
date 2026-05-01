@@ -14605,6 +14605,118 @@ app.post('/api/v2/dreamai/vendor-action/send-client-reminder', async (req, res) 
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// POST /api/v2/vendor/calendar/import/:vendorId — parse .ics and block dates in TDW
+app.post('/api/v2/vendor/calendar/import/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { ics_content } = req.body;
+
+    if (!ics_content) return res.status(400).json({ success: false, error: 'No iCal content provided.' });
+
+    // Parse VEVENT blocks
+    const events = [];
+    const eventBlocks = ics_content.split('BEGIN:VEVENT');
+    for (let i = 1; i < eventBlocks.length; i++) {
+      const block = eventBlocks[i];
+
+      // Extract fields using indexOf/slice — no regex needed
+      function extractField(blk, field) {
+        const prefix = field + ':';
+        const idx = blk.indexOf(prefix);
+        if (idx === -1) return null;
+        const start = idx + prefix.length;
+        const end = blk.indexOf('\n', start);
+        return end === -1 ? blk.slice(start).trim() : blk.slice(start, end).trim().replace(/\r$/, '');
+      }
+
+      // Also handle DTSTART with params like DTSTART;VALUE=DATE:20250614
+      function extractDtStart(blk) {
+        const idx = blk.indexOf('DTSTART');
+        if (idx === -1) return null;
+        const colon = blk.indexOf(':', idx);
+        if (colon === -1) return null;
+        const end = blk.indexOf('\n', colon);
+        const raw = end === -1 ? blk.slice(colon + 1).trim() : blk.slice(colon + 1, end).trim().replace(/\r$/, '');
+        return raw.slice(0, 8); // just YYYYMMDD
+      }
+
+      function extractDtEnd(blk) {
+        const idx = blk.indexOf('DTEND');
+        if (idx === -1) return null;
+        const colon = blk.indexOf(':', idx);
+        if (colon === -1) return null;
+        const end = blk.indexOf('\n', colon);
+        const raw = end === -1 ? blk.slice(colon + 1).trim() : blk.slice(colon + 1, end).trim().replace(/\r$/, '');
+        return raw.slice(0, 8);
+      }
+
+      function toDateStr(yyyymmdd) {
+        if (!yyyymmdd || yyyymmdd.length < 8) return null;
+        return yyyymmdd.slice(0, 4) + '-' + yyyymmdd.slice(4, 6) + '-' + yyyymmdd.slice(6, 8);
+      }
+
+      const rawStart = extractDtStart(block);
+      const rawEnd = extractDtEnd(block);
+      const summary = extractField(block, 'SUMMARY');
+      const status = extractField(block, 'STATUS');
+
+      if (!rawStart) continue;
+      if (status === 'CANCELLED') continue;
+
+      const startStr = toDateStr(rawStart);
+      if (!startStr) continue;
+
+      if (rawEnd && rawEnd !== rawStart) {
+        const endStr = toDateStr(rawEnd);
+        const cur = new Date(startStr);
+        const endDate = new Date(endStr);
+        while (cur < endDate) {
+          const y = cur.getFullYear();
+          const m = String(cur.getMonth() + 1).padStart(2, '0');
+          const d = String(cur.getDate()).padStart(2, '0');
+          events.push({ date: y + '-' + m + '-' + d, note: summary });
+          cur.setDate(cur.getDate() + 1);
+        }
+      } else {
+        events.push({ date: startStr, note: summary });
+      }
+    }
+
+    if (events.length === 0) {
+      return res.json({ success: true, imported: 0, message: 'No events found in this calendar file.' });
+    }
+
+    // Dedupe against existing
+    const { data: existing } = await supabase
+      .from('vendor_availability_blocks')
+      .select('blocked_date')
+      .eq('vendor_id', vendorId);
+
+    const existingSet = new Set((existing || []).map(function(e) { return e.blocked_date; }));
+
+    const toInsert = events
+      .filter(function(e) { return !existingSet.has(e.date); })
+      .map(function(e) { return {
+        vendor_id: vendorId,
+        blocked_date: e.date,
+        note: e.note ? 'Imported: ' + e.note.slice(0, 100) : 'Imported from calendar',
+      }; });
+
+    if (toInsert.length === 0) {
+      return res.json({ success: true, imported: 0, message: 'All dates already exist in your TDW calendar.' });
+    }
+
+    const { error } = await supabase.from('vendor_availability_blocks').insert(toInsert);
+    if (error) throw error;
+
+    res.json({ success: true, imported: toInsert.length, total_parsed: events.length });
+
+  } catch (err) {
+    console.error('[iCal import]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/v2/vendor/calendar.ics/:vendorId — iCal feed for Apple/Google Calendar
 app.get('/api/v2/vendor/calendar.ics/:vendorId', async (req, res) => {
   try {
