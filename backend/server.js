@@ -32,13 +32,7 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-// Block v1 domain - only allow v2 and local
-app.use((req, res, next) => {
-  const origin = req.headers.origin || req.headers.referer || '';
-  const isV1 = origin.includes('vendor.thedreamwedding.in') && !origin.includes('app.thedreamwedding.in') && !origin.includes('tdw-2');
-  if (isV1) return res.status(403).json({ error: 'v1 is retired. Please use app.thedreamwedding.in' });
-  next();
-});
+// v1 desktop portal (vendor.thedreamwedding.in) is now active — block removed
 
 app.use(express.urlencoded({ extended: true }));
 
