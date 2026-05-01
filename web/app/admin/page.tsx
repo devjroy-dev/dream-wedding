@@ -595,7 +595,7 @@ export default function AdminPage() {
     try {
       const [codesRes, vendorsRes, tierCodesRes, coupleCodesRes] = await Promise.all([
         fetch(`${API}/api/access-codes`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API}/api/vendors`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API}/api/admin/all-vendors`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API}/api/tier-codes`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API}/api/couple-codes`).then(r => r.json()).catch(() => ({ success: false })),
       ]);
@@ -617,7 +617,7 @@ export default function AdminPage() {
     if (!vendorTierSearch.trim()) return;
     setVendorTierSearching(true);
     try {
-      const res = await fetch(API + '/api/vendors?search=' + encodeURIComponent(vendorTierSearch.trim()));
+      const res = await fetch(API + '/api/admin/all-vendors?search=' + encodeURIComponent(vendorTierSearch.trim()));
       const data = await res.json();
       if (data.success) {
         const filtered = (data.data || []).filter((v: any) => v.name?.toLowerCase().includes(vendorTierSearch.toLowerCase()) || v.email?.toLowerCase().includes(vendorTierSearch.toLowerCase()) || v.phone?.includes(vendorTierSearch));
