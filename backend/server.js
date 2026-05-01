@@ -13970,7 +13970,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
 
       // Execute query tools immediately, collect mutation tools for confirmation
       const toolResults = [];
-      const QUERY_TOOLS = ['query_schedule', 'query_revenue', 'query_clients', 'save_to_muse', 'complete_task', 'add_expense'];
+      const QUERY_TOOLS = ['query_schedule', 'query_revenue', 'query_clients', 'general_reply', 'save_to_muse', 'complete_task', 'add_expense'];
 
       for (const toolBlock of toolUseBlocks) {
         const { id: toolUseId, name: toolName, input: toolInput } = toolBlock;
