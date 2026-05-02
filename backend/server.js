@@ -5935,7 +5935,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       supabase.from('couple_events').select('*').eq('couple_id', userId).order('event_date', { ascending: true }),
       supabase.from('couple_expenses').select('*').eq('couple_id', userId),
       supabase.from('couple_profiles').select('total_budget').eq('user_id', userId).maybeSingle(),
-      supabase.from('moodboard_items').select('id, vendor_id, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(3),
+      supabase.from('moodboard_items').select('id, vendor_id, image_url, source_url, title, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(3),
       supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, vendor_unread_count').eq('couple_id', userId).eq('status', 'active').order('last_message_at', { ascending: false }),
       supabase.from('couple_vendors').select('id, name, category, status, events').eq('couple_id', userId),
       supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
