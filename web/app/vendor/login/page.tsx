@@ -3,23 +3,24 @@ import { useState, useEffect, useRef } from 'react';
 
 const API = 'https://dream-wedding-production-89ae.up.railway.app';
 
-const C = {
-  cream: '#FAF6F0',
-  ivory: '#FFFFFF',
-  border: '#EDE8E0',
-  goldBorder: '#E8D9B5',
-  dark: '#2C2420',
-  gold: '#C9A84C',
-  goldDeep: '#B8963A',
-  muted: '#8C7B6E',
-  mutedLight: '#B8ADA4',
-  red: '#C65757',
-  redSoft: '#FBEEEE',
-  redBorder: '#F0CFCF',
-};
+const NAVY = '#0C1424';
+const NAVY_LIGHT = '#152035';
+const NAVY_BORDER = '#1E2D45';
+const WHITE = '#FFFFFF';
+const OFF_WHITE = '#F7F8FA';
+const BORDER = '#E4E7EC';
+const TEXT = '#101828';
+const MUTED = '#667085';
+const MUTED_LIGHT = '#98A2B3';
+const GOLD = '#C9A84C';
+const GOLD_DEEP = '#B8963A';
+const RED = '#D92D20';
+const RED_BG = '#FEF3F2';
+const RED_BORDER = '#FDA29B';
 
 export default function VendorLoginPage() {
   const [mounted, setMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const goToVendorHome = () => {
     const mob = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -28,55 +29,140 @@ export default function VendorLoginPage() {
 
   useEffect(() => {
     setMounted(true);
+    setIsMobile(window.innerWidth < 768);
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
     try {
       const s = localStorage.getItem('vendor_web_session');
-      if (s) {
-        const p = JSON.parse(s);
-        if (p.vendorId) goToVendorHome();
-      }
+      if (s) { const p = JSON.parse(s); if (p.vendorId) goToVendorHome(); }
     } catch {}
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   if (!mounted) return null;
 
   return (
     <div style={{
-      minHeight: '100vh', background: C.cream,
-      fontFamily: "'DM Sans', sans-serif",
-      padding: '56px 24px max(24px, env(safe-area-inset-bottom))',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      display: 'flex', minHeight: '100vh',
+      fontFamily: "'Inter', 'DM Sans', system-ui, sans-serif",
+      flexDirection: isMobile ? 'column' : 'row',
     }}>
-      <div style={{ maxWidth: 420, width: '100%' }}>
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
+      {/* LEFT — Navy panel */}
+      {!isMobile && (
+        <div style={{
+          width: '45%', background: NAVY,
+          display: 'flex', flexDirection: 'column',
+          justifyContent: 'space-between',
+          padding: '48px 52px',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          {/* Subtle decorative circle */}
+          <div style={{
+            position: 'absolute', bottom: -120, right: -120,
+            width: 380, height: 380, borderRadius: '50%',
+            background: NAVY_LIGHT, opacity: 0.6,
+          }} />
+          <div style={{
+            position: 'absolute', top: -80, left: -80,
+            width: 240, height: 240, borderRadius: '50%',
+            background: NAVY_LIGHT, opacity: 0.4,
+          }} />
+
+          {/* Logo */}
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <p style={{
+              margin: '0 0 6px', fontSize: 10, color: GOLD,
+              fontWeight: 600, letterSpacing: '3px', textTransform: 'uppercase',
+            }}>The Dream Wedding</p>
+            <h1 style={{
+              margin: 0, fontSize: 26, color: WHITE,
+              fontFamily: "'Georgia', 'Playfair Display', serif",
+              fontWeight: 400, lineHeight: '34px',
+            }}>Business Portal</h1>
+          </div>
+
+          {/* Centre content */}
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <p style={{
+              fontSize: 13, color: GOLD, fontStyle: 'italic',
+              margin: '0 0 40px', lineHeight: 1.6,
+              fontFamily: "'Georgia', serif",
+            }}>
+              Not just happily married.<br />Getting married happily.
+            </p>
+
+            {[
+              { icon: '◈', label: 'Client & enquiry management' },
+              { icon: '◈', label: 'Revenue tracking & invoicing' },
+              { icon: '◈', label: 'Team scheduling & task delegation' },
+              { icon: '◈', label: 'Calendar sync & availability' },
+              { icon: '◈', label: 'DreamAi — your business co-pilot' },
+            ].map((f, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <span style={{ color: GOLD, fontSize: 10, flexShrink: 0 }}>{f.icon}</span>
+                <span style={{ fontSize: 13, color: '#A8BACE', lineHeight: 1.5 }}>{f.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ height: 1, background: NAVY_BORDER, marginBottom: 20 }} />
+            <p style={{ margin: 0, fontSize: 11, color: '#4A6080', lineHeight: 1.6 }}>
+              Access is by invitation only.<br />
+              Use the same number registered with TDW.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* RIGHT — White panel */}
+      <div style={{
+        flex: 1, background: WHITE,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: isMobile ? '48px 24px' : '48px 64px',
+      }}>
+        <div style={{ width: '100%', maxWidth: 400 }}>
+          {/* Mobile-only logo */}
+          {isMobile && (
+            <div style={{ textAlign: 'center', marginBottom: 36 }}>
+              <p style={{
+                margin: '0 0 4px', fontSize: 10, color: GOLD_DEEP,
+                fontWeight: 600, letterSpacing: '3px', textTransform: 'uppercase',
+              }}>The Dream Wedding</p>
+              <h1 style={{
+                margin: 0, fontSize: 24, color: TEXT,
+                fontFamily: "'Georgia', serif", fontWeight: 400,
+              }}>Business Portal</h1>
+            </div>
+          )}
+
+          {/* Heading */}
+          <div style={{ marginBottom: 32 }}>
+            <h2 style={{
+              margin: '0 0 8px', fontSize: 22, color: TEXT,
+              fontWeight: 600, letterSpacing: '-0.3px', lineHeight: '28px',
+            }}>Sign in</h2>
+            <p style={{ margin: 0, fontSize: 14, color: MUTED, lineHeight: 1.6 }}>
+              Enter your registered phone number to continue.
+            </p>
+          </div>
+
+          <OTPLoginFlow onSuccess={goToVendorHome} />
+
+          {/* Bottom link */}
           <p style={{
-            margin: '0 0 4px', fontSize: 10, color: C.goldDeep, fontWeight: 500,
-            letterSpacing: '3px', textTransform: 'uppercase',
-          }}>The Dream Wedding</p>
-          <h1 style={{
-            margin: '0 0 8px', fontSize: 28, color: C.dark,
-            fontFamily: "'Playfair Display', serif", fontWeight: 400, lineHeight: '34px',
-          }}>Business Portal</h1>
-          <p style={{
-            margin: 0, fontSize: 13, color: C.muted,
-            fontWeight: 300, lineHeight: '20px',
+            textAlign: 'center', margin: '28px 0 0',
+            fontSize: 12, color: MUTED_LIGHT, lineHeight: 1.6,
           }}>
-            Sign in with your registered phone number.
+            Not a vendor yet?{' '}
+            <a href="https://thedreamwedding.in" style={{ color: GOLD_DEEP, textDecoration: 'none', fontWeight: 500 }}>
+              Apply to join →
+            </a>
           </p>
         </div>
-
-        <OTPLoginFlow onSuccess={goToVendorHome} />
       </div>
     </div>
-  );
-}
-
-function FormLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <label style={{
-      display: 'block', fontSize: 11, color: C.muted,
-      fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase',
-      marginBottom: 6, fontFamily: "'DM Sans', sans-serif",
-    }}>{children}</label>
   );
 }
 
@@ -84,32 +170,27 @@ function ErrorBanner({ msg }: { msg: string }) {
   if (!msg) return null;
   return (
     <div style={{
-      background: C.redSoft, border: `1px solid ${C.redBorder}`,
-      borderRadius: 8, padding: '10px 12px',
-      fontSize: 12, color: C.red, marginBottom: 14,
-    }}>
-      {msg}
-    </div>
+      background: RED_BG, border: `1px solid ${RED_BORDER}`,
+      borderRadius: 8, padding: '10px 14px',
+      fontSize: 13, color: RED, marginBottom: 16, lineHeight: 1.5,
+    }}>{msg}</div>
   );
 }
 
-function GoldButton({ label, onTap, disabled }: {
+function PrimaryButton({ label, onTap, disabled }: {
   label: string; onTap: () => void; disabled?: boolean;
 }) {
   return (
-    <button
-      onClick={onTap}
-      disabled={disabled}
-      style={{
-        width: '100%', padding: '14px 24px',
-        background: disabled ? C.border : C.dark,
-        color: disabled ? C.mutedLight : C.gold,
-        border: 'none', borderRadius: 12,
-        fontSize: 12, fontWeight: 600, letterSpacing: '1.8px', textTransform: 'uppercase',
-        fontFamily: "'DM Sans', sans-serif",
-        cursor: disabled ? 'not-allowed' : 'pointer',
-      }}
-    >{label}</button>
+    <button onClick={onTap} disabled={disabled} style={{
+      width: '100%', padding: '13px 24px',
+      background: disabled ? OFF_WHITE : NAVY,
+      color: disabled ? MUTED_LIGHT : WHITE,
+      border: `1px solid ${disabled ? BORDER : NAVY}`,
+      borderRadius: 10, fontSize: 14, fontWeight: 600,
+      letterSpacing: '0.2px', cursor: disabled ? 'not-allowed' : 'pointer',
+      transition: 'background 0.15s ease',
+      fontFamily: "inherit",
+    }}>{label}</button>
   );
 }
 
@@ -140,7 +221,7 @@ function OtpBoxes({ value, onChange, onComplete }: {
     }
   };
   return (
-    <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginBottom: 14 }}>
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginBottom: 16 }}>
       {Array.from({ length: 6 }, (_, i) => (
         <input
           key={i}
@@ -152,11 +233,12 @@ function OtpBoxes({ value, onChange, onComplete }: {
           onPaste={handlePaste}
           autoFocus={i === 0}
           style={{
-            width: 44, height: 52, background: C.ivory,
-            border: `1px solid ${value[i] ? C.gold : C.border}`,
+            width: 48, height: 56, background: value[i] ? WHITE : OFF_WHITE,
+            border: `1.5px solid ${value[i] ? NAVY : BORDER}`,
             borderRadius: 10, textAlign: 'center',
-            fontSize: 20, fontFamily: "'Playfair Display', serif",
-            color: C.dark, outline: 'none', boxSizing: 'border-box',
+            fontSize: 22, fontWeight: 600,
+            color: TEXT, outline: 'none', boxSizing: 'border-box',
+            transition: 'border-color 0.15s',
           }}
         />
       ))}
@@ -206,12 +288,9 @@ function OTPLoginFlow({ onSuccess }: { onSuccess: () => void }) {
       }
       try {
         const session = {
-          vendorId: vendor.id,
-          id: vendor.id,
-          vendorName: vendor.name || '',
-          name: vendor.name || '',
-          category: vendor.category || '',
-          phone: clean,
+          vendorId: vendor.id, id: vendor.id,
+          vendorName: vendor.name || '', name: vendor.name || '',
+          category: vendor.category || '', phone: clean,
           pin_set: vendor.pin_set || false,
         };
         localStorage.setItem('vendor_web_session', JSON.stringify(session));
@@ -224,64 +303,70 @@ function OTPLoginFlow({ onSuccess }: { onSuccess: () => void }) {
   if (step === 'phone') {
     return (
       <div>
-        <FormLabel>Phone number</FormLabel>
-        <div style={{ position: 'relative', marginBottom: 14 }}>
+        <label style={{
+          display: 'block', fontSize: 13, color: TEXT,
+          fontWeight: 500, marginBottom: 6,
+        }}>Phone number</label>
+        <div style={{ position: 'relative', marginBottom: 16 }}>
           <span style={{
             position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
-            fontSize: 15, color: C.muted, fontFamily: "'DM Sans', sans-serif",
+            fontSize: 14, color: MUTED, fontWeight: 500,
           }}>+91</span>
           <input
             type="tel" value={phone}
             onChange={e => { setPhone(e.target.value.replace(/\D/g, '').slice(0, 10)); setError(''); }}
             placeholder="98765 43210"
-            autoFocus
-            inputMode="numeric"
+            autoFocus inputMode="numeric"
             onKeyDown={e => e.key === 'Enter' && !loading && sendOtp()}
             style={{
               width: '100%', boxSizing: 'border-box',
-              padding: '12px 16px 12px 46px', borderRadius: 10,
-              border: `1px solid ${C.border}`, background: C.ivory,
-              fontFamily: "'DM Sans', sans-serif", fontSize: 15, color: C.dark, outline: 'none',
+              padding: '12px 16px 12px 48px', borderRadius: 10,
+              border: `1.5px solid ${BORDER}`, background: OFF_WHITE,
+              fontSize: 15, color: TEXT, outline: 'none',
+              fontFamily: 'inherit',
+              transition: 'border-color 0.15s',
             }}
+            onFocus={e => { e.target.style.borderColor = NAVY; e.target.style.background = WHITE; }}
+            onBlur={e => { e.target.style.borderColor = BORDER; e.target.style.background = OFF_WHITE; }}
           />
         </div>
         <ErrorBanner msg={error} />
-        <GoldButton
+        <PrimaryButton
           label={loading ? 'Sending code…' : 'Send verification code'}
           onTap={sendOtp}
           disabled={loading || phone.replace(/\D/g, '').length !== 10}
         />
-        <p style={{
-          textAlign: 'center', margin: '20px 0 0',
-          fontSize: 11, color: C.mutedLight, lineHeight: 1.6,
-        }}>
-          Business portal access is by invitation only.<br />
-          Use the same number registered with The Dream Wedding.
-        </p>
       </div>
     );
   }
 
   return (
     <div>
-      <p style={{ fontSize: 13, color: C.muted, marginBottom: 16, lineHeight: 1.6 }}>
-        We sent a 6-digit code to +91 {phone.replace(/\D/g, '').slice(-10)}.
+      <p style={{ fontSize: 14, color: MUTED, marginBottom: 20, lineHeight: 1.6 }}>
+        We sent a 6-digit code to <strong style={{ color: TEXT }}>+91 {phone.replace(/\D/g, '').slice(-10)}</strong>.
       </p>
-      <FormLabel>Verification code</FormLabel>
-      <OtpBoxes value={otp} onChange={v => { setOtp(v); setError(''); }} onComplete={v => !loading && verifyOtp(v)} />
+      <label style={{
+        display: 'block', fontSize: 13, color: TEXT,
+        fontWeight: 500, marginBottom: 8,
+      }}>Verification code</label>
+      <OtpBoxes
+        value={otp}
+        onChange={v => { setOtp(v); setError(''); }}
+        onComplete={v => !loading && verifyOtp(v)}
+      />
       <ErrorBanner msg={error} />
-      <GoldButton
+      <PrimaryButton
         label={loading ? 'Verifying…' : 'Sign in'}
         onTap={() => verifyOtp()}
         disabled={loading || otp.length < 6}
       />
-      <div style={{ textAlign: 'center', marginTop: 14 }}>
+      <div style={{ textAlign: 'center', marginTop: 16 }}>
         <button
           onClick={() => { setStep('phone'); setOtp(''); setError(''); }}
           style={{
-            background: 'none', border: 'none', color: C.muted,
-            fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-            cursor: 'pointer', textDecoration: 'underline',
+            background: 'none', border: 'none', color: MUTED,
+            fontSize: 13, cursor: 'pointer', textDecoration: 'underline',
+            fontFamily: 'inherit',
           }}
         >Use a different number</button>
       </div>
