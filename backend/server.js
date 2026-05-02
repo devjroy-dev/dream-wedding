@@ -11292,9 +11292,7 @@ app.post('/api/v2/couple/muse', async (req, res) => {
     const { data, error } = await supabase.from('moodboard_items').insert([{
       user_id,
       vendor_id: null,
-      image_url: ogImage || null,
-      source_url,
-      title: title || null,
+      image_url: ogImage || source_url,
       function_tag: 'muse_save',
       created_at: new Date().toISOString(),
     }]).select().single();
