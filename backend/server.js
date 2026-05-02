@@ -5938,7 +5938,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       supabase.from('moodboard_items').select('id, vendor_id, image_url, source_url, title, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(3),
       supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_from, vendor_unread_count').eq('couple_id', userId).eq('status', 'active').order('last_message_at', { ascending: false }),
       supabase.from('couple_vendors').select('id, name, category, status, events').eq('couple_id', userId),
-      supabase.from('vendor_enquiries').select('id, last_message_at, last_message_preview').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
+      supabase.from('vendor_enquiries').select('id, vendor_id, last_message_at, last_message_preview, last_message_from').eq('couple_id', userId).order('last_message_at', { ascending: false }).limit(5),
     ]);
 
     // ── Hero state ────────────────────────────────────────────────────────────
@@ -6086,11 +6086,22 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
     const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
 
     // ── Quiet activity ────────────────────────────────────────────────────────
+    // Enrich with vendor names
+    const activityVendorIds = [...new Set((activityRows || []).map(e => e.vendor_id).filter(Boolean))];
+    let activityVendorMap = {};
+    if (activityVendorIds.length > 0) {
+      const { data: actVendors } = await supabase.from('vendors').select('id, name, category').in('id', activityVendorIds);
+      (actVendors || []).forEach(v => { activityVendorMap[v.id] = v; });
+    }
     const quietActivity = (activityRows || []).slice(0, 5).map(e => ({
       type: 'message',
       text: e.last_message_preview || 'New message',
       at: e.last_message_at,
       enquiry_id: e.id,
+      vendor_id: e.vendor_id,
+      vendor_name: activityVendorMap[e.vendor_id]?.name || null,
+      vendor_category: activityVendorMap[e.vendor_id]?.category || null,
+      from: e.last_message_from || 'unknown',
     }));
 
     res.json({
