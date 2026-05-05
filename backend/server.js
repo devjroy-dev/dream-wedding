@@ -14499,26 +14499,22 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
     const { userId, userType, message, context, history, image_base64, image_media_type } = req.body || {};
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
 
-    // PHASE 5: Token quota enforcement for in-app DreamAi chat
+    // Vendor in-app daily cap — Directive 2.3
+    // Caps: Essential 20/day, Signature 75/day, Prestige unlimited
     if (userId && userType === 'vendor') {
-      const { data: vendorQuota } = await supabase.from('vendors')
-        .select('ai_commands_used, ai_extra_tokens, tier')
-        .eq('id', userId).maybeSingle();
+      const { data: vSubCheck } = await supabase.from('vendor_subscriptions')
+        .select('tier').eq('vendor_id', userId).maybeSingle();
+      const vTierCheck = (vSubCheck && vSubCheck.tier) ? vSubCheck.tier : 'essential';
 
-      if (vendorQuota) {
-        const quota = getAiQuota(vendorQuota);
-        const used = vendorQuota.ai_commands_used || 0;
-        const extra = vendorQuota.ai_extra_tokens || 0;
-        const totalRemaining = Math.max(0, quota - used) + extra;
+      const vendorDailyResult = await checkAndIncrementDailyUsage(
+        userId, 'vendor', 'inapp', vTierCheck, false, null
+      );
 
-        if (totalRemaining <= 0) {
-          return res.json({
-            success: true,
-            reply: "You've used all your DreamAi commands this month. Top up at Settings → DreamAi Tokens.\n\n50 commands for ₹100 · 200 for ₹350 · 500 for ₹800",
-          });
-        }
-
-        // NOTE: Actual increment happens POST-loop, charged per tool (Directive 2.4)
+      if (!vendorDailyResult.allowed) {
+        const capMsg = vTierCheck === 'essential'
+          ? "You've used your 20 in-app DreamAi messages for today. Upgrade to Signature for 75/day, or wait until midnight IST."
+          : "You've used your daily in-app DreamAi messages. Your limit resets at midnight IST.";
+        return res.json({ success: true, reply: capMsg, quota_exceeded: true });
       }
     }
 
@@ -14724,31 +14720,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
       allMessages.push({ role: 'user', content: toolResults });
     }
 
-    // Directive 2.4: Post-loop vendor deduction — charged per tool called
-    if (userId && userType === 'vendor' && toolsExecuted > 0) {
-      try {
-        const { data: vq } = await supabase.from('vendors')
-          .select('ai_commands_used, ai_extra_tokens').eq('id', userId).maybeSingle();
-        if (vq) {
-          const vUsed = vq.ai_commands_used || 0;
-          const vExtra = vq.ai_extra_tokens || 0;
-          const { data: vSub } = await supabase.from('vendor_subscriptions')
-            .select('tier').eq('vendor_id', userId).maybeSingle();
-          const vTier = (vSub && vSub.tier) ? vSub.tier : 'essential';
-          const vAllowance = vTier === 'prestige' ? 999999 : vTier === 'signature' ? 75 : 20;
-          const vTierRemaining = Math.max(0, vAllowance - vUsed);
-          if (toolsExecuted <= vTierRemaining) {
-            await supabase.from('vendors').update({ ai_commands_used: vUsed + toolsExecuted }).eq('id', userId);
-          } else {
-            const fromExtra = toolsExecuted - vTierRemaining;
-            await supabase.from('vendors').update({
-              ai_commands_used: vUsed + vTierRemaining,
-              ai_extra_tokens: Math.max(0, vExtra - fromExtra),
-            }).eq('id', userId);
-          }
-        }
-      } catch (e) { console.error('[quota] vendor post-loop deduct:', e.message); }
-    }
+    // Vendor daily usage recorded by checkAndIncrementDailyUsage at request start (Directive 2.3)
 
     // Build final response — with grace token signal + upgrade nudge (P0.3 / P0.4)
     let graceSignal = null;
