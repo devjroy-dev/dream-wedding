@@ -14988,9 +14988,16 @@ app.post('/api/v2/vendor/calendar/import/:vendorId', async (req, res) => {
 
     if (!ics_content) return res.status(400).json({ success: false, error: 'No iCal content provided.' });
 
+    // RFC 5545 unfolding: Google Calendar exports use CRLF + folded lines (long lines wrapped with \r\n + whitespace)
+    // Unfold before parsing: join any line that starts with a space or tab to the previous line
+    const unfolded = ics_content
+      .replace(/\r\n/g, '\n')   // normalise CRLF → LF
+      .replace(/\r/g, '\n')      // normalise bare CR → LF
+      .replace(/\n[ \t]/g, '');  // RFC 5545 unfold: \n followed by space/tab = continuation
+
     // Parse VEVENT blocks
     const events = [];
-    const eventBlocks = ics_content.split('BEGIN:VEVENT');
+    const eventBlocks = unfolded.split('BEGIN:VEVENT');
     for (let i = 1; i < eventBlocks.length; i++) {
       const block = eventBlocks[i];
 
