@@ -1511,6 +1511,73 @@ app.post('/api/v2/vendor/contracts/:id/acknowledge', async (req, res) => {
 });
 
 // ── End P1.3 Contracts V2 ─────────────────────────────────────────────────────
+
+// ── P1.4 Gmail OAuth ──────────────────────────────────────────────────────────
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://dream-wedding-production-89ae.up.railway.app/api/v2/vendor/gmail/callback';
+
+app.get('/api/v2/vendor/gmail/connect/:vendorId', (req, res) => {
+  if (!GOOGLE_CLIENT_ID) return res.status(503).json({ success: false, error: 'Google OAuth not configured' });
+  const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_REDIRECT_URI, response_type: 'code', scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email', access_type: 'offline', prompt: 'consent', state: req.params.vendorId });
+  res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + params.toString());
+});
+
+app.get('/api/v2/vendor/gmail/callback', async (req, res) => {
+  const { code, state: vendorId, error } = req.query;
+  if (error || !code || !vendorId) return res.redirect('https://vendor.thedreamwedding.in/vendor/studio/settings?gmail=error');
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code, client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, redirect_uri: GOOGLE_REDIRECT_URI, grant_type: 'authorization_code' }).toString() });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token');
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: 'Bearer ' + tokens.access_token } });
+    const profile = await profileRes.json();
+    const expiry = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null;
+    await supabase.from('vendors').update({ google_access_token: tokens.access_token, google_refresh_token: tokens.refresh_token || null, google_token_expiry: expiry, google_email: profile.email || null }).eq('id', vendorId);
+    res.redirect('https://vendor.thedreamwedding.in/vendor/studio/settings?gmail=connected');
+  } catch (err) { console.error('[Gmail OAuth] callback error:', err.message); res.redirect('https://vendor.thedreamwedding.in/vendor/studio/settings?gmail=error'); }
+});
+
+app.get('/api/v2/vendor/gmail/status/:vendorId', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendors').select('google_email, google_access_token').eq('id', req.params.vendorId).maybeSingle();
+    res.json({ success: true, connected: !!(data?.google_access_token && data?.google_email), email: data?.google_email || null });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.delete('/api/v2/vendor/gmail/disconnect/:vendorId', async (req, res) => {
+  try {
+    const { data } = await supabase.from('vendors').select('google_access_token').eq('id', req.params.vendorId).maybeSingle();
+    if (data?.google_access_token) fetch('https://oauth2.googleapis.com/revoke?token=' + data.google_access_token, { method: 'POST' }).catch(() => {});
+    await supabase.from('vendors').update({ google_access_token: null, google_refresh_token: null, google_token_expiry: null, google_email: null }).eq('id', req.params.vendorId);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/v2/vendor/gmail/send', async (req, res) => {
+  const { vendor_id, to, subject, body } = req.body || {};
+  if (!vendor_id || !to || !subject || !body) return res.status(400).json({ success: false, error: 'vendor_id, to, subject, body required' });
+  try {
+    const { data: vendor } = await supabase.from('vendors').select('google_access_token, google_refresh_token, google_token_expiry, google_email').eq('id', vendor_id).maybeSingle();
+    if (!vendor?.google_access_token) return res.status(403).json({ success: false, error: 'Google account not connected' });
+    let accessToken = vendor.google_access_token;
+    if (vendor.google_token_expiry && new Date(vendor.google_token_expiry) < new Date() && vendor.google_refresh_token) {
+      const refreshRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, refresh_token: vendor.google_refresh_token, grant_type: 'refresh_token' }).toString() });
+      const refreshed = await refreshRes.json();
+      if (refreshed.access_token) { accessToken = refreshed.access_token; await supabase.from('vendors').update({ google_access_token: accessToken, google_token_expiry: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString() }).eq('id', vendor_id); }
+    }
+    const from = vendor.google_email || 'me';
+    const emailLines = [`From: ${from}`, `To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '', body];
+    const raw = Buffer.from(emailLines.join('\r\n')).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST', headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ raw }) });
+    const gmailData = await gmailRes.json();
+    if (gmailData.error) throw new Error(gmailData.error.message || 'Gmail send failed');
+    res.json({ success: true, message_id: gmailData.id });
+  } catch (err) { console.error('[Gmail send] error:', err.message); res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── End P1.4 Gmail OAuth ──────────────────────────────────────────────────────
 // EXPENSE ROUTES
 // ==================
 
