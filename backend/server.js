@@ -3016,6 +3016,22 @@ app.get('/api/hot-dates', async (req, res) => {
   }
 });
 
+// v2 alias — supports from/to date range filters used by vendor calendar
+app.get('/api/v2/hot-dates', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let q = supabase.from('hot_dates').select('*').order('date', { ascending: true });
+    if (from) q = q.gte('date', from);
+    if (to) q = q.lte('date', to);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('v2 hot-dates error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Admin: add a hot date
 app.post('/api/hot-dates', async (req, res) => {
   try {
