@@ -229,7 +229,7 @@ app.get('/api/vendors/search', async (req, res) => {
 
 app.post('/api/vendors', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendors').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('vendors').insert([safePayload('vendors', req.body)]).select().single();
     if (error) throw error;
     // Auto-create Signature trial subscription
     if (data?.id) { await createVendorTrial(data.id); logActivity('vendor_registered', 'New vendor: ' + (data.name || 'Unknown') + ' (' + (data.category || '') + ')', { vendor_id: data.id }); }
@@ -249,7 +249,7 @@ app.delete('/api/vendors/:id', async (req, res) => {
 
 app.patch('/api/vendors/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendors').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('vendors').update(safePayload('vendors', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -282,7 +282,7 @@ app.post('/api/users', async (req, res) => {
     const { phone, name, email } = req.body;
     const { data: existing } = await supabase.from('users').select('*').eq('phone', phone).single();
     if (existing) return res.json({ success: true, data: existing, isNew: false });
-    const { data, error } = await supabase.from('users').insert([{ phone, name, email }]).select().single();
+    const { data, error } = await supabase.from('users').insert([safePayload('users', { phone, name, email })]).select().single();
     if (error) throw error;
     res.json({ success: true, data, isNew: true });
   } catch (error) {
@@ -332,7 +332,7 @@ app.delete('/api/users/:id', async (req, res) => {
     }
 
     // 2) CRITICAL: Nullify access_codes.redeemed_user_id (FK that was blocking delete)
-    try { await supabase.from('access_codes').update({ redeemed_user_id: null }).eq('redeemed_user_id', userId); } catch (e) {}
+    try { await supabase.from('access_codes').update(safePayload('access_codes', { redeemed_user_id: null })).eq('redeemed_user_id', userId); } catch (e) {}
 
     // 3) Now delete the user
     const { error } = await supabase.from('users').delete().eq('id', userId);
@@ -362,7 +362,7 @@ app.get('/api/users/:id', async (req, res) => {
 
 app.patch('/api/users/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('users').update(safePayload('users', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -386,7 +386,7 @@ app.get('/api/moodboard/:userId', async (req, res) => {
 
 app.post('/api/moodboard', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('moodboard_items').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('moodboard_items').insert([safePayload('moodboard_items', req.body)]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -425,12 +425,12 @@ app.post('/api/bookings/check-expired', async (req, res) => {
     const ids = expiredBookings.map(b => b.id);
     const { error: updateError } = await supabase
       .from('bookings')
-      .update({
+      .update(safePayload('bookings', {
         status: 'auto_refunded',
         shield_status: 'refunded_to_couple',
         platform_fee_retained: true,
         auto_refunded_at: new Date().toISOString(),
-      })
+      }))
       .in('id', ids);
 
     if (updateError) throw updateError;
@@ -537,11 +537,11 @@ app.post('/api/bookings/:id/confirm', async (req, res) => {
 
     const { data, error } = await supabase
       .from('bookings')
-      .update({
+      .update(safePayload('bookings', {
         status: 'confirmed',
         confirmed_at: new Date().toISOString(),
         shield_status: 'released_to_vendor',
-      })
+      }))
       .eq('id', id)
       .select()
       .single();
@@ -606,13 +606,13 @@ app.post('/api/bookings/:id/decline', async (req, res) => {
 
     const { data, error } = await supabase
       .from('bookings')
-      .update({
+      .update(safePayload('bookings', {
         status: 'declined',
         declined_at: new Date().toISOString(),
         decline_reason: reason || 'Vendor unavailable',
         shield_status: 'refunded_to_couple',
         platform_fee_retained: true,
-      })
+      }))
       .eq('id', id)
       .select()
       .single();
@@ -679,7 +679,7 @@ app.post('/api/vendors/:id/upgrade-nudge', async (req, res) => {
     if (existing.includes(trigger_key)) return res.json({ success: true, data: { already_shown: true } });
     const next = [...existing, trigger_key];
     const { error } = await supabase
-      .from('vendors').update({ upgrade_nudges_shown: next }).eq('id', id);
+      .from('vendors').update(safePayload('vendors', { upgrade_nudges_shown: next })).eq('id', id);
     if (error) throw error;
     res.json({ success: true, data: { upgrade_nudges_shown: next } });
   } catch (error) {
@@ -708,13 +708,13 @@ app.post('/api/bookings/:id/cancel', async (req, res) => {
 
     const { data, error } = await supabase
       .from('bookings')
-      .update({
+      .update(safePayload('bookings', {
         status: 'cancelled_by_vendor',
         cancelled_at: new Date().toISOString(),
         cancel_reason: reason || 'Vendor cancelled',
         shield_status: 'refunded_to_couple',
         platform_fee_retained: true,
-      })
+      }))
       .eq('id', id)
       .select()
       .single();
@@ -789,7 +789,7 @@ app.post('/api/messages', async (req, res) => {
     const { message, ...rest } = req.body;
     const filtered = sanitizeMessage(message);
     const wasFiltered = filtered !== message;
-    const { data, error } = await supabase.from('messages').insert([{ ...rest, message: filtered, was_filtered: wasFiltered }]).select().single();
+    const { data, error } = await supabase.from('messages').insert([safePayload('messages', { ...rest, message: filtered, was_filtered: wasFiltered })]).select().single();
     if (error) throw error;
     res.json({ success: true, data, was_filtered: wasFiltered });
   } catch (error) {
@@ -813,7 +813,7 @@ app.get('/api/guests/:userId', async (req, res) => {
 
 app.post('/api/guests', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('guests').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('guests').insert([safePayload('guests', req.body)]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -823,7 +823,7 @@ app.post('/api/guests', async (req, res) => {
 
 app.patch('/api/guests/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('guests').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('guests').update(safePayload('guests', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -847,7 +847,7 @@ app.get('/api/leads/:vendorId', async (req, res) => {
 
 app.post('/api/leads', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendor_leads').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('vendor_leads').insert([safePayload('vendor_leads', req.body)]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -857,7 +857,7 @@ app.post('/api/leads', async (req, res) => {
 
 app.patch('/api/leads/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendor_leads').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('vendor_leads').update(safePayload('vendor_leads', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -1092,7 +1092,7 @@ app.get('/api/notifications/:userId', async (req, res) => {
 
 app.patch('/api/notifications/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('notifications').update({ read: true }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('notifications').update(safePayload('notifications', { read: true })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -1388,7 +1388,7 @@ app.patch('/api/vendor-clients/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_clients')
-      .update(req.body)
+      .update(safePayload('vendor_clients', req.body))
       .eq('id', req.params.id)
       .select()
       .single();
@@ -1469,7 +1469,7 @@ app.post('/api/contracts', async (req, res) => {
     const financial_year = `FY ${year}-${String(year + 1).slice(-2)}`;
     const { data, error } = await supabase
       .from('vendor_contracts')
-      .insert([{ ...req.body, financial_year }])
+      .insert([safePayload('vendor_contracts', { ...req.body, financial_year })])
       .select()
       .single();
     if (error) throw error;
@@ -1483,7 +1483,7 @@ app.patch('/api/contracts/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_contracts')
-      .update(req.body)
+      .update(safePayload('vendor_contracts', req.body))
       .eq('id', req.params.id)
       .select()
       .single();
@@ -1509,7 +1509,7 @@ app.get('/api/v2/vendor/tc/:vendorId', async (req, res) => {
 app.post('/api/v2/vendor/tc/:vendorId', async (req, res) => {
   try {
     const { tc_text } = req.body || {};
-    const { error } = await supabase.from('vendors').update({ tc_text }).eq('id', req.params.vendorId);
+    const { error } = await supabase.from('vendors').update(safePayload('vendors', { tc_text })).eq('id', req.params.vendorId);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -1529,9 +1529,9 @@ app.post('/api/v2/vendor/contracts/create', async (req, res) => {
     if (!vendor_id || !client_name) return res.status(400).json({ success: false, error: 'vendor_id and client_name required' });
     const version = parent_contract_id ? 2 : 1;
     const ref = 'TDW-' + Date.now().toString().slice(-8).toUpperCase();
-    const { data: contract, error } = await supabase.from('vendor_contracts').insert([{ vendor_id, category, business_name, client_name, client_phone: client_phone || null, client_email: client_email || null, fields_json: fields_json || {}, status: 'draft', version, parent_contract_id: parent_contract_id || null, contract_text: ref }]).select().single();
+    const { data: contract, error } = await supabase.from('vendor_contracts').insert([safePayload('vendor_contracts', { vendor_id, category, business_name, client_name, client_phone: client_phone || null, client_email: client_email || null, fields_json: fields_json || {}, status: 'draft', version, parent_contract_id: parent_contract_id || null, contract_text: ref })]).select().single();
     if (error) throw error;
-    if (parent_contract_id) { await supabase.from('vendor_contracts').update({ superseded_by: contract.id, status: 'superseded' }).eq('id', parent_contract_id); }
+    if (parent_contract_id) { await supabase.from('vendor_contracts').update(safePayload('vendor_contracts', { superseded_by: contract.id, status: 'superseded' })).eq('id', parent_contract_id); }
     const fields = fields_json || {};
     if (fields.total_fee && fields.advance_paid) {
       const balance = Number(fields.total_fee) - Number(fields.advance_paid);
@@ -1543,7 +1543,7 @@ app.post('/api/v2/vendor/contracts/create', async (req, res) => {
 
 app.post('/api/v2/vendor/contracts/:id/send', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendor_contracts').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('vendor_contracts').update(safePayload('vendor_contracts', { status: 'sent', sent_at: new Date().toISOString() })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -1551,7 +1551,7 @@ app.post('/api/v2/vendor/contracts/:id/send', async (req, res) => {
 
 app.post('/api/v2/vendor/contracts/:id/acknowledge', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('vendor_contracts').update({ status: 'acknowledged', acknowledged_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('vendor_contracts').update(safePayload('vendor_contracts', { status: 'acknowledged', acknowledged_at: new Date().toISOString() })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -1581,7 +1581,7 @@ app.get('/api/v2/vendor/gmail/callback', async (req, res) => {
     const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: 'Bearer ' + tokens.access_token } });
     const profile = await profileRes.json();
     const expiry = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null;
-    await supabase.from('vendors').update({ google_access_token: tokens.access_token, google_refresh_token: tokens.refresh_token || null, google_token_expiry: expiry, google_email: profile.email || null }).eq('id', vendorId);
+    await supabase.from('vendors').update(safePayload('vendors', { google_access_token: tokens.access_token, google_refresh_token: tokens.refresh_token || null, google_token_expiry: expiry, google_email: profile.email || null })).eq('id', vendorId);
     res.redirect('https://vendor.thedreamwedding.in/vendor/studio/settings?gmail=connected');
   } catch (err) { console.error('[Gmail OAuth] callback error:', err.message); res.redirect('https://vendor.thedreamwedding.in/vendor/studio/settings?gmail=error'); }
 });
@@ -1597,7 +1597,7 @@ app.delete('/api/v2/vendor/gmail/disconnect/:vendorId', async (req, res) => {
   try {
     const { data } = await supabase.from('vendors').select('google_access_token').eq('id', req.params.vendorId).maybeSingle();
     if (data?.google_access_token) fetch('https://oauth2.googleapis.com/revoke?token=' + data.google_access_token, { method: 'POST' }).catch(() => {});
-    await supabase.from('vendors').update({ google_access_token: null, google_refresh_token: null, google_token_expiry: null, google_email: null }).eq('id', req.params.vendorId);
+    await supabase.from('vendors').update(safePayload('vendors', { google_access_token: null, google_refresh_token: null, google_token_expiry: null, google_email: null })).eq('id', req.params.vendorId);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
@@ -1612,7 +1612,7 @@ app.post('/api/v2/vendor/gmail/send', async (req, res) => {
     if (vendor.google_token_expiry && new Date(vendor.google_token_expiry) < new Date() && vendor.google_refresh_token) {
       const refreshRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, refresh_token: vendor.google_refresh_token, grant_type: 'refresh_token' }).toString() });
       const refreshed = await refreshRes.json();
-      if (refreshed.access_token) { accessToken = refreshed.access_token; await supabase.from('vendors').update({ google_access_token: accessToken, google_token_expiry: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString() }).eq('id', vendor_id); }
+      if (refreshed.access_token) { accessToken = refreshed.access_token; await supabase.from('vendors').update(safePayload('vendors', { google_access_token: accessToken, google_token_expiry: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString() })).eq('id', vendor_id); }
     }
     const from = vendor.google_email || 'me';
     const emailLines = [`From: ${from}`, `To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '', body];
@@ -1906,7 +1906,7 @@ app.post('/api/events', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_calendar_events')
-      .insert([req.body])
+      .insert([safePayload('vendor_calendar_events', req.body)])
       .select().single();
     if (error) throw error;
     res.json({ success: true, data });
@@ -1919,7 +1919,7 @@ app.patch('/api/events/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_calendar_events')
-      .update(req.body)
+      .update(safePayload('vendor_calendar_events', req.body))
       .eq('id', req.params.id)
       .select().single();
     if (error) throw error;
@@ -2005,7 +2005,7 @@ app.patch('/api/payment-schedules/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('vendor_payment_schedules')
-      .update(req.body)
+      .update(safePayload('vendor_payment_schedules', req.body))
       .eq('id', req.params.id)
       .select()
       .single();
@@ -2314,7 +2314,7 @@ app.post('/api/tier-codes/redeem', async (req, res) => {
     }]);
 
     // Mark code as used
-    await supabase.from('access_codes').update({ used: true, used_count: (codeData.used_count || 0) + 1 }).eq('id', codeData.id);
+    await supabase.from('access_codes').update(safePayload('access_codes', { used: true, used_count: (codeData.used_count || 0) + 1 })).eq('id', codeData.id);
 
     res.json({
       success: true,
@@ -2440,11 +2440,11 @@ app.put('/api/subscriptions/:vendorId/tier', async (req, res) => {
     // Check if subscription exists
     const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', req.params.vendorId).single();
     if (existing) {
-      const { data, error } = await supabase.from('vendor_subscriptions').update({ tier, updated_at: new Date().toISOString() }).eq('vendor_id', req.params.vendorId).select().single();
+      const { data, error } = await supabase.from('vendor_subscriptions').update(safePayload('vendor_subscriptions', { tier, updated_at: new Date().toISOString() })).eq('vendor_id', req.params.vendorId).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     } else {
-      const { data, error } = await supabase.from('vendor_subscriptions').insert([{ vendor_id: req.params.vendorId, tier, status: 'active' }]).select().single();
+      const { data, error } = await supabase.from('vendor_subscriptions').insert([safePayload('vendor_subscriptions', { vendor_id: req.params.vendorId, tier, status: 'active' })]).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     }
@@ -2456,11 +2456,11 @@ app.put('/api/subscriptions/:vendorId/founding', async (req, res) => {
     const { founding_badge } = req.body;
     const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', req.params.vendorId).single();
     if (existing) {
-      const { data, error } = await supabase.from('vendor_subscriptions').update({ founding_badge: !!founding_badge, updated_at: new Date().toISOString() }).eq('vendor_id', req.params.vendorId).select().single();
+      const { data, error } = await supabase.from('vendor_subscriptions').update(safePayload('vendor_subscriptions', { founding_badge: !!founding_badge, updated_at: new Date().toISOString() })).eq('vendor_id', req.params.vendorId).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     } else {
-      const { data, error } = await supabase.from('vendor_subscriptions').insert([{ vendor_id: req.params.vendorId, tier: 'essential', status: 'active', founding_badge: !!founding_badge }]).select().single();
+      const { data, error } = await supabase.from('vendor_subscriptions').insert([safePayload('vendor_subscriptions', { vendor_id: req.params.vendorId, tier: 'essential', status: 'active', founding_badge: !!founding_badge })]).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     }
@@ -2856,7 +2856,7 @@ app.post('/api/vendor/reset-password', async (req, res) => {
     if (!vendor) return res.status(404).json({ success: false, error: 'Account not found' });
     const passwordHash = await bcrypt.hash(new_password, 10);
     const { error } = await supabase
-      .from('vendors').update({ password_hash: passwordHash }).eq('id', vendor.id);
+      .from('vendors').update(safePayload('vendors', { password_hash: passwordHash })).eq('id', vendor.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
@@ -3165,7 +3165,7 @@ app.post('/api/access-codes/validate', async (req, res) => {
       return res.json({ success: false, error: 'Code expired' });
     }
     // Increment used count
-    await supabase.from('access_codes').update({ used: true, used_count: (data.used_count || 0) + 1 }).eq('id', data.id);
+    await supabase.from('access_codes').update(safePayload('access_codes', { used: true, used_count: (data.used_count || 0) + 1 })).eq('id', data.id);
     res.json({ success: true, data: {
       type: data.type,
       expires_at: data.expires_at,
@@ -3457,7 +3457,7 @@ app.post('/api/ai-tokens/verify-payment', async (req, res) => {
     const { tokens, price } = AI_TOKEN_PACKS[pack];
     const { data: v } = await supabase.from('vendors').select('ai_extra_tokens').eq('id', vendor_id).single();
     const current = (v && v.ai_extra_tokens) || 0;
-    await supabase.from('vendors').update({ ai_extra_tokens: current + tokens }).eq('id', vendor_id);
+    await supabase.from('vendors').update(safePayload('vendors', { ai_extra_tokens: current + tokens })).eq('id', vendor_id);
     try {
       await supabase.from('ai_token_purchases').insert([{
         vendor_id, pack, tokens, amount: price,
@@ -3600,9 +3600,9 @@ async function incrementAiCommands(vendorId) {
   const used = v.ai_commands_used || 0;
   const extra = v.ai_extra_tokens || 0;
   if (used < allowance) {
-    await supabase.from('vendors').update({ ai_commands_used: used + 1 }).eq('id', vendorId);
+    await supabase.from('vendors').update(safePayload('vendors', { ai_commands_used: used + 1 })).eq('id', vendorId);
   } else if (extra > 0) {
-    await supabase.from('vendors').update({ ai_extra_tokens: extra - 1 }).eq('id', vendorId);
+    await supabase.from('vendors').update(safePayload('vendors', { ai_extra_tokens: extra - 1 })).eq('id', vendorId);
   }
   return used + 1;
 }
@@ -3921,6 +3921,22 @@ const TDW_COUPLE_TOOLS = [
 
 // ─── Tool Executors ───
 async function executeToolCall(toolName, toolInput, vendor) {
+  // P0-SCHEMA-2: tool-to-table map — every write tool mapped to its target table
+  const TOOL_TABLE_MAP = {
+    create_invoice:       'vendor_invoices',
+    block_calendar_dates: 'blocked_dates',
+    add_client:           'vendor_clients',
+    create_task:          'team_tasks',
+    log_expense:          'vendor_expenses',
+    save_to_muse:         'moodboard_items',
+    complete_task:        'couple_checklist',
+    add_expense:          'couple_expenses',
+    add_vendor:           'couple_vendors',
+    add_guest:            'couple_guests',
+    send_enquiry:         'vendor_enquiries',
+  };
+  // P0-DREAMAI-VENDOR-ID diagnostic
+  console.log('[DreamAi] executeToolCall:', toolName, '| id:', vendor?.id);
   try {
     switch (toolName) {
       case 'create_invoice': {
@@ -3928,12 +3944,12 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const gst_amount = Math.round(amount * 0.18);
         const total_amount = amount + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
-        const { data, error } = await supabase.from('vendor_invoices').insert([{
+        const { data, error } = await supabase.from('vendor_invoices').insert([safePayload('vendor_invoices', {
           vendor_id: vendor.id, client_name, event_type,
           amount, gst_amount, total_amount,
           invoice_number: invNum, status: 'pending',
           gst_enabled: true,
-        }]).select().single();
+        })]).select().single();
         if (error) throw error;
         return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_amount.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance paid: ₹' + advance_received.toLocaleString('en-IN') + ' · Remaining: ₹' + (total_amount - advance_received).toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
       }
@@ -3941,19 +3957,19 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'block_calendar_dates': {
         const { client_name, dates, notes = '' } = toolInput;
         for (const date of dates) {
-          await supabase.from('blocked_dates').insert([{
+          await supabase.from('blocked_dates').insert([safePayload('blocked_dates', {
             vendor_id: vendor.id, date, reason: `${client_name} wedding`, notes,
-          }]).select();
+          })]).select();
         }
         return `✓ Blocked ${dates.length} date${dates.length > 1 ? 's' : ''} for ${client_name}\n${dates.join(', ')}`;
       }
 
       case 'add_client': {
         const { client_name, phone = '', event_date = null, event_type = 'Wedding', budget = null } = toolInput;
-        const { error } = await supabase.from('vendor_clients').insert([{
+        const { error } = await supabase.from('vendor_clients').insert([safePayload('vendor_clients', {
           vendor_id: vendor.id, name: client_name, phone,
           event_date, event_type, budget, status: 'upcoming',
-        }]);
+        })]);
         if (error) throw error;
         return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + budget.toLocaleString('en-IN') : ''}`;
       }
@@ -4088,11 +4104,11 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'create_task': {
         const { task, assignee = '', due_date = null } = toolInput;
         try {
-          await supabase.from('team_tasks').insert([{
+          await supabase.from('team_tasks').insert([safePayload('team_tasks', {
             vendor_id: vendor.id, title: task, description: task,
             assignee_name: assignee || vendor.name, due_date,
             status: 'pending', priority: 'medium',
-          }]);
+          })]);
         } catch (e) {}
         return `✓ Task created: ${task}${assignee ? '\nAssigned to: ' + assignee : ''}${due_date ? '\nDue: ' + due_date : ''}`;
       }
@@ -4116,11 +4132,11 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const coupleId = vendor?.id || userId;
         // Try to scrape OG image
         const ogImage = await fetchOgImage(source_url);
-        await supabase.from('moodboard_items').insert([{
+        await supabase.from('moodboard_items').insert([safePayload('moodboard_items', {
           user_id: coupleId, vendor_id: null,
           image_url: ogImage || source_url,
           function_tag,
-        }]);
+        })]);
         if (ogImage) {
           return "Saved to your Muse board with preview! Open Plan > Muse to see it.";
         } else {
@@ -4131,17 +4147,17 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'complete_task': {
         const { task_id } = toolInput;
         if (!task_id) return 'Task ID required.';
-        await supabase.from('couple_checklist').update({ is_complete: true, completed_at: new Date().toISOString() }).eq('id', task_id);
+        await supabase.from('couple_checklist').update(safePayload('couple_checklist', { is_complete: true, completed_at: new Date().toISOString() })).eq('id', task_id);
         return '✓ Task marked complete.';
       }
 
       case 'add_expense': {
         const { vendor_name = '', description, actual_amount, category = 'Other' } = toolInput;
         const coupleId = vendor?.id || userId;
-        await supabase.from('couple_expenses').insert([{
+        await supabase.from('couple_expenses').insert([safePayload('couple_expenses', {
           couple_id: coupleId, vendor_name, description, actual_amount, category,
           payment_status: 'committed', event: 'general',
-        }]);
+        })]);
         return `✓ Expense logged: ₹${actual_amount?.toLocaleString('en-IN')} for ${description}.`;
       }
 
@@ -4149,7 +4165,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const { vendor_name, expense_id } = toolInput;
         const coupleId = vendor && vendor.id ? vendor.id : userId;
         if (expense_id) {
-          await supabase.from('couple_expenses').update({ payment_status: 'paid' }).eq('id', expense_id);
+          await supabase.from('couple_expenses').update(safePayload('couple_expenses', { payment_status: 'paid' })).eq('id', expense_id);
           return "Marked as paid.";
         }
         if (vendor_name) {
@@ -4158,7 +4174,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
             .ilike('vendor_name', '%' + vendor_name + '%')
             .neq('payment_status', 'paid');
           if (!rows || rows.length === 0) return "No unpaid expenses found for " + vendor_name + ".";
-          await supabase.from('couple_expenses').update({ payment_status: 'paid' })
+          await supabase.from('couple_expenses').update(safePayload('couple_expenses', { payment_status: 'paid' }))
             .eq('couple_id', coupleId).ilike('vendor_name', '%' + vendor_name + '%');
           const total = rows.reduce(function(s, r) { return s + (r.actual_amount || 0); }, 0);
           return "Marked paid: " + rows.length + " expense(s) for " + vendor_name + " (Rs." + total.toLocaleString('en-IN') + " total)";
@@ -4169,10 +4185,10 @@ async function executeToolCall(toolName, toolInput, vendor) {
       case 'add_vendor': {
         const { name, category, phone = null, quoted_total = 0, status = 'shortlisted', events = null } = toolInput;
         const coupleId = vendor && vendor.id ? vendor.id : userId;
-        const { error } = await supabase.from('couple_vendors').insert([{
+        const { error } = await supabase.from('couple_vendors').insert([safePayload('couple_vendors', {
           couple_id: coupleId, name, category, phone, quoted_total,
           status, events, source: 'manual',
-        }]);
+        })]);
         if (error) throw error;
         return "Added " + name + " (" + category + ") to your vendors as " + status + "." + (quoted_total ? " Quoted: Rs." + quoted_total.toLocaleString('en-IN') : "");
       }
@@ -4183,16 +4199,16 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const { data: rows } = await supabase.from('couple_vendors')
           .select('id, name').eq('couple_id', coupleId).ilike('name', '%' + vendor_name + '%').limit(1);
         if (!rows || rows.length === 0) return "Vendor " + vendor_name + " not found in your list. Add them first.";
-        await supabase.from('couple_vendors').update({ status: status, updated_at: new Date().toISOString() }).eq('id', rows[0].id);
+        await supabase.from('couple_vendors').update(safePayload('couple_vendors', { status: status, updated_at: new Date().toISOString() })).eq('id', rows[0].id);
         return rows[0].name + " updated to " + status + ".";
       }
 
       case 'add_guest': {
         const { name, phone = null, side = null, rsvp_status = 'pending' } = toolInput;
         const coupleId = vendor && vendor.id ? vendor.id : userId;
-        const { error } = await supabase.from('couple_guests').insert([{
+        const { error } = await supabase.from('couple_guests').insert([safePayload('couple_guests', {
           couple_id: coupleId, name, phone, side, rsvp_status,
-        }]);
+        })]);
         if (error) throw error;
         return name + " added to your guest list" + (side ? " (" + side + " side)" : "") + ".";
       }
@@ -4204,25 +4220,25 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const { data: existing } = await supabase.from('vendor_enquiries')
           .select('id').eq('couple_id', coupleId).eq('vendor_id', vendor_id).maybeSingle();
         if (existing) {
-          await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: existing.id, from_role: 'couple', content: message }]);
-          await supabase.from('vendor_enquiries').update({
+          await supabase.from('vendor_enquiry_messages').insert([safePayload('vendor_enquiry_messages', { enquiry_id: existing.id, from_role: 'couple', content: message })]);
+          await supabase.from('vendor_enquiries').update(safePayload('vendor_enquiries', {
             last_message_at: new Date().toISOString(),
             last_message_preview: message.slice(0, 120),
             last_message_from: 'couple',
             vendor_unread_count: 1,
-          }).eq('id', existing.id);
+          })).eq('id', existing.id);
           return "Message sent to vendor.";
         }
-        const { data: enq, error } = await supabase.from('vendor_enquiries').insert([{
+        const { data: enq, error } = await supabase.from('vendor_enquiries').insert([safePayload('vendor_enquiries', {
           couple_id: coupleId, vendor_id, initial_message: message,
           wedding_date: cp ? cp.wedding_date : null,
           last_message_at: new Date().toISOString(),
           last_message_preview: message.slice(0, 120),
           last_message_from: 'couple',
           vendor_unread_count: 1,
-        }]).select().single();
+        })]).select().single();
         if (error) throw error;
-        await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: enq.id, from_role: 'couple', content: message }]);
+        await supabase.from('vendor_enquiry_messages').insert([safePayload('vendor_enquiry_messages', { enquiry_id: enq.id, from_role: 'couple', content: message })]);
         return "Enquiry sent! You will see replies in Messages.";
       }
 
@@ -4295,7 +4311,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const now = new Date();
         const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
         const financial_year = `FY ${year}-${String(year + 1).slice(-2)}`;
-        const { data, error } = await supabase.from('vendor_expenses').insert([{
+        const { data, error } = await supabase.from('vendor_expenses').insert([safePayload('vendor_expenses', {
           vendor_id: vendor.id,
           description: description || null,
           amount: Number(amount),
@@ -4304,7 +4320,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
           related_name: related_name || null,
           expense_date: now.toISOString().split('T')[0],
           financial_year,
-        }]).select().single();
+        })]).select().single();
         if (error) throw error;
         const typeLabel = expense_type === 'business' ? 'Business expense' : 'Expense';
         return `✓ ${typeLabel} logged: ${description} — ₹${Number(amount).toLocaleString('en-IN')}${category ? ' (' + category + ')' : ''}${related_name ? '\nRef: ' + related_name : ''}`;
@@ -4486,7 +4502,7 @@ I'll add them to your Guest Ledger automatically.`);
       if (isExplicitMuse) {
         if (imageUrls.length > 0) {
           for (const url of imageUrls) {
-            await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' }]);
+            await supabase.from('moodboard_items').insert([safePayload('moodboard_items', { user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' })]);
           }
           await sendWhatsApp(fromPhone, `Saved ${imageUrls.length > 1 ? imageUrls.length + ' images' : 'that'} to your Muse board ✨
 
@@ -4495,7 +4511,7 @@ Open TDW → Muse to see it.`);
         }
         if (urlMatch) {
           const ogImg = await fetchOgImage(urlMatch[0]);
-          await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+          await supabase.from('moodboard_items').insert([safePayload('moodboard_items', { user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' })]);
           if (ogImg) {
             await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
           } else {
@@ -4508,7 +4524,7 @@ Open TDW → Muse to see it.`);
       // ── Social/inspiration URL — auto muse (no keyword needed) ──
       if (isSocialUrl && !isExplicitReceipt) {
         const ogImg = await fetchOgImage(urlMatch[0]);
-        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+        await supabase.from('moodboard_items').insert([safePayload('moodboard_items', { user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' })]);
         if (ogImg) {
           await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
         } else {
@@ -4573,7 +4589,7 @@ Open TDW → Muse to see it.`);
           } else {
             // MUSE classification
             for (const url of imageUrls) {
-              await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' }]);
+              await supabase.from('moodboard_items').insert([safePayload('moodboard_items', { user_id: couple.id, vendor_id: null, image_url: url, function_tag: 'muse_save' })]);
             }
             await sendWhatsApp(fromPhone, `Saved to your Muse board ✨
 
@@ -4596,7 +4612,7 @@ Reply 1 or 2.`);
       // ── Bare URL (non-social) — save to muse ──
       if (urlMatch && !isExplicitReceipt) {
         const ogImg = await fetchOgImage(urlMatch[0]);
-        await supabase.from('moodboard_items').insert([{ user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' }]);
+        await supabase.from('moodboard_items').insert([safePayload('moodboard_items', { user_id: couple.id, vendor_id: null, image_url: ogImg || urlMatch[0], function_tag: 'muse_save' })]);
         if (ogImg) {
           await sendWhatsApp(fromPhone, "Saved to your Muse board with preview! Open TDW > Muse to see it.");
         } else {
@@ -4774,7 +4790,7 @@ Reply 1 or 2.`);
 
     // Track activity — powers Founding Vendors admin tab + keepalive cron
     try {
-      await supabase.from('vendors').update({ last_whatsapp_activity: new Date().toISOString() }).eq('id', vendor.id);
+      await supabase.from('vendors').update(safePayload('vendors', { last_whatsapp_activity: new Date().toISOString() })).eq('id', vendor.id);
     } catch (e) { /* non-fatal — column may not exist yet */ }
 
     // Daily WhatsApp cap check — Directive 2.5 (replaces monthly counter)
@@ -5289,7 +5305,7 @@ app.post('/api/pai/confirm', async (req, res) => {
             .limit(1).maybeSingle();
           if (!existing) throw new Error(`Vendor "${data.vendor_name}" not found in your list`);
           const { data: upd, error } = await supabase
-            .from('couple_vendors').update({ status: data.new_stage })
+            .from('couple_vendors').update(safePayload('couple_vendors', { status: data.new_stage }))
             .eq('id', existing.id).select().single();
           if (error) throw error; createdId = upd?.id;
         } else {
@@ -6616,7 +6632,7 @@ app.get('/api/ds/tasks/:vendorId', async (req, res) => {
 app.post('/api/ds/tasks', async (req, res) => {
   try {
     const { vendor_id, assigned_to, assigned_by, title, description, priority, status, due_date, related_booking_id, related_client_name, category, notes } = req.body;
-    const { data, error } = await supabase.from('team_tasks').insert([{ vendor_id, assigned_to, assigned_by, title, description, priority: priority || 'medium', status: status || 'pending', due_date, related_booking_id, related_client_name, category: category || 'general', notes }]).select().single();
+    const { data, error } = await supabase.from('team_tasks').insert([safePayload('team_tasks', { vendor_id, assigned_to, assigned_by, title, description, priority: priority || 'medium', status: status || 'pending', due_date, related_booking_id, related_client_name, category: category || 'general', notes })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6671,7 +6687,7 @@ app.get('/api/ds/messages/:vendorId', async (req, res) => {
 app.post('/api/ds/messages', async (req, res) => {
   try {
     const { vendor_id, sender_id, sender_name, channel_type, channel_id, message, message_type, reference_id } = req.body;
-    const { data, error } = await supabase.from('team_messages').insert([{ vendor_id, sender_id, sender_name, channel_type: channel_type || 'group', channel_id, message, message_type: message_type || 'text', reference_id }]).select().single();
+    const { data, error } = await supabase.from('team_messages').insert([safePayload('team_messages', { vendor_id, sender_id, sender_name, channel_type: channel_type || 'group', channel_id, message, message_type: message_type || 'text', reference_id })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6680,7 +6696,7 @@ app.post('/api/ds/messages', async (req, res) => {
 app.put('/api/ds/messages/:id/pin', async (req, res) => {
   try {
     const { pinned } = req.body;
-    const { data, error } = await supabase.from('team_messages').update({ pinned }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('team_messages').update(safePayload('team_messages', { pinned })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6704,7 +6720,7 @@ app.get('/api/ds/procurement/:vendorId', async (req, res) => {
 app.post('/api/ds/procurement', async (req, res) => {
   try {
     const { vendor_id, booking_id, item_name, description, vendor_supplier, status, assigned_to, expected_date, cost, notes, related_client_name } = req.body;
-    const { data, error } = await supabase.from('procurement_items').insert([{ vendor_id, booking_id, item_name, description, vendor_supplier, status: status || 'ordered', assigned_to, expected_date, cost, notes, related_client_name }]).select().single();
+    const { data, error } = await supabase.from('procurement_items').insert([safePayload('procurement_items', { vendor_id, booking_id, item_name, description, vendor_supplier, status: status || 'ordered', assigned_to, expected_date, cost, notes, related_client_name })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6744,7 +6760,7 @@ app.get('/api/ds/deliveries/:vendorId', async (req, res) => {
 app.post('/api/ds/deliveries', async (req, res) => {
   try {
     const { vendor_id, booking_id, item_name, description, status, assigned_to, delivery_date, related_client_name, notes } = req.body;
-    const { data, error } = await supabase.from('delivery_items').insert([{ vendor_id, booking_id, item_name, description, status: status || 'preparing', assigned_to, delivery_date, related_client_name, notes }]).select().single();
+    const { data, error } = await supabase.from('delivery_items').insert([safePayload('delivery_items', { vendor_id, booking_id, item_name, description, status: status || 'preparing', assigned_to, delivery_date, related_client_name, notes })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6785,7 +6801,7 @@ app.get('/api/ds/trials/:vendorId', async (req, res) => {
 app.post('/api/ds/trials', async (req, res) => {
   try {
     const { vendor_id, booking_id, client_name, trial_type, scheduled_date, assigned_to, status, notes } = req.body;
-    const { data, error } = await supabase.from('trial_schedule').insert([{ vendor_id, booking_id, client_name, trial_type: trial_type || 'consultation', scheduled_date, assigned_to, status: status || 'scheduled', notes }]).select().single();
+    const { data, error } = await supabase.from('trial_schedule').insert([safePayload('trial_schedule', { vendor_id, booking_id, client_name, trial_type: trial_type || 'consultation', scheduled_date, assigned_to, status: status || 'scheduled', notes })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6825,7 +6841,7 @@ app.get('/api/ds/photos/:vendorId', async (req, res) => {
 app.post('/api/ds/photos', async (req, res) => {
   try {
     const { vendor_id, uploaded_by, uploader_name, booking_id, related_client_name, file_url, thumbnail_url, file_type, title, description } = req.body;
-    const { data, error } = await supabase.from('photo_approvals').insert([{ vendor_id, uploaded_by, uploader_name, booking_id, related_client_name, file_url, thumbnail_url, file_type: file_type || 'image', title, description, status: 'pending' }]).select().single();
+    const { data, error } = await supabase.from('photo_approvals').insert([safePayload('photo_approvals', { vendor_id, uploaded_by, uploader_name, booking_id, related_client_name, file_url, thumbnail_url, file_type: file_type || 'image', title, description, status: 'pending' })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6848,7 +6864,7 @@ app.put('/api/ds/photos/:id', async (req, res) => {
         try {
           const { data: img } = await supabase.from('vendor_images').select('tags').eq('id', image_id).maybeSingle();
           const newTags = Array.from(new Set([...((img?.tags || [])), 'carousel']));
-          await supabase.from('vendor_images').update({ tags: newTags }).eq('id', image_id);
+          await supabase.from('vendor_images').update(safePayload('vendor_images', { tags: newTags })).eq('id', image_id);
           await syncVendorImagesToVendorColumns(vendor_id);
         } catch (e) { console.error('[photo-approve] carousel side effect:', e.message); }
       }
@@ -6893,7 +6909,7 @@ app.get('/api/ds/checkins/:vendorId', async (req, res) => {
 app.post('/api/ds/checkins', async (req, res) => {
   try {
     const { vendor_id, member_id, member_name, booking_id, related_client_name, notes } = req.body;
-    const { data, error } = await supabase.from('team_checkins').insert([{ vendor_id, member_id, member_name, booking_id, related_client_name, status: 'checked_in', notes }]).select().single();
+    const { data, error } = await supabase.from('team_checkins').insert([safePayload('team_checkins', { vendor_id, member_id, member_name, booking_id, related_client_name, status: 'checked_in', notes })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6901,7 +6917,7 @@ app.post('/api/ds/checkins', async (req, res) => {
 
 app.put('/api/ds/checkins/:id/checkout', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('team_checkins').update({ status: 'checked_out', checked_out_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('team_checkins').update(safePayload('team_checkins', { status: 'checked_out', checked_out_at: new Date().toISOString() })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6924,7 +6940,7 @@ app.get('/api/ds/sentiment/:vendorId', async (req, res) => {
 app.post('/api/ds/sentiment', async (req, res) => {
   try {
     const { vendor_id, booking_id, client_name, milestone, rating, logged_by, logger_name, notes } = req.body;
-    const { data, error } = await supabase.from('client_sentiment').insert([{ vendor_id, booking_id, client_name, milestone, rating, logged_by, logger_name, notes }]).select().single();
+    const { data, error } = await supabase.from('client_sentiment').insert([safePayload('client_sentiment', { vendor_id, booking_id, client_name, milestone, rating, logged_by, logger_name, notes })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -6945,7 +6961,7 @@ app.get('/api/ds/templates/:vendorId', async (req, res) => {
 app.post('/api/ds/templates', async (req, res) => {
   try {
     const { vendor_id, template_name, event_type, tasks } = req.body;
-    const { data, error } = await supabase.from('delegation_templates').insert([{ vendor_id, template_name, event_type: event_type || 'wedding', tasks: tasks || [] }]).select().single();
+    const { data, error } = await supabase.from('delegation_templates').insert([safePayload('delegation_templates', { vendor_id, template_name, event_type: event_type || 'wedding', tasks: tasks || [] })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -7388,7 +7404,7 @@ app.get('/api/destination-packages/pending', async (req, res) => {
 // Create package (event manager)
 app.post('/api/destination-packages', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('destination_packages').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('destination_packages').insert([safePayload('destination_packages', req.body)]).select().single();
     if (error) throw error;
     logActivity('destination_package_created', 'New destination package: ' + (data.package_name || '') + ' in ' + (data.destination || ''), { vendor_id: data.vendor_id, package_id: data.id });
     res.json({ success: true, data });
@@ -7398,7 +7414,7 @@ app.post('/api/destination-packages', async (req, res) => {
 // Update package status (admin approve/reject)
 app.put('/api/destination-packages/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('destination_packages').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('destination_packages').update(safePayload('destination_packages', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -7439,7 +7455,7 @@ app.get('/api/featured-boards', async (req, res) => {
 // Create board item (admin)
 app.post('/api/featured-boards', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('featured_boards').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('featured_boards').insert([safePayload('featured_boards', req.body)]).select().single();
     if (error) throw error;
     logActivity('featured_board_created', 'Added to ' + (req.body.board_type || '').replace('_', ' ') + ': ' + (req.body.title || req.body.vendor_name || ''));
     res.json({ success: true, data });
@@ -7449,7 +7465,7 @@ app.post('/api/featured-boards', async (req, res) => {
 // Update board item (admin)
 app.put('/api/featured-boards/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('featured_boards').update(req.body).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('featured_boards').update(safePayload('featured_boards', req.body)).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -7577,7 +7593,7 @@ app.delete('/api/admin/users/:id', async (req, res) => {
     }
 
     // CRITICAL: Nullify access_codes.redeemed_user_id (FK that blocks delete)
-    try { await supabase.from('access_codes').update({ redeemed_user_id: null }).eq('redeemed_user_id', userId); } catch {}
+    try { await supabase.from('access_codes').update(safePayload('access_codes', { redeemed_user_id: null })).eq('redeemed_user_id', userId); } catch {}
 
     // Finally delete the user row
     const { error } = await supabase.from('users').delete().eq('id', userId);
@@ -7614,7 +7630,7 @@ app.delete('/api/admin/vendors/:id', async (req, res) => {
     }
 
     // CRITICAL: Nullify access_codes.redeemed_vendor_id (FK that blocks delete)
-    try { await supabase.from('access_codes').update({ redeemed_vendor_id: null }).eq('redeemed_vendor_id', vendorId); } catch {}
+    try { await supabase.from('access_codes').update(safePayload('access_codes', { redeemed_vendor_id: null })).eq('redeemed_vendor_id', vendorId); } catch {}
 
     // Now delete the vendor row itself
     const { error } = await supabase.from('vendors').delete().eq('id', vendorId);
@@ -7943,7 +7959,7 @@ app.patch('/api/v2/admin/couples/:id/tier', async (req, res) => {
   try {
     const { tier } = req.body || {};
     if (!tier) return res.status(400).json({ error: 'tier required' });
-    const { error } = await supabase.from('users').update({ dreamer_type: tier }).eq('id', req.params.id);
+    const { error } = await supabase.from('users').update(safePayload('users', { dreamer_type: tier })).eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -7953,7 +7969,7 @@ app.patch('/api/v2/admin/couples/:id/tier', async (req, res) => {
 app.patch('/api/v2/admin/couples/:id/revoke', async (req, res) => {
   if (req.headers['x-admin-password'] !== 'Mira@2551354') return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const { error } = await supabase.from('users').update({ dreamer_type: 'revoked' }).eq('id', req.params.id);
+    const { error } = await supabase.from('users').update(safePayload('users', { dreamer_type: 'revoked' })).eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -7976,7 +7992,7 @@ app.delete('/api/v2/admin/couples/:id', async (req, res) => {
       try { await supabase.from(t).delete().eq('user_id', userId); } catch (e) {}
       try { await supabase.from(t).delete().eq('couple_id', userId); } catch (e) {}
     }
-    try { await supabase.from('access_codes').update({ redeemed_user_id: null }).eq('redeemed_user_id', userId); } catch (e) {}
+    try { await supabase.from('access_codes').update(safePayload('access_codes', { redeemed_user_id: null })).eq('redeemed_user_id', userId); } catch (e) {}
     const { error } = await supabase.from('users').delete().eq('id', userId);
     if (error) throw error;
     res.json({ success: true });
@@ -8000,7 +8016,7 @@ app.post('/api/v2/admin/couples/create', async (req, res) => {
     }]).select().single();
     if (error) throw error;
     if (data?.id) {
-      try { await supabase.from('couple_profiles').insert([{ user_id: data.id, total_budget: 0 }]); } catch (e) {}
+      try { await supabase.from('couple_profiles').insert([safePayload('couple_profiles', { user_id: data.id, total_budget: 0 })]); } catch (e) {}
     }
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -8047,7 +8063,7 @@ app.patch('/api/v2/admin/vendors/:id/approve', async (req, res) => {
   try {
     const { data: vendor } = await supabase.from('vendors').select('is_approved').eq('id', req.params.id).maybeSingle();
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
-    const { error } = await supabase.from('vendors').update({ is_approved: !vendor.is_approved }).eq('id', req.params.id);
+    const { error } = await supabase.from('vendors').update(safePayload('vendors', { is_approved: !vendor.is_approved })).eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true, is_approved: !vendor.is_approved });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -8079,7 +8095,7 @@ app.patch('/api/v2/admin/vendors/:id/tier', async (req, res) => {
     const { tier } = req.body || {};
     const allowed = ['essential', 'signature', 'prestige'];
     if (!allowed.includes(tier)) return res.status(400).json({ success: false, error: 'Invalid tier' });
-    const { error } = await supabase.from('vendor_subscriptions').update({ tier }).eq('vendor_id', req.params.id);
+    const { error } = await supabase.from('vendor_subscriptions').update(safePayload('vendor_subscriptions', { tier })).eq('vendor_id', req.params.id);
     if (error) throw error;
     res.json({ success: true, tier });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -8092,7 +8108,7 @@ app.patch('/api/v2/admin/vendors/:id/dreamai', async (req, res) => {
   }
   try {
     const { access } = req.body || {};
-    const { error } = await supabase.from('vendors').update({ dreamai_access: !!access }).eq('id', req.params.id);
+    const { error } = await supabase.from('vendors').update(safePayload('vendors', { dreamai_access: !!access })).eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true, dreamai_access: !!access });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -8626,7 +8642,7 @@ app.post('/api/signup/complete', async (req, res) => {
       }]);
 
       // Mark code as used
-      if (code_id) await supabase.from('access_codes').update({ used: true, used_count: 1 }).eq('id', code_id);
+      if (code_id) await supabase.from('access_codes').update(safePayload('access_codes', { used: true, used_count: 1 })).eq('id', code_id);
 
       logActivity('vendor_signup', name + ' signed up as vendor (' + (tier || 'essential') + ')');
 
@@ -8656,7 +8672,7 @@ app.post('/api/signup/complete', async (req, res) => {
       if (uErr) throw uErr;
 
       // Mark code as used (if admin code)
-      if (code_id) await supabase.from('access_codes').update({ used: true, used_count: 1 }).eq('id', code_id);
+      if (code_id) await supabase.from('access_codes').update(safePayload('access_codes', { used: true, used_count: 1 })).eq('id', code_id);
 
       // Track referral if vendor-referred
       if (code_type === 'couple_referral' && vendor_id) {
@@ -8714,9 +8730,9 @@ app.post('/api/verify/confirm-email', async (req, res) => {
 
     // Mark email as verified in DB
     if (user_type === 'vendor') {
-      await supabase.from('vendor_credentials').update({ email_verified: true }).eq('vendor_id', user_id);
+      await supabase.from('vendor_credentials').update(safePayload('vendor_credentials', { email_verified: true })).eq('vendor_id', user_id);
     } else {
-      await supabase.from('users').update({ email_verified: true }).eq('id', user_id);
+      await supabase.from('users').update(safePayload('users', { email_verified: true })).eq('id', user_id);
     }
 
     delete emailVerifyCodes[cleanEmail];
@@ -8756,7 +8772,7 @@ app.post('/api/verify/check-instagram', async (req, res) => {
 app.post('/api/admin/verify-instagram', async (req, res) => {
   try {
     const { vendor_id, verified } = req.body;
-    await supabase.from('vendors').update({ ig_verified: verified }).eq('id', vendor_id);
+    await supabase.from('vendors').update(safePayload('vendors', { ig_verified: verified })).eq('id', vendor_id);
     logActivity('ig_verify', `Vendor ${vendor_id} IG ${verified ? 'verified' : 'unverified'} by admin`);
     res.json({ success: true });
   } catch (error) {
@@ -8871,11 +8887,11 @@ app.post('/api/couple/onboard', async (req, res) => {
     // If an access_code was used, mark it consumed + link to user
     if (access_code) {
       await supabase.from('access_codes')
-        .update({
+        .update(safePayload('access_codes', {
           used: true,
           redeemed_user_id: userRow.id,
           redeemed_at: new Date().toISOString(),
-        })
+        }))
         .eq('code', ('' + access_code).toUpperCase().trim())
         .eq('type', 'couple_tier');
     }
@@ -9031,7 +9047,7 @@ app.post('/api/couple/reset-password', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(new_password, 10);
     const { error } = await supabase
-      .from('users').update({ password_hash: passwordHash }).eq('id', user.id);
+      .from('users').update(safePayload('users', { password_hash: passwordHash })).eq('id', user.id);
     if (error) throw error;
 
     res.json({ success: true });
@@ -9197,7 +9213,7 @@ app.post('/api/couple/checklist/bulk', async (req, res) => {
     if (error) throw error;
 
     // Mark user as seeded so we never duplicate templates
-    await supabase.from('users').update({ checklist_seeded: true }).eq('id', couple_id);
+    await supabase.from('users').update(safePayload('users', { checklist_seeded: true })).eq('id', couple_id);
 
     res.json({ success: true, data: data || [] });
   } catch (error) {
@@ -9220,7 +9236,7 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
 
     const { data: existing } = await supabase.from('couple_checklist').select('id').eq('couple_id', coupleId);
     if (existing && existing.length > 0) {
-      await supabase.from('users').update({ checklist_seeded: true }).eq('id', coupleId);
+      await supabase.from('users').update(safePayload('users', { checklist_seeded: true })).eq('id', coupleId);
       return res.json({ success: true, seeded: false, message: 'Tasks already exist', count: existing.length });
     }
 
@@ -9292,7 +9308,7 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
     const { data, error } = await supabase.from('couple_checklist').insert(rows).select();
     if (error) throw error;
 
-    await supabase.from('users').update({ checklist_seeded: true }).eq('id', coupleId);
+    await supabase.from('users').update(safePayload('users', { checklist_seeded: true })).eq('id', coupleId);
     res.json({ success: true, seeded: true, count: data?.length || 0 });
   } catch (error) {
     console.error('checklist seed error:', error.message);
@@ -9592,7 +9608,7 @@ app.patch('/api/couple/shagun/:shagunId', async (req, res) => {
     const { shagunId } = req.params;
     const { data, error } = await supabase
       .from('couple_shagun')
-      .update(req.body || {})
+      .update(safePayload('couple_shagun', req.body || {}))
       .eq('id', shagunId)
       .select().single();
     if (error) throw error;
@@ -9709,7 +9725,7 @@ app.delete('/api/couple/guests/:guestId', async (req, res) => {
   try {
     const { guestId } = req.params;
     // Un-link any household members first (set their household_head_id to null)
-    await supabase.from('couple_guests').update({ household_head_id: null }).eq('household_head_id', guestId);
+    await supabase.from('couple_guests').update(safePayload('couple_guests', { household_head_id: null })).eq('household_head_id', guestId);
     const { error } = await supabase.from('couple_guests').delete().eq('id', guestId);
     if (error) throw error;
     res.json({ success: true });
@@ -9877,7 +9893,7 @@ app.patch('/api/couple/moodboard/:pinId', async (req, res) => {
     const { pinId } = req.params;
     const { data, error } = await supabase
       .from('couple_moodboard_pins')
-      .update(req.body || {})
+      .update(safePayload('couple_moodboard_pins', req.body || {}))
       .eq('id', pinId)
       .select().single();
     if (error) throw error;
@@ -10051,7 +10067,7 @@ app.post('/api/couple/wa-templates/bulk', async (req, res) => {
       .insert(rows)
       .select();
     if (error) throw error;
-    await supabase.from('users').update({ wa_templates_seeded: true }).eq('id', couple_id);
+    await supabase.from('users').update(safePayload('users', { wa_templates_seeded: true })).eq('id', couple_id);
     res.json({ success: true, data: data || [] });
   } catch (error) {
     console.error('wa-templates bulk error:', error.message);
@@ -10199,7 +10215,7 @@ app.post('/api/co-planner/invite', async (req, res) => {
     }
 
     if (tokenCost > 0) {
-      await supabase.from('users').update({ token_balance: user.token_balance - tokenCost }).eq('id', user_id);
+      await supabase.from('users').update(safePayload('users', { token_balance: user.token_balance - tokenCost })).eq('id', user_id);
     }
 
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -10291,7 +10307,7 @@ app.get('/api/co-planner/list/:userId', async (req, res) => {
 app.post('/api/co-planner/remove', async (req, res) => {
   try {
     const { invite_id, user_id } = req.body;
-    await supabase.from('co_planners').update({ status: 'removed' }).eq('id', invite_id).eq('primary_user_id', user_id);
+    await supabase.from('co_planners').update(safePayload('co_planners', { status: 'removed' })).eq('id', invite_id).eq('primary_user_id', user_id);
     logActivity('co_planner_removed', `Co-planner ${invite_id} removed`);
     res.json({ success: true });
   } catch (error) {
@@ -10445,7 +10461,7 @@ app.post('/api/enquiry/check-refunds', async (req, res) => {
         // No reply — refund token
         const { data: user } = await supabase.from('users').select('token_balance').eq('id', msg.user_id).single();
         if (user) {
-          await supabase.from('users').update({ token_balance: (user.token_balance || 0) + 1 }).eq('id', msg.user_id);
+          await supabase.from('users').update(safePayload('users', { token_balance: (user.token_balance || 0) + 1 })).eq('id', msg.user_id);
           refunded++;
         }
       }
@@ -10464,7 +10480,7 @@ app.post('/api/ai-access/grant', async (req, res) => {
   try {
     const { vendor_id, enabled } = req.body;
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
-    const { error } = await supabase.from('vendors').update({ ai_enabled: !!enabled }).eq('id', vendor_id);
+    const { error } = await supabase.from('vendors').update(safePayload('vendors', { ai_enabled: !!enabled })).eq('id', vendor_id);
     if (error) return res.json({ success: false, error: error.message });
     logActivity('ai_access_toggle', `Vendor ${vendor_id}: ${enabled ? 'granted' : 'revoked'}`);
     res.json({ success: true, data: { vendor_id, ai_enabled: !!enabled } });
@@ -10508,7 +10524,7 @@ app.post('/api/ai-access/request', async (req, res) => {
   try {
     const { vendor_id, use_case } = req.body;
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
-    await supabase.from('vendors').update({ ai_access_requested: true, ai_use_case: use_case || '' }).eq('id', vendor_id);
+    await supabase.from('vendors').update(safePayload('vendors', { ai_access_requested: true, ai_use_case: use_case || '' })).eq('id', vendor_id);
     logActivity('ai_access_request', `Vendor ${vendor_id} requested AI access`);
     res.json({ success: true });
   } catch (error) {
@@ -10871,7 +10887,7 @@ app.post('/api/discover/admin/revoke', async (req, res) => {
   try {
     const { user_id } = req.body || {};
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
-    const { error } = await supabase.from('users').update({ discover_enabled: false }).eq('id', user_id);
+    const { error } = await supabase.from('users').update(safePayload('users', { discover_enabled: false })).eq('id', user_id);
     if (error) throw error;
     logActivity('discover_access_revoked', `Couple ${user_id} Discover access revoked`);
     res.json({ success: true });
@@ -11086,7 +11102,7 @@ app.post('/api/v2/vendor/leads/:leadId/convert', async (req, res) => {
     if (error) throw error;
 
     // Mark lead as converted
-    await supabase.from('vendor_leads').update({ status: 'converted' }).eq('id', leadId);
+    await supabase.from('vendor_leads').update(safePayload('vendor_leads', { status: 'converted' })).eq('id', leadId);
 
     res.json({ success: true, client, message: `${lead.client_name || lead.name || 'Client'} added to your clients.` });
   } catch (err) {
@@ -11266,7 +11282,7 @@ async function recomputeDiscoverCompletion(vendor_id) {
     if (packages && packages.length > 0) score++;
     if (v.cancellation_policy) score++;
     const pct = Math.round((score / total) * 100);
-    await supabase.from('vendors').update({ discover_completion_pct: pct }).eq('id', vendor_id);
+    await supabase.from('vendors').update(safePayload('vendors', { discover_completion_pct: pct })).eq('id', vendor_id);
   } catch (e) { console.warn('recomputeDiscoverCompletion error:', e.message); }
 }
 
@@ -11457,7 +11473,7 @@ app.post('/api/vendor-discover/submit', async (req, res) => {
     }
 
     // Mark packages as pending
-    await supabase.from('vendor_packages').update({ approval_status: 'pending' })
+    await supabase.from('vendor_packages').update(safePayload('vendor_packages', { approval_status: 'pending' }))
       .eq('vendor_id', vendor_id).eq('is_approved', 'draft');
 
     logActivity('vendor_discover_submitted', `${tier} vendor ${vendor.name} submitted for Discovery review`);
@@ -11550,7 +11566,7 @@ app.post('/api/vendor-discover/admin/submission/finalize', async (req, res) => {
         approval_status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: 'admin-bulk',
       }).eq('vendor_id', sub.vendor_id).eq('is_approved', 'pending');
       // Auto-approve pending packages
-      await supabase.from('vendor_packages').update({ approval_status: 'approved', reviewed_at: new Date().toISOString() })
+      await supabase.from('vendor_packages').update(safePayload('vendor_packages', { approval_status: 'approved', reviewed_at: new Date().toISOString() }))
         .eq('vendor_id', sub.vendor_id).eq('is_approved', 'pending');
       logActivity('vendor_discover_listed', `Vendor ${sub.vendor_id} listed in Discovery (${status})`);
     } else {
@@ -11989,7 +12005,7 @@ async function upsertCoupleVendor(couple_id, vendor_id, newStatus) {
     if (existing) {
       // Only upgrade, never downgrade
       if ((statusRank[newStatus] || 0) > (statusRank[existing.status] || 0)) {
-        await supabase.from('couple_vendors').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', existing.id);
+        await supabase.from('couple_vendors').update(safePayload('couple_vendors', { status: newStatus, updated_at: new Date().toISOString() })).eq('id', existing.id);
       }
     } else {
       await supabase.from('couple_vendors').insert([{
@@ -12411,7 +12427,7 @@ app.get('/api/vendor-discover/mode-state/:vendor_id', async (req, res) => {
     const now = new Date();
     if (trialStatus === 'active' && trialDeadline && trialDeadline < now && completionPct < 100) {
       trialStatus = 'paused';
-      try { await supabase.from('vendors').update({ discovery_trial_status: 'paused' }).eq('id', v.id); } catch {}
+      try { await supabase.from('vendors').update(safePayload('vendors', { discovery_trial_status: 'paused' })).eq('id', v.id); } catch {}
     }
 
     const daysLeft = trialDeadline ? Math.max(0, Math.ceil((trialDeadline.getTime() - now.getTime()) / 86400000)) : null;
@@ -12496,7 +12512,7 @@ app.post('/api/vendor-discover/onboard/:vendor_id', async (req, res) => {
     const skippedCols = [];
     for (const u of optionalUpdates) {
       try {
-        const { error } = await supabase.from('vendors').update({ [u.col]: u.val }).eq('id', vendorId);
+        const { error } = await supabase.from('vendors').update(safePayload('vendors', { [u.col]: u.val })).eq('id', vendorId);
         if (error) {
           console.error(`[onboard] Skipping column ${u.col}: ${error.message}`);
           skippedCols.push(u.col);
@@ -12581,7 +12597,7 @@ app.post('/api/vendor-images/bulk-tag', async (req, res) => {
       if (Array.isArray(remove_tags)) {
         nextTags = nextTags.filter(t => !remove_tags.includes(t));
       }
-      await supabase.from('vendor_images').update({ tags: nextTags }).eq('id', img.id);
+      await supabase.from('vendor_images').update(safePayload('vendor_images', { tags: nextTags })).eq('id', img.id);
     }
     // Sync all affected vendors
     for (const vid of vendorIds) {
@@ -12773,7 +12789,7 @@ app.post('/api/vendor-activity/mark-read', async (req, res) => {
   try {
     const { vendor_id } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
-    await supabase.from('vendor_activity_log').update({ is_read: true }).eq('vendor_id', vendor_id).eq('is_read', false);
+    await supabase.from('vendor_activity_log').update(safePayload('vendor_activity_log', { is_read: true })).eq('vendor_id', vendor_id).eq('is_read', false);
     res.json({ success: true });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -12863,7 +12879,7 @@ app.post('/api/vendor-images/set-hero', async (req, res) => {
     for (const img of imgs) {
       const tags = Array.isArray(img.tags) ? img.tags.filter(t => t !== 'hero') : [];
       if (img.id === image_id) tags.push('hero');
-      await supabase.from('vendor_images').update({ tags }).eq('id', img.id);
+      await supabase.from('vendor_images').update(safePayload('vendor_images', { tags })).eq('id', img.id);
     }
     await syncVendorImagesToVendorColumns(vendor_id);
     res.json({ success: true });
@@ -12889,7 +12905,7 @@ app.post('/api/vendor-images/toggle-carousel', async (req, res) => {
     if (hasCarousel) {
       // remove carousel
       const newTags = targetTags.filter(t => t !== 'carousel');
-      await supabase.from('vendor_images').update({ tags: newTags }).eq('id', image_id);
+      await supabase.from('vendor_images').update(safePayload('vendor_images', { tags: newTags })).eq('id', image_id);
       await syncVendorImagesToVendorColumns(vendor_id);
       return res.json({ success: true, added: false });
     } else {
@@ -12901,7 +12917,7 @@ app.post('/api/vendor-images/toggle-carousel', async (req, res) => {
         return res.status(400).json({ success: false, error: 'tier_cap', cap, tier, message: `Your ${tier} tier allows ${cap} images total. Upgrade or remove one from carousel.` });
       }
       const newTags = [...targetTags, 'carousel'];
-      await supabase.from('vendor_images').update({ tags: newTags }).eq('id', image_id);
+      await supabase.from('vendor_images').update(safePayload('vendor_images', { tags: newTags })).eq('id', image_id);
       await syncVendorImagesToVendorColumns(vendor_id);
       return res.json({ success: true, added: true });
     }
@@ -13339,26 +13355,26 @@ app.post('/api/v2/razorpay/verify-payment', async (req, res) => {
     } catch (e) {}
     // Apply entitlement by payment_type
     if (payment_type === 'couple_gold') {
-      await supabase.from('users').update({ dreamer_type: 'gold' }).eq('id', user_id);
+      await supabase.from('users').update(safePayload('users', { dreamer_type: 'gold' })).eq('id', user_id);
     } else if (payment_type === 'couple_platinum') {
-      await supabase.from('users').update({ dreamer_type: 'platinum' }).eq('id', user_id);
+      await supabase.from('users').update(safePayload('users', { dreamer_type: 'platinum' })).eq('id', user_id);
     } else if (payment_type === 'dreamer_tokens') {
       const { data: cp } = await supabase.from('users').select('token_balance').eq('user_id', user_id).maybeSingle();
       const current = (cp && cp.token_balance) || 0;
-      await supabase.from('users').update({ token_balance: current + 50 }).eq('user_id', user_id);
+      await supabase.from('users').update(safePayload('users', { token_balance: current + 50 })).eq('user_id', user_id);
     } else if (payment_type === 'vendor_signature') {
       const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
       if (existing) {
-        await supabase.from('vendor_subscriptions').update({ tier: 'signature', status: 'active' }).eq('vendor_id', user_id);
+        await supabase.from('vendor_subscriptions').update(safePayload('vendor_subscriptions', { tier: 'signature', status: 'active' })).eq('vendor_id', user_id);
       } else {
-        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'signature', status: 'active' }]);
+        await supabase.from('vendor_subscriptions').insert([safePayload('vendor_subscriptions', { vendor_id: user_id, tier: 'signature', status: 'active' })]);
       }
     } else if (payment_type === 'vendor_prestige') {
       const { data: existing } = await supabase.from('vendor_subscriptions').select('id').eq('vendor_id', user_id).maybeSingle();
       if (existing) {
-        await supabase.from('vendor_subscriptions').update({ tier: 'prestige', status: 'active' }).eq('vendor_id', user_id);
+        await supabase.from('vendor_subscriptions').update(safePayload('vendor_subscriptions', { tier: 'prestige', status: 'active' })).eq('vendor_id', user_id);
       } else {
-        await supabase.from('vendor_subscriptions').insert([{ vendor_id: user_id, tier: 'prestige', status: 'active' }]);
+        await supabase.from('vendor_subscriptions').insert([safePayload('vendor_subscriptions', { vendor_id: user_id, tier: 'prestige', status: 'active' })]);
       }
     }
     res.json({ success: true });
@@ -13628,7 +13644,7 @@ app.post('/api/v2/vendor/enquiries/:id/convert', async (req, res) => {
     if (clientErr) throw clientErr;
 
     // Update enquiry — mark as converted
-    await supabase.from('vendor_enquiries').update({ status: 'converted' }).eq('id', id);
+    await supabase.from('vendor_enquiries').update(safePayload('vendor_enquiries', { status: 'converted' })).eq('id', id);
 
     res.json({ success: true, data: client });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -13732,7 +13748,7 @@ app.post('/api/v2/vendor/payment-shield', async (req, res) => {
     const { vendor_id, client_id, client_name, amount, wedding_date } = req.body || {};
     if (!vendor_id || !client_name || !amount) return res.status(400).json({ success: false, error: 'vendor_id, client_name, amount required' });
     const release_date = wedding_date ? new Date(new Date(wedding_date).getTime() + 24*60*60*1000).toISOString().split('T')[0] : null;
-    const { data, error } = await supabase.from('vendor_payment_shield').insert([{ vendor_id, client_id: client_id||null, client_name, amount, wedding_date: wedding_date||null, release_date, status: 'holding' }]).select().single();
+    const { data, error } = await supabase.from('vendor_payment_shield').insert([safePayload('vendor_payment_shield', { vendor_id, client_id: client_id||null, client_name, amount, wedding_date: wedding_date||null, release_date, status: 'holding' })]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -13768,7 +13784,7 @@ app.post('/api/v2/vendor/broadcast-whatsapp', async (req, res) => {
     }
 
     // Log broadcast
-    await supabase.from('vendor_broadcasts').insert([{ vendor_id, message, template: segment || 'all', recipient_count: clients.length, sent_count: sent }]);
+    await supabase.from('vendor_broadcasts').insert([safePayload('vendor_broadcasts', { vendor_id, message, template: segment || 'all', recipient_count: clients.length, sent_count: sent })]);
 
     res.json({ success: true, sent, failed_count: failed.length, total: clients.length });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -13975,7 +13991,7 @@ app.post('/api/v2/collab/posts', async (req, res) => {
 app.patch('/api/v2/collab/posts/:id', async (req, res) => {
   try {
     const { status } = req.body || {};
-    const { data, error } = await supabase.from('collab_posts').update({ status }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('collab_posts').update(safePayload('collab_posts', { status })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -14141,7 +14157,7 @@ app.post('/api/v2/collab/posts', async (req, res) => {
 app.patch('/api/v2/collab/posts/:id', async (req, res) => {
   try {
     const { status } = req.body || {};
-    const { data, error } = await supabase.from('collab_posts').update({ status }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('collab_posts').update(safePayload('collab_posts', { status })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -14199,7 +14215,7 @@ app.patch('/api/v2/collab/applications/:id', async (req, res) => {
       updates.match_fee_amount = matchFee;
       updates.match_fee_collected = true;
       // Mark post as filled
-      await supabase.from('collab_posts').update({ status: 'filled' }).eq('id', post_id);
+      await supabase.from('collab_posts').update(safePayload('collab_posts', { status: 'filled' })).eq('id', post_id);
     }
 
     // Notify applicant on accept/reject
@@ -14793,6 +14809,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
         if (QUERY_TOOLS.includes(toolName)) {
           // Execute immediately
           toolsExecuted++;
+          console.log('[DreamAi] in-app tool:', toolName, '| userId:', userId, '| type:', userType);
           try {
             const result = await executeToolCall(toolName, toolInput, { id: userId });
             toolResults.push({
@@ -14912,7 +14929,7 @@ app.post('/api/v2/dreamai/action/complete-task', async (req, res) => {
   try {
     const { task_id, couple_id } = req.body || {};
     if (!task_id) return res.status(400).json({ success: false, error: 'task_id required' });
-    const { error } = await supabase.from('couple_checklist').update({ is_complete: true }).eq('id', task_id);
+    const { error } = await supabase.from('couple_checklist').update(safePayload('couple_checklist', { is_complete: true })).eq('id', task_id);
     if (error) throw error;
     res.json({ success: true, message: 'Task marked as complete.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -14959,7 +14976,7 @@ app.post('/api/v2/dreamai/action/send-enquiry', async (req, res) => {
     }]).select().single();
     if (enqErr) throw enqErr;
     // Create first message
-    await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id: enq.id, from_role: 'couple', content: opening_message }]);
+    await supabase.from('vendor_enquiry_messages').insert([safePayload('vendor_enquiry_messages', { enquiry_id: enq.id, from_role: 'couple', content: opening_message })]);
     // Fire entity link
     writeEntityLink({ from_entity_type:'couple', from_entity_id:couple_id, to_entity_type:'vendor', to_entity_id:vendor_id, link_type:'enquired_about', couple_id });
     res.json({ success: true, data: enq, message: 'Enquiry sent.' });
@@ -14983,9 +15000,9 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
   try {
     const { enquiry_id, message } = req.body || {};
     if (!enquiry_id || !message) return res.status(400).json({ success: false, error: 'enquiry_id and message required' });
-    const { data, error } = await supabase.from('vendor_enquiry_messages').insert([{ enquiry_id, from_role: 'vendor', content: message }]).select().single();
+    const { data, error } = await supabase.from('vendor_enquiry_messages').insert([safePayload('vendor_enquiry_messages', { enquiry_id, from_role: 'vendor', content: message })]).select().single();
     if (error) throw error;
-    await supabase.from('vendor_enquiries').update({ last_message_at: new Date().toISOString(), last_message_from: 'vendor', last_message_preview: message.slice(0,120), couple_unread_count: 1 }).eq('id', enquiry_id);
+    await supabase.from('vendor_enquiries').update(safePayload('vendor_enquiries', { last_message_at: new Date().toISOString(), last_message_from: 'vendor', last_message_preview: message.slice(0,120), couple_unread_count: 1 })).eq('id', enquiry_id);
     res.json({ success: true, message: 'Reply sent.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
@@ -14995,7 +15012,7 @@ app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
   try {
     const { vendor_id, blocked_date, note, reason } = req.body || {};
     if (!vendor_id || !blocked_date) return res.status(400).json({ success: false, error: 'vendor_id and blocked_date required' });
-    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, reason: reason || note || null }]).select().single();
+    const { data, error } = await supabase.from('vendor_availability_blocks').insert([safePayload('vendor_availability_blocks', { vendor_id, blocked_date, reason: reason || note || null })]).select().single();
     if (error) throw error;
     res.json({ success: true, data, message: `${blocked_date} blocked on your calendar.` });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -15403,7 +15420,7 @@ app.post('/api/v2/vendor/onboarding', async (req, res) => {
     const { vendorId, phone, name, category } = req.body || {};
     if (!name) return res.status(400).json({ success: false, error: 'name required' });
 
-    let query = supabase.from('vendors').update({ name, category: category || null });
+    let query = supabase.from('vendors').update(safePayload('vendors', { name, category: category || null }));
 
     if (vendorId) {
       query = query.eq('id', vendorId);
@@ -15415,7 +15432,7 @@ app.post('/api/v2/vendor/onboarding', async (req, res) => {
       const { data: v2 } = await supabase.from('vendors').select('id').eq('phone', bare).maybeSingle();
       const vendor = v1 || v2;
       if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
-      query = supabase.from('vendors').update({ name, category: category || null }).eq('id', vendor.id);
+      query = supabase.from('vendors').update(safePayload('vendors', { name, category: category || null })).eq('id', vendor.id);
     } else {
       return res.status(400).json({ success: false, error: 'vendorId or phone required' });
     }
@@ -15503,7 +15520,7 @@ app.post('/api/v2/couple/upsert', async (req, res) => {
     }]).select('id').single();
     if (error) throw error;
     if (invite_code) {
-      await supabase.from('invite_codes').update({ status: 'used', used_by: newUser.id }).eq('code', invite_code.toUpperCase());
+      await supabase.from('invite_codes').update(safePayload('invite_codes', { status: 'used', used_by: newUser.id })).eq('code', invite_code.toUpperCase());
     }
     res.json({ success: true, userId: newUser.id, pin_set: false, created: true });
   } catch (err) {
@@ -15532,7 +15549,7 @@ app.post('/api/v2/vendor/upsert', async (req, res) => {
     if (error) throw error;
     // Mark invite code as used
     if (invite_code) {
-      await supabase.from('invite_codes').update({ status: 'used', used_by: newVendor.id }).eq('code', invite_code.toUpperCase());
+      await supabase.from('invite_codes').update(safePayload('invite_codes', { status: 'used', used_by: newVendor.id })).eq('code', invite_code.toUpperCase());
     }
     res.json({ success: true, vendorId: newVendor.id, pin_set: false, created: true });
   } catch (err) {
@@ -15934,7 +15951,7 @@ app.patch('/api/v3/admin/makers/:id', adminAuth, async (req, res) => {
 app.patch('/api/v3/admin/images/:id', adminAuth, async (req, res) => {
   try {
     const { approved, rejection_reason } = req.body || {};
-    const { data, error } = await supabase.from('vendor_images').update({ approved: !!approved, rejection_reason: rejection_reason || null }).eq('id', req.params.id).select().single();
+    const { data, error } = await supabase.from('vendor_images').update(safePayload('vendor_images', { approved: !!approved, rejection_reason: rejection_reason || null })).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -15943,7 +15960,7 @@ app.patch('/api/v3/admin/images/:id', adminAuth, async (req, res) => {
 // Approve all images for a vendor
 app.post('/api/v3/admin/makers/:id/approve-all-images', adminAuth, async (req, res) => {
   try {
-    const { error } = await supabase.from('vendor_images').update({ approved: true }).eq('vendor_id', req.params.id).eq('approved', false);
+    const { error } = await supabase.from('vendor_images').update(safePayload('vendor_images', { approved: true })).eq('vendor_id', req.params.id).eq('approved', false);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
