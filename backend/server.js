@@ -5670,15 +5670,15 @@ app.post("/api/v2/couple/auth/verify-otp", async (req, res) => {
     // Look up user in users table by phone
     const fullPhone = "+91" + phone;
     let user = null;
-    const { data: u1 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type").eq("phone", fullPhone).maybeSingle();
+    const { data: u1 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type, user_segment, couple_tier").eq("phone", fullPhone).maybeSingle();
     if (u1) user = u1;
     if (!user) {
-      const { data: u2 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type").eq("phone", phone).maybeSingle();
+      const { data: u2 } = await supabase.from("users").select("id, name, phone, pin_set, dreamer_type, user_segment, couple_tier").eq("phone", phone).maybeSingle();
       if (u2) user = u2;
     }
     if (!user) return res.status(404).json({ success: false, error: "No account found. Join the waitlist." });
 
-    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone, pin_set: !!user.pin_set, dreamer_type: user.dreamer_type || 'basic' } });
+    res.json({ success: true, user: { id: user.id, name: user.name, phone: user.phone, pin_set: !!user.pin_set, dreamer_type: user.dreamer_type || 'basic', user_segment: user.user_segment || 'india', couple_tier: user.couple_tier || 'lite' } });
   } catch (err) {
     console.error("[v2 OTP] verify error:", err.message);
     res.status(500).json({ success: false, error: "Verification failed" });
