@@ -3918,9 +3918,15 @@ async function executeToolCall(toolName, toolInput, vendor) {
           .select('date, reason').eq('vendor_id', vendor.id)
           .gte('date', startDate.toISOString().slice(0,10))
           .lt('date', endDate.toISOString().slice(0,10));
+        // Also read from vendor_availability_blocks (iCal imports land here)
+        const { data: availBlocks } = await supabase.from('vendor_availability_blocks')
+          .select('blocked_date, reason').eq('vendor_id', vendor.id)
+          .gte('blocked_date', startDate.toISOString().slice(0,10))
+          .lt('blocked_date', endDate.toISOString().slice(0,10));
         const events = [];
         (clients || []).forEach(c => events.push(`${c.event_date}: ${c.name} ${c.event_type || ''}`));
         (blocked || []).forEach(b => events.push(`${b.date}: Blocked - ${b.reason || ''}`));
+        (availBlocks || []).forEach(b => events.push(`${b.blocked_date}: Blocked - ${b.reason || ''}`));
         if (events.length === 0) return `You're free ${label}. No events scheduled.`;
         return `📅 Schedule for ${label}:\n\n${events.join('\n')}`;
       }
@@ -14886,9 +14892,9 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
 // POST /api/v2/dreamai/vendor-action/block-date
 app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
   try {
-    const { vendor_id, blocked_date, note } = req.body || {};
+    const { vendor_id, blocked_date, note, reason } = req.body || {};
     if (!vendor_id || !blocked_date) return res.status(400).json({ success: false, error: 'vendor_id and blocked_date required' });
-    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, note: note||null }]).select().single();
+    const { data, error } = await supabase.from('vendor_availability_blocks').insert([{ vendor_id, blocked_date, reason: reason || note || null }]).select().single();
     if (error) throw error;
     res.json({ success: true, data, message: `${blocked_date} blocked on your calendar.` });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
