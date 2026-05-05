@@ -7914,8 +7914,8 @@ app.post('/api/admin/create-couple', async (req, res) => {
       });
     }
 
-    const tierMap = { basic: 'free', gold: 'premium', platinum: 'elite' };
-    const tokenMap = { basic: 3, gold: 15, platinum: 999 };
+    const tierMap = { lite: 'lite', signature: 'signature', platinum: 'platinum' };
+    const tokenMap = { lite: 3, signature: 15, platinum: 999 };
     const coupleTier = tierMap[finalTier];
     const tokens = tokenMap[finalTier];
 
@@ -8099,12 +8099,12 @@ app.post('/api/admin/wipe-all', async (req, res) => {
 app.post('/api/couple-codes/generate', async (req, res) => {
   try {
     const { tier, couple_name, created_by, note } = req.body;
-    if (!tier || !['basic', 'gold', 'platinum'].includes(tier)) {
-      return res.status(400).json({ success: false, error: 'Tier must be basic, gold, or platinum' });
+    if (!tier || !['lite', 'signature', 'platinum'].includes(tier)) {
+      return res.status(400).json({ success: false, error: 'Tier must be lite, signature, or platinum' });
     }
     const code = genCode();
 
-    const tokenMap = { basic: 3, gold: 15, platinum: 999 };
+    const tokenMap = { lite: 3, signature: 15, platinum: 999 };
 
     const { data, error } = await supabase.from('access_codes').insert([{
       code, type: 'couple_tier', tier,
@@ -8142,9 +8142,9 @@ app.post('/api/couple-codes/redeem', async (req, res) => {
       return res.json({ success: false, error: 'Invite expired' });
     }
 
-    const tierMap = { basic: 'free', gold: 'premium', platinum: 'elite' };
-    const tokenMap = { basic: 3, gold: 15, platinum: 999 };
-    const coupleTier = tierMap[codeData.tier] || 'free';
+    const tierMap = { lite: 'lite', signature: 'signature', platinum: 'platinum' };
+    const tokenMap = { lite: 3, signature: 15, platinum: 999 };
+    const coupleTier = tierMap[codeData.tier] || 'lite';
     const tokens = tokenMap[codeData.tier] || 3;
 
     // VALIDATE ONLY — do NOT create a user here. Onboard endpoint creates the user
@@ -8198,9 +8198,9 @@ app.post('/api/dreamer-codes/redeem', async (req, res) => {
       return res.json({ success: false, error: 'Code expired' });
     }
 
-    const tierMap = { basic: 'free', gold: 'premium', platinum: 'elite' };
-    const tokenMap = { basic: 3, gold: 15, platinum: 999 };
-    const coupleTier = tierMap[codeData.tier] || 'free';
+    const tierMap = { lite: 'lite', signature: 'signature', platinum: 'platinum' };
+    const tokenMap = { lite: 3, signature: 15, platinum: 999 };
+    const coupleTier = tierMap[codeData.tier] || 'lite';
     const tokens = tokenMap[codeData.tier] || 3;
 
     // Re-login support: if code already redeemed, find the existing user via redeemed_user_id
@@ -8377,9 +8377,9 @@ app.post('/api/signup/complete', async (req, res) => {
         .select('id').or(`phone.eq.+91${cleanPhone},email.eq.${cleanEmail}`).limit(1).single();
       if (existingUser) return res.json({ success: false, error: 'Account already exists with this phone or email. Please log in.' });
 
-      const tierMap = { basic: 'free', gold: 'premium', platinum: 'elite' };
-      const tokenMap = { basic: 3, gold: 15, platinum: 999 };
-      const coupleTier = tierMap[tier] || 'free';
+      const tierMap = { lite: 'lite', signature: 'signature', platinum: 'platinum' };
+      const tokenMap = { lite: 3, signature: 15, platinum: 999 };
+      const coupleTier = tierMap[tier] || 'lite';
       const tokens = tokenMap[tier] || 3;
 
       const hashedCpwd = await bcrypt.hash(password, 10);
@@ -8403,11 +8403,11 @@ app.post('/api/signup/complete', async (req, res) => {
         }]);
       }
 
-      logActivity('couple_signup', name + ' signed up as couple (' + (tier || 'basic') + ')');
+      logActivity('couple_signup', name + ' signed up as couple (' + (tier || 'lite') + ')');
 
       return res.json({ success: true, data: {
         type: 'couple', id: user.id, name: user.name,
-        couple_tier: coupleTier, tier_label: tier || 'basic', tokens,
+        couple_tier: coupleTier, tier_label: tier || 'lite', tokens,
       }});
     }
   } catch (error) {
@@ -8549,7 +8549,7 @@ app.post('/api/couple/onboard', async (req, res) => {
     const cleanPhone = ('' + phone).replace(/\D/g, '').slice(-10);
     const fullPhone = '+91' + cleanPhone;
     const eventsArr = Array.isArray(events) ? events : [];
-    const tier = couple_tier || 'free';
+    const tier = couple_tier || 'lite';
     const isFounding = !!founding_bride;
 
     // Hash password if provided
@@ -8569,7 +8569,7 @@ app.post('/api/couple/onboard', async (req, res) => {
         partner_name: partner_name || null,
         wedding_date: wedding_date || null,
         wedding_events: eventsArr,
-        couple_tier: existing.couple_tier === 'elite' ? 'elite' : tier,
+        couple_tier: existing.couple_tier === 'platinum' ? 'platinum' : tier,
         founding_bride: isFounding || !!existing.founding_bride,
         dreamer_type: 'couple',
       };
@@ -8709,7 +8709,7 @@ app.post('/api/couple/login', async (req, res) => {
         partner_name: user.partner_name || '',
         wedding_date: user.wedding_date || '',
         events: user.wedding_events || [],
-        couple_tier: user.couple_tier || 'free',
+        couple_tier: user.couple_tier || 'lite',
         founding_bride: !!user.founding_bride,
         token_balance: user.token_balance || 0,
       }
@@ -9921,11 +9921,11 @@ app.post('/api/co-planner/invite', async (req, res) => {
     if (!user) return res.json({ success: false, error: 'User not found' });
 
     // First invite always free regardless of tier
-    const tierLabel = user.couple_tier === 'elite' ? 'platinum' : user.couple_tier === 'premium' ? 'gold' : 'basic';
+    const tierLabel = user.couple_tier === 'platinum' ? 'platinum' : user.couple_tier === 'signature' ? 'signature' : 'lite';
     let tokenCost = 0;
     if (active.length > 0) {
       if (tierLabel === 'platinum') tokenCost = 0;
-      else if (tierLabel === 'gold') tokenCost = 1;
+      else if (tierLabel === 'signature') tokenCost = 1;
       else tokenCost = 2;
     }
 
@@ -10423,12 +10423,12 @@ app.post('/api/signup/login', async (req, res) => {
     const coupleMatch = await bcrypt.compare(password, user.password_hash);
     if (!coupleMatch) return res.status(401).json({ success: false, error: 'Invalid password' });
 
-    const tierLabelMap = { free: 'basic', premium: 'gold', elite: 'platinum' };
+    const tierLabelMap = { lite: 'Lite', signature: 'Signature', platinum: 'Platinum' };
 
     return res.json({ success: true, data: {
       type: 'couple', id: user.id, name: user.name,
-      couple_tier: user.couple_tier || 'free',
-      tier_label: tierLabelMap[user.couple_tier] || 'basic',
+      couple_tier: user.couple_tier || 'lite',
+      tier_label: tierLabelMap[user.couple_tier] || 'Lite',
       tokens: user.token_balance || 3,
     }});
   } catch (error) {
@@ -15103,9 +15103,9 @@ app.get('/api/v2/couple/profile/:userId', async (req, res) => {
         name: data.name || null,
         partner_name: data.partner_name || null,
         wedding_date: data.wedding_date || null,
-        couple_tier: data.couple_tier || 'free',
-        dreamer_type: data.dreamer_type || 'free',
-        tier: data.couple_tier || data.dreamer_type || 'free',
+        couple_tier: data.couple_tier || 'lite',
+        dreamer_type: data.dreamer_type || 'lite',
+        tier: data.couple_tier || data.dreamer_type || 'lite',
         token_balance: data.token_balance || 0,
         founding_bride: data.founding_bride || false,
       }
