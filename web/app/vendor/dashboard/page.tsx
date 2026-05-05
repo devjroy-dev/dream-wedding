@@ -2084,8 +2084,8 @@ export default function VendorDashboard() {
             }}
             onClick={() => {
               if (vendorData?.ai_enabled) {
-                const joinCode = 'join acres-eventually';
-                window.open('https://wa.me/14155238886?text=' + encodeURIComponent(joinCode), '_blank');
+                
+                window.open('https://wa.me/14787788550', '_blank');
               } else {
                 setShowAiModal(true);
               }

@@ -5018,7 +5018,7 @@ function HomeScreen({ session, onNavTo, tasks, loading, onToggleComplete, budget
           </p>
         </div>
         <a
-          href="https://api.whatsapp.com/send?phone=14155238886&text=Hi%20DreamAi%2C%20I%20need%20help%20with%20my%20wedding%20planning&lang=en"
+          href="https://wa.me/14787788550"
           target="_blank" rel="noreferrer"
           style={{
             width: 32, height: 32, borderRadius: 16, background: C.dark,
@@ -7921,8 +7921,7 @@ function WhatsAppImportModal({ onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
-  const TWILIO_NUMBER = '14155238886';
-  const SANDBOX_JOIN_CODE = 'join acres-eventually';
+  const TWILIO_NUMBER = '14787788550';
   const [refreshing, setRefreshing] = useState(false);
 
   const openWhatsAppImport = () => {
@@ -8065,7 +8064,7 @@ function WhatsAppImportModal({ onClose, onRefresh }: {
             letterSpacing: '1px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
           }}>First time?</p>
           <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>
-            You'll need to connect once. Send <span style={{ fontWeight: 500, color: C.dark }}>{SANDBOX_JOIN_CODE}</span> to <span style={{ fontWeight: 500, color: C.dark }}>+1 {TWILIO_NUMBER.slice(0, 3)}-{TWILIO_NUMBER.slice(3, 6)}-{TWILIO_NUMBER.slice(6)}</span> from your WhatsApp.
+            Save our number and say hi. DreamAi is ready on WhatsApp.
           </p>
         </div>
 
@@ -11105,8 +11104,7 @@ function DreamAiSheet({ session, onClose }: {
   session: CoupleSession;
   onClose: () => void;
 }) {
-  const TWILIO_NUMBER = '14155238886';
-  const SANDBOX_JOIN_CODE = 'join acres-eventually';
+  const TWILIO_NUMBER = '14787788550';
 
   const prompts = [
     {
@@ -11228,7 +11226,7 @@ function DreamAiSheet({ session, onClose }: {
             letterSpacing: '1px', textTransform: 'uppercase' as const, fontFamily: 'DM Sans, sans-serif',
           }}>First time?</p>
           <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted, fontFamily: 'DM Sans, sans-serif', fontWeight: 300, lineHeight: '16px' }}>
-            Send <span style={{ fontWeight: 500, color: C.dark }}>{SANDBOX_JOIN_CODE}</span> to <span style={{ fontWeight: 500, color: C.dark }}>+1 {TWILIO_NUMBER.slice(0, 3)}-{TWILIO_NUMBER.slice(3, 6)}-{TWILIO_NUMBER.slice(6)}</span> from WhatsApp to connect.
+            Save our number and send us a message to get started.
           </p>
         </div>
       </div>
