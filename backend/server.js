@@ -15847,7 +15847,7 @@ app.post('/api/v3/admin/data/backfill-all', adminAuth, async (req, res) => {
 // PHASE 4: Couple onboarding endpoint
 app.post('/api/v2/couple/onboarding', async (req, res) => {
   try {
-    const { userId, phone, name, wedding_date, partner_name, residence_country, wedding_country, user_segment } = req.body;
+    const { userId, phone, name, wedding_date, partner_name, residence_country, wedding_country, user_segment, wedding_style } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Name required' });
 
     // Build update payload — include segment fields if provided (Directive 2.9)
@@ -15859,6 +15859,7 @@ app.post('/api/v2/couple/onboarding', async (req, res) => {
     if (residence_country) updatePayload.residence_country = residence_country;
     if (wedding_country) updatePayload.wedding_country = wedding_country;
     if (user_segment) updatePayload.user_segment = user_segment;
+    if (wedding_style) updatePayload.wedding_style = wedding_style;
 
     let updated = false;
     if (userId) {
