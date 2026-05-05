@@ -15081,14 +15081,15 @@ app.post('/api/v2/vendor/calendar/import/:vendorId', async (req, res) => {
       .map(function(e) { return {
         vendor_id: vendorId,
         blocked_date: e.date,
-        note: e.note ? 'Imported: ' + e.note.slice(0, 100) : 'Imported from calendar',
+        reason: e.note ? 'Imported: ' + e.note.slice(0, 100) : 'Imported from calendar',
       }; });
 
     if (toInsert.length === 0) {
       return res.json({ success: true, imported: 0, message: 'All dates already exist in your TDW calendar.' });
     }
 
-    const { error } = await supabase.from('vendor_availability_blocks').insert(toInsert);
+    const { error } = await supabase.from('vendor_availability_blocks')
+      .upsert(toInsert, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
     if (error) throw error;
 
     res.json({ success: true, imported: toInsert.length, total_parsed: events.length });
