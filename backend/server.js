@@ -40,20 +40,20 @@ const schemaCache = {};
 
 async function loadSchemaCache() {
   try {
-    const { data, error } = await supabase.rpc('get_table_columns').catch(() => ({ data: null, error: 'rpc not found' }));
-    if (error || !data) {
-      // Fallback: query information_schema directly
-      const { data: cols } = await supabase
-        .from('information_schema.columns')
-        .select('table_name, column_name')
-        .eq('table_schema', 'public');
-      if (cols) {
-        cols.forEach(({ table_name, column_name }) => {
-          if (!schemaCache[table_name]) schemaCache[table_name] = new Set();
-          schemaCache[table_name].add(column_name);
-        });
-        console.log('[schema] Loaded', Object.keys(schemaCache).length, 'tables');
-      }
+    // Query information_schema directly — no custom RPC needed
+    const { data: cols, error } = await supabase
+      .from('information_schema.columns')
+      .select('table_name, column_name')
+      .eq('table_schema', 'public');
+    if (error) throw new Error(error.message || JSON.stringify(error));
+    if (cols && cols.length > 0) {
+      cols.forEach(({ table_name, column_name }) => {
+        if (!schemaCache[table_name]) schemaCache[table_name] = new Set();
+        schemaCache[table_name].add(column_name);
+      });
+      console.log('[schema] Loaded', Object.keys(schemaCache).length, 'tables,', cols.length, 'columns');
+    } else {
+      console.warn('[schema] No columns returned — passthrough mode active');
     }
   } catch (e) {
     console.warn('[schema] Cache load failed (will use passthrough):', e.message);
