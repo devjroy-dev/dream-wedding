@@ -4502,19 +4502,15 @@ Reply 1 or 2.`);
       await supabase.from('vendors').update({ last_whatsapp_activity: new Date().toISOString() }).eq('id', vendor.id);
     } catch (e) { /* non-fatal — column may not exist yet */ }
 
-    // Check quota (tier allowance first, then extra tokens)
-    const quota = getAiQuota(vendor);
-    const used = vendor.ai_commands_used || 0;
-    const extraTokens = vendor.ai_extra_tokens || 0;
-    const tierRemaining = Math.max(0, quota - used);
-    const totalRemaining = tierRemaining + extraTokens;
-    if (totalRemaining <= 0) {
-      await sendWhatsApp(fromPhone, "You've used all your Dream Ai commands this month. Buy more tokens at vendor.thedreamwedding.in/vendor/settings\n\n50 tokens: Rs.100\n200 tokens: Rs.350 (save 12%)\n500 tokens: Rs.800 (save 20%)");
+    // Daily WhatsApp cap check — Directive 2.5 (replaces monthly counter)
+    const vendorWaQuota = await checkAndIncrementDailyUsage(
+      vendor.id, "vendor", "whatsapp",
+      vendor.tier || "essential",
+      false, null
+    );
+    if (!vendorWaQuota.allowed) {
+      await sendWhatsApp(fromPhone, "You've used your DreamAi WhatsApp messages for today (" + vendorWaQuota.cap + " on your current plan). Log in to vendor.thedreamwedding.in to continue, or wait until midnight IST. Need more? Top up at vendor.thedreamwedding.in/vendor/settings");
       return;
-    }
-    // Low balance warning once at exactly 5 remaining
-    if (totalRemaining === 5) {
-      setTimeout(() => sendWhatsApp(fromPhone, 'Heads up — you have 5 Dream Ai commands left. Top up at vendor.thedreamwedding.in/vendor/settings'), 3000);
     }
 
     // Check if Anthropic is configured
@@ -8594,9 +8590,10 @@ app.post('/api/couple/onboard', async (req, res) => {
           wedding_events: eventsArr,
           couple_tier: tier,
           founding_bride: isFounding,
+          founding_period_end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
           dreamer_type: 'couple',
           password_hash: passwordHash,
-          token_balance: tier === 'elite' ? 999 : tier === 'premium' ? 15 : 3,
+          token_balance: tier === 'platinum' ? 999 : tier === 'signature' ? 15 : 3,
         }])
         .select().single();
       if (cErr) throw cErr;
@@ -14360,10 +14357,7 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
           });
         }
 
-        // Increment usage
-        await supabase.from('vendors')
-          .update({ ai_commands_used: used + 1 })
-          .eq('id', userId);
+        // NOTE: Actual increment happens POST-loop, charged per tool (Directive 2.4)
       }
     }
 
@@ -14472,6 +14466,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
     const MAX_ITERATIONS = 5;
     let finalReply = '';
     let pendingAction = null;
+    let toolsExecuted = 0; // Directive 2.4: per-tool billing
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
@@ -14520,6 +14515,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
 
         if (QUERY_TOOLS.includes(toolName)) {
           // Execute immediately
+          toolsExecuted++;
           try {
             const result = await executeToolCall(toolName, toolInput, { id: userId });
             toolResults.push({
@@ -14537,6 +14533,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
           }
         } else {
           // Mutation tool — map to action for confirmation
+          toolsExecuted++;
           if (!pendingAction) {
             pendingAction = mapToolToAction(toolName, toolInput, isVendor);
           }
@@ -14551,6 +14548,32 @@ ${JSON.stringify(context || {}, null, 2)}`;
 
       // Add tool results to messages for next iteration
       allMessages.push({ role: 'user', content: toolResults });
+    }
+
+    // Directive 2.4: Post-loop vendor deduction — charged per tool called
+    if (userId && userType === 'vendor' && toolsExecuted > 0) {
+      try {
+        const { data: vq } = await supabase.from('vendors')
+          .select('ai_commands_used, ai_extra_tokens').eq('id', userId).maybeSingle();
+        if (vq) {
+          const vUsed = vq.ai_commands_used || 0;
+          const vExtra = vq.ai_extra_tokens || 0;
+          const { data: vSub } = await supabase.from('vendor_subscriptions')
+            .select('tier').eq('vendor_id', userId).maybeSingle();
+          const vTier = (vSub && vSub.tier) ? vSub.tier : 'essential';
+          const vAllowance = vTier === 'prestige' ? 999999 : vTier === 'signature' ? 75 : 20;
+          const vTierRemaining = Math.max(0, vAllowance - vUsed);
+          if (toolsExecuted <= vTierRemaining) {
+            await supabase.from('vendors').update({ ai_commands_used: vUsed + toolsExecuted }).eq('id', userId);
+          } else {
+            const fromExtra = toolsExecuted - vTierRemaining;
+            await supabase.from('vendors').update({
+              ai_commands_used: vUsed + vTierRemaining,
+              ai_extra_tokens: Math.max(0, vExtra - fromExtra),
+            }).eq('id', userId);
+          }
+        }
+      } catch (e) { console.error('[quota] vendor post-loop deduct:', e.message); }
     }
 
     // Build final response
