@@ -14362,14 +14362,16 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
     }
 
     // COUPLE in-app daily quota enforcement
+    let coupleData = null; // stored for grace + upgrade nudge logic in final response
     if (userId && userType === "couple") {
       const { data: coupleForQuota } = await supabase
         .from("users")
-        .select("couple_tier, founding_bride, created_at")
+        .select("couple_tier, founding_bride, created_at, grace_tokens_remaining, dreamai_cap_hit_dates")
         .eq("id", userId)
         .maybeSingle();
 
       if (coupleForQuota) {
+        coupleData = coupleForQuota;
         const tier = coupleForQuota.couple_tier || "lite";
         const quotaResult = await checkAndIncrementDailyUsage(
           userId, "couple", "inapp",
@@ -14379,6 +14381,17 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
         );
 
         if (!quotaResult.allowed) {
+          // Track cap hit date for upgrade nudge
+          try {
+            const todayIST = new Date(Date.now() + (5.5 * 3600 * 1000)).toISOString().slice(0, 10);
+            const existingDates = Array.isArray(coupleForQuota.dreamai_cap_hit_dates) ? coupleForQuota.dreamai_cap_hit_dates : [];
+            if (!existingDates.includes(todayIST)) {
+              await supabase.from("users").update({
+                dreamai_cap_hit_dates: [...existingDates, todayIST]
+              }).eq("id", userId);
+            }
+          } catch (e) { console.error("[grace] cap hit date track error:", e.message); }
+
           const isFoundingMsg = quotaResult.isFoundingPeriod
             ? " You're in your founding period — enjoy Signature-tier access for your first 30 days."
             : "";
@@ -14576,13 +14589,73 @@ ${JSON.stringify(context || {}, null, 2)}`;
       } catch (e) { console.error('[quota] vendor post-loop deduct:', e.message); }
     }
 
-    // Build final response
+    // Build final response — with grace token signal + upgrade nudge (P0.3 / P0.4)
+    let graceSignal = null;
+    let upgradeNudge = false;
+
+    if (userId && userType === "couple" && coupleData) {
+      const tier = coupleData.couple_tier || "lite";
+
+      // Grace token pools per tier
+      const gracePool = tier === "platinum" ? 50 : tier === "signature" ? 15 : 10;
+      const card1Threshold = tier === "platinum" ? 15 : tier === "signature" ? 5 : 5;
+
+      const currentRemaining = typeof coupleData.grace_tokens_remaining === "number"
+        ? coupleData.grace_tokens_remaining
+        : gracePool;
+
+      // Decrement one grace token per successful response when pool has tokens
+      if (currentRemaining > 0) {
+        try {
+          const newRemaining = currentRemaining - 1;
+          await supabase.from("users").update({
+            grace_tokens_remaining: newRemaining
+          }).eq("id", userId);
+
+          // Determine which card to show based on remaining after decrement
+          let graceCard = null;
+          if (newRemaining === gracePool - (tier === "platinum" ? 35 : tier === "signature" ? 10 : 5)) {
+            graceCard = 1; // just consumed Card1 disbursement
+          } else if (newRemaining === 0) {
+            graceCard = 3; // hard cap
+          } else if (currentRemaining === card1Threshold) {
+            graceCard = 2; // entering Card2 territory
+          }
+
+          if (graceCard) {
+            graceSignal = { grace_used: true, grace_card: graceCard, grace_remaining: newRemaining, tier };
+          }
+        } catch (e) { console.error("[grace] decrement error:", e.message); }
+      }
+
+      // Upgrade nudge — 3+ cap hits in last 7 days (P0.4)
+      try {
+        const { data: freshUser } = await supabase.from("users")
+          .select("upgrade_prompt_dismissed_at, dreamai_cap_hit_dates")
+          .eq("id", userId).maybeSingle();
+
+        if (freshUser) {
+          const todayIST = new Date(Date.now() + (5.5 * 3600 * 1000)).toISOString().slice(0, 10);
+          const sevenDaysAgo = new Date(Date.now() + (5.5 * 3600 * 1000) - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const capDates = Array.isArray(freshUser.dreamai_cap_hit_dates) ? freshUser.dreamai_cap_hit_dates : [];
+          const recentCapHits = capDates.filter(d => d >= sevenDaysAgo && d <= todayIST);
+
+          const dismissedAt = freshUser.upgrade_prompt_dismissed_at;
+          const cooldownOk = !dismissedAt || (Date.now() - new Date(dismissedAt).getTime() > 7 * 24 * 60 * 60 * 1000);
+
+          if (recentCapHits.length >= 3 && cooldownOk && tier !== "platinum") {
+            upgradeNudge = true;
+          }
+        }
+      } catch (e) { console.error("[upgrade nudge] error:", e.message); }
+    }
+
     if (pendingAction) {
       const actionTag = `[ACTION:${pendingAction.type}|${pendingAction.label}|${pendingAction.preview}|${JSON.stringify(pendingAction.params)}]`;
       const replyWithAction = (finalReply || pendingAction.description || '') + '\n' + actionTag;
-      res.json({ success: true, reply: replyWithAction });
+      res.json({ success: true, reply: replyWithAction, ...(graceSignal || {}), ...(upgradeNudge ? { upgrade_nudge: true } : {}) });
     } else {
-      res.json({ success: true, reply: finalReply.trim() || 'Done.' });
+      res.json({ success: true, reply: finalReply.trim() || 'Done.', ...(graceSignal || {}), ...(upgradeNudge ? { upgrade_nudge: true } : {}) });
     }
 
   } catch (err) {
