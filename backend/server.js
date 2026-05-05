@@ -40,13 +40,53 @@ const schemaCache = {};
 
 async function loadSchemaCache() {
   try {
-    // Query information_schema directly — no custom RPC needed
-    const { data: cols, error } = await supabase
-      .from('information_schema.columns')
-      .select('table_name, column_name')
-      .eq('table_schema', 'public');
-    if (error) throw new Error(error.message || JSON.stringify(error));
-    if (cols && cols.length > 0) {
+    // Use PostgREST /rest/v1/rpc endpoint to query information_schema via raw fetch
+    // This bypasses the Supabase client schema cache restriction on system tables
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      console.warn('[schema] SUPABASE_URL or key not set — passthrough mode active');
+      return;
+    }
+    // Fetch column list via PostgREST direct REST query on information_schema
+    const url = `${supabaseUrl}/rest/v1/information_schema.columns?select=table_name,column_name&table_schema=eq.public`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Accept': 'application/json',
+      },
+    });
+    if (!res.ok) {
+      // Fallback: use a hardcoded minimal set of known critical tables
+      // so safePayload can at least protect the most dangerous write paths
+      console.warn('[schema] REST query failed (' + res.status + ') — loading minimal hardcoded cache');
+      const criticalTables = {
+        vendor_clients:   ['id','vendor_id','name','phone','email','event_type','event_date','venue','budget','status','notes','profile_incomplete','created_at','updated_at'],
+        vendor_invoices:  ['id','vendor_id','client_name','event_type','amount','gst_amount','total_amount','invoice_number','status','gst_enabled','advance_received','created_at'],
+        vendor_expenses:  ['id','vendor_id','description','amount','category','expense_type','related_name','expense_date','financial_year','created_at'],
+        team_tasks:       ['id','vendor_id','title','description','assignee_name','due_date','status','priority','created_at'],
+        blocked_dates:    ['id','vendor_id','date','reason','notes','created_at'],
+        vendor_availability_blocks: ['id','vendor_id','blocked_date','reason','created_at'],
+        couple_expenses:  ['id','couple_id','vendor_name','description','actual_amount','category','payment_status','event','created_at'],
+        couple_vendors:   ['id','couple_id','name','category','phone','quoted_total','status','events','source','created_at','updated_at'],
+        couple_guests:    ['id','couple_id','name','phone','side','rsvp_status','created_at'],
+        couple_checklist: ['id','couple_id','text','due_date','event','priority','is_complete','completed_at','created_at'],
+        moodboard_items:  ['id','user_id','vendor_id','image_url','source_url','function_tag','created_at'],
+        vendor_enquiries: ['id','couple_id','vendor_id','initial_message','wedding_date','last_message_at','last_message_preview','last_message_from','vendor_unread_count','couple_unread_count','status','created_at'],
+        vendor_enquiry_messages: ['id','enquiry_id','from_role','content','created_at'],
+        bookings:         ['id','user_id','vendor_id','event_date','status','amount','escrow_status','created_at'],
+        vendors:          ['id','name','phone','email','category','city','bio','is_approved','ai_enabled','ai_commands_used','ai_access_requested','discover_listed','vendor_discover_enabled','created_at'],
+        users:            ['id','name','phone','email','wedding_date','couple_tier','founding_bride','grace_tokens_remaining','dreamai_cap_hit_dates','checklist_seeded','created_at'],
+      };
+      Object.entries(criticalTables).forEach(([table, cols]) => {
+        schemaCache[table] = new Set(cols);
+      });
+      console.log('[schema] Loaded hardcoded cache:', Object.keys(schemaCache).length, 'critical tables');
+      return;
+    }
+    const cols = await res.json();
+    if (Array.isArray(cols) && cols.length > 0) {
       cols.forEach(({ table_name, column_name }) => {
         if (!schemaCache[table_name]) schemaCache[table_name] = new Set();
         schemaCache[table_name].add(column_name);
