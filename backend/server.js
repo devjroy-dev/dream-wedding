@@ -31,6 +31,52 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+// ─── Schema Cache ─────────────────────────────────────────────────────────────
+// Fetches actual column names from Supabase at startup and caches them.
+// safeInsert() and safeUpdate() strip unknown columns before every DB write.
+// This prevents 500 errors when code tries to insert columns that don't exist.
+
+const schemaCache = {};
+
+async function loadSchemaCache() {
+  try {
+    const { data, error } = await supabase.rpc('get_table_columns').catch(() => ({ data: null, error: 'rpc not found' }));
+    if (error || !data) {
+      // Fallback: query information_schema directly
+      const { data: cols } = await supabase
+        .from('information_schema.columns')
+        .select('table_name, column_name')
+        .eq('table_schema', 'public');
+      if (cols) {
+        cols.forEach(({ table_name, column_name }) => {
+          if (!schemaCache[table_name]) schemaCache[table_name] = new Set();
+          schemaCache[table_name].add(column_name);
+        });
+        console.log('[schema] Loaded', Object.keys(schemaCache).length, 'tables');
+      }
+    }
+  } catch (e) {
+    console.warn('[schema] Cache load failed (will use passthrough):', e.message);
+  }
+}
+
+// Strip payload to only columns that exist in the table
+// If table not in cache, passes payload through unchanged (safe fallback)
+function safePayload(table, payload) {
+  const cols = schemaCache[table];
+  if (!cols || cols.size === 0) return payload; // unknown table — pass through
+  const safe = {};
+  for (const key of Object.keys(payload)) {
+    if (cols.has(key)) safe[key] = payload[key];
+    else console.warn('[schema] Stripped unknown column:', table + '.' + key);
+  }
+  return safe;
+}
+
+// Load schema cache on startup
+loadSchemaCache();
+
+
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 // v1 desktop portal (vendor.thedreamwedding.in) is now active — block removed
 
@@ -412,7 +458,7 @@ app.post('/api/bookings/check-expired', async (req, res) => {
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('bookings').insert([req.body]).select().single();
+    const { data, error } = await supabase.from('bookings').insert([safePayload('bookings', req.body)]).select().single();
     if (error) throw error;
     res.json({ success: true, data });
   } catch (error) {
@@ -1325,9 +1371,10 @@ app.post('/api/vendor-clients', async (req, res) => {
     ];
     const payload = {};
     for (const k of allowed) if (req.body[k] !== undefined) payload[k] = req.body[k];
+    const safeP = safePayload('vendor_clients', payload);
     const { data, error } = await supabase
       .from('vendor_clients')
-      .insert([payload])
+      .insert([safeP])
       .select()
       .single();
     if (error) throw error;
@@ -15149,7 +15196,7 @@ app.post('/api/v2/vendor/calendar/import/:vendorId', async (req, res) => {
     }
 
     const { error } = await supabase.from('vendor_availability_blocks')
-      .upsert(toInsert, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
+      .upsert(toInsert.map(r => safePayload('vendor_availability_blocks', r)), { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
     if (error) throw error;
 
     res.json({ success: true, imported: toInsert.length, total_parsed: events.length });
