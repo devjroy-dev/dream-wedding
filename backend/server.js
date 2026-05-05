@@ -3916,12 +3916,38 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const today = new Date(); today.setHours(0,0,0,0);
         let startDate, endDate, label;
         const w = when.toLowerCase();
-        if (w.includes('today') || w.includes('aaj')) {
+        const currentYear = today.getFullYear();
+
+        // Try to parse a specific date mention (e.g. "dec 13", "13 december", "december 13th", "13/12")
+        const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
+          january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11 };
+        let specificDate = null;
+        // Match "dec 13", "13 dec", "december 13", "13th december" etc
+        const monthMatch = w.match(/(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/);
+        const dayMatch = w.match(/(\d{1,2})(?:st|nd|rd|th)?/);
+        if (monthMatch && dayMatch) {
+          const m = MONTHS[monthMatch[1]];
+          const d = parseInt(dayMatch[1]);
+          // Use next occurrence of this month if it's already passed this year
+          let y = currentYear;
+          const candidate = new Date(y, m, d);
+          if (candidate < today) y = currentYear + 1;
+          specificDate = new Date(y, m, d);
+          specificDate.setHours(0,0,0,0);
+        }
+
+        if (specificDate) {
+          startDate = specificDate;
+          endDate = new Date(specificDate.getTime() + 86400000);
+          label = specificDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+        } else if (w.includes('today') || w.includes('aaj')) {
           startDate = today; endDate = new Date(today.getTime() + 86400000); label = 'today';
         } else if (w.includes('tomorrow') || w.includes('kal')) {
           startDate = new Date(today.getTime() + 86400000); endDate = new Date(today.getTime() + 2*86400000); label = 'tomorrow';
         } else if (w.includes('week')) {
           startDate = today; endDate = new Date(today.getTime() + 7*86400000); label = 'this week';
+        } else if (w.includes('month')) {
+          startDate = today; endDate = new Date(today.getTime() + 30*86400000); label = 'this month';
         } else {
           startDate = today; endDate = new Date(today.getTime() + 30*86400000); label = 'upcoming';
         }
