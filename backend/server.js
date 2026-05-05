@@ -3936,10 +3936,29 @@ async function executeToolCall(toolName, toolInput, vendor) {
           specificDate.setHours(0,0,0,0);
         }
 
+        // Check for month-only mention (no specific day) — e.g. "december schedule", "nov mein kya hai"
+        let specificMonth = null;
+        if (!specificDate && monthMatch && !dayMatch) {
+          specificMonth = MONTHS[monthMatch[1]];
+        }
+
         if (specificDate) {
           startDate = specificDate;
           endDate = new Date(specificDate.getTime() + 86400000);
           label = specificDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+        } else if (specificMonth !== null) {
+          // Full month range — use next occurrence if month already passed
+          let y = currentYear;
+          if (specificMonth < today.getMonth()) y = currentYear + 1;
+          // If same month, start from today; otherwise start from 1st
+          if (specificMonth === today.getMonth() && y === currentYear) {
+            startDate = today;
+          } else {
+            startDate = new Date(y, specificMonth, 1);
+          }
+          endDate = new Date(y, specificMonth + 1, 1); // first day of next month
+          const monthName = startDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+          label = monthName;
         } else if (w.includes('today') || w.includes('aaj')) {
           startDate = today; endDate = new Date(today.getTime() + 86400000); label = 'today';
         } else if (w.includes('tomorrow') || w.includes('kal')) {
