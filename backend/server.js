@@ -73,8 +73,7 @@ function safePayload(table, payload) {
   return safe;
 }
 
-// Load schema cache on startup
-loadSchemaCache();
+// loadSchemaCache() called after server starts (supabase must be initialized first)
 
 
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
@@ -6514,6 +6513,8 @@ app.patch('/api/v2/couple/tasks/:id/complete', async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`The Dream Wedding API running on port ${PORT} 🎉`);
+  // Load schema cache now — supabase client is initialized, server is up
+  loadSchemaCache();
 });
 
 // DELETE routes for missing entities
