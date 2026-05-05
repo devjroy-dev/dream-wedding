@@ -61,6 +61,10 @@ async function loadSchemaCache() {
       // Fallback: use a hardcoded minimal set of known critical tables
       // so safePayload can at least protect the most dangerous write paths
       console.warn('[schema] REST query failed (' + res.status + ') — loading minimal hardcoded cache');
+      // HARDCODED FALLBACK — information_schema blocked by Supabase RLS
+      // If new tables are added to the codebase, add them here too.
+      // Tables not in this list will pass through safePayload unchanged (no protection).
+      // Last updated: May 6, 2026 by Tech V4
       const criticalTables = {
         vendor_clients:   ['id','vendor_id','name','phone','email','event_type','event_date','venue','budget','status','notes','profile_incomplete','created_at','updated_at'],
         vendor_invoices:  ['id','vendor_id','client_name','event_type','amount','gst_amount','total_amount','invoice_number','status','gst_enabled','advance_received','created_at'],
