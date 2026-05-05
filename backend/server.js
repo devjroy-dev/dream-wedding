@@ -5928,17 +5928,10 @@ app.post('/api/v2/vendor/auth/verify-otp', async (req, res) => {
       if (v3) vendor = v3;
     }
     if (!vendor) {
-      // Vendor verified via Twilio but not in DB — create record now
-      console.log('[v2 vendor OTP] Vendor not found, creating record for', fullPhone);
-      const { data: newVendor, error: insertErr } = await supabase.from('vendors').insert([{
-        phone: fullPhone,
-        created_at: new Date().toISOString(),
-      }]).select('id, name, phone, pin_set, category').single();
-      if (insertErr) {
-        console.error('[v2 vendor OTP] Insert failed:', insertErr.message);
-        return res.status(404).json({ success: false, error: 'No vendor account found. Please sign up via invite.' });
-      }
-      vendor = newVendor;
+      // Vendor not found — do NOT auto-create. Vendors are invite-only.
+      // Auto-create was causing duplicate accounts when phone numbers didn't match DB records.
+      console.log('[v2 vendor OTP] Vendor not found for phone:', fullPhone);
+      return res.status(404).json({ success: false, error: 'No vendor account found for this number. Please contact TDW support.' });
     }
     res.json({ success: true, vendor: { id: vendor.id, name: vendor.name, phone: vendor.phone, pin_set: !!vendor.pin_set, category: vendor.category } });
   } catch (err) {
