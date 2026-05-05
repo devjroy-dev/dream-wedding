@@ -3291,13 +3291,16 @@ const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+
 
 // Helper: send WhatsApp message via Twilio
 async function sendWhatsApp(toPhone, message) {
-  if (!twilioClient) { console.log('[Dream Ai] Twilio not configured. Would send:', message); return false; }
+  if (!twilioClient) { console.log('[WhatsApp] Twilio not configured. Would send:', message); return false; }
+  const to = toPhone.startsWith('whatsapp:') ? toPhone : 'whatsapp:' + toPhone;
+  console.log('[WhatsApp] attempting send | from:', TWILIO_WHATSAPP_NUMBER, '| to:', to, '| msgLen:', message.length);
   try {
-    const to = toPhone.startsWith('whatsapp:') ? toPhone : 'whatsapp:' + toPhone;
-    await twilioClient.messages.create({ from: TWILIO_WHATSAPP_NUMBER, to, body: message });
+    const result = await twilioClient.messages.create({ from: TWILIO_WHATSAPP_NUMBER, to, body: message });
+    console.log('[WhatsApp] send success | sid:', result.sid, '| status:', result.status);
     return true;
   } catch (err) {
-    console.error('[Dream Ai] WhatsApp send error:', err.message);
+    console.error('[WhatsApp] send FAILED | to:', to, '| code:', err.code, '| status:', err.status, '| message:', err.message);
+    if (err.moreInfo) console.error('[WhatsApp] moreInfo:', err.moreInfo);
     return false;
   }
 }
