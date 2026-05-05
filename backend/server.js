@@ -1448,6 +1448,69 @@ app.patch('/api/contracts/:id', async (req, res) => {
 });
 
 // ==================
+
+// ── P1.3 Contracts V2 ─────────────────────────────────────────────────────────
+
+app.get('/api/v2/vendor/tc/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendors').select('tc_text, category').eq('id', req.params.vendorId).maybeSingle();
+    if (error) throw error;
+    res.json({ success: true, tc_text: data?.tc_text || null, category: data?.category || null });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/v2/vendor/tc/:vendorId', async (req, res) => {
+  try {
+    const { tc_text } = req.body || {};
+    const { error } = await supabase.from('vendors').update({ tc_text }).eq('id', req.params.vendorId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/v2/vendor/contracts/list/:vendorId', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_contracts').select('id, client_name, category, status, version, parent_contract_id, created_at, sent_at, acknowledged_at, fields_json, business_name, client_phone, client_email, superseded_by').eq('vendor_id', req.params.vendorId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/v2/vendor/contracts/create', async (req, res) => {
+  try {
+    const { vendor_id, category, business_name, client_name, client_phone, client_email, fields_json, parent_contract_id } = req.body || {};
+    if (!vendor_id || !client_name) return res.status(400).json({ success: false, error: 'vendor_id and client_name required' });
+    const version = parent_contract_id ? 2 : 1;
+    const ref = 'TDW-' + Date.now().toString().slice(-8).toUpperCase();
+    const { data: contract, error } = await supabase.from('vendor_contracts').insert([{ vendor_id, category, business_name, client_name, client_phone: client_phone || null, client_email: client_email || null, fields_json: fields_json || {}, status: 'draft', version, parent_contract_id: parent_contract_id || null, contract_text: ref }]).select().single();
+    if (error) throw error;
+    if (parent_contract_id) { await supabase.from('vendor_contracts').update({ superseded_by: contract.id, status: 'superseded' }).eq('id', parent_contract_id); }
+    const fields = fields_json || {};
+    if (fields.total_fee && fields.advance_paid) {
+      const balance = Number(fields.total_fee) - Number(fields.advance_paid);
+      try { await supabase.from('vendor_payment_schedules').insert([ { vendor_id, client_name, amount: Number(fields.advance_paid), status: 'paid', description: 'Advance — ' + client_name, due_date: new Date().toISOString().split('T')[0] }, { vendor_id, client_name, amount: balance, status: 'committed', description: 'Balance — ' + client_name, due_date: fields.balance_due_date || null } ]); } catch (e) { console.error('[contracts] payment linkage error:', e.message); }
+    }
+    res.json({ success: true, data: contract });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/v2/vendor/contracts/:id/send', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_contracts').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/v2/vendor/contracts/:id/acknowledge', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('vendor_contracts').update({ status: 'acknowledged', acknowledged_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── End P1.3 Contracts V2 ─────────────────────────────────────────────────────
 // EXPENSE ROUTES
 // ==================
 
@@ -3553,6 +3616,23 @@ const TDW_AI_TOOLS = [
       required: ['description', 'amount'],
     },
   },
+  {
+    name: 'prefill_contract',
+    description: 'Pre-fill a contract form from natural language. Use when vendor says "make a contract", "create a contract", "generate a contract", or "draft a contract" for a client. Extract all fields mentioned.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: { type: 'string', description: 'Client or couple name' },
+        total_fee: { type: 'number', description: 'Total fee in rupees' },
+        advance_paid: { type: 'number', description: 'Advance already paid in rupees' },
+        balance_due_date: { type: 'string', description: 'Balance due date in YYYY-MM-DD format' },
+        wedding_date: { type: 'string', description: 'Wedding/event date in YYYY-MM-DD format' },
+        events_covered: { type: 'array', items: { type: 'string' }, description: 'Events covered e.g. ["Mehendi", "Sangeet", "Reception"]' },
+        notes: { type: 'string', description: 'Any additional notes or special terms mentioned' },
+      },
+      required: ['client_name'],
+    },
+  },
 ];
 
 const TDW_COUPLE_TOOLS = [
@@ -4047,6 +4127,20 @@ async function executeToolCall(toolName, toolInput, vendor) {
         if (error) throw error;
         const typeLabel = expense_type === 'business' ? 'Business expense' : 'Expense';
         return `✓ ${typeLabel} logged: ${description} — ₹${Number(amount).toLocaleString('en-IN')}${category ? ' (' + category + ')' : ''}${related_name ? '\nRef: ' + related_name : ''}`;
+      }
+
+      case 'prefill_contract': {
+        const { client_name, total_fee, advance_paid, balance_due_date, wedding_date, events_covered, notes } = toolInput;
+        const balance = (total_fee && advance_paid) ? total_fee - advance_paid : null;
+        const parts = [`Contract pre-filled for ${client_name}.`];
+        if (total_fee) parts.push(`Total fee: ₹${Number(total_fee).toLocaleString('en-IN')}`);
+        if (advance_paid) parts.push(`Advance paid: ₹${Number(advance_paid).toLocaleString('en-IN')}`);
+        if (balance !== null) parts.push(`Balance: ₹${Number(balance).toLocaleString('en-IN')}`);
+        if (balance_due_date) parts.push(`Balance due: ${balance_due_date}`);
+        if (wedding_date) parts.push(`Event date: ${wedding_date}`);
+        if (events_covered?.length) parts.push(`Events: ${events_covered.join(', ')}`);
+        parts.push('Opening contract form…');
+        return { prefill: true, client_name, total_fee, advance_paid, balance_due_date, wedding_date, events_covered, notes, summary: parts.join('\n') };
       }
 
       default:
