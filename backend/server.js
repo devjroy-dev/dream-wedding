@@ -10145,6 +10145,7 @@ app.post('/api/couple/vendors', async (req, res) => {
       events, status, quoted_total, balance_due_date,
       contract_url, contract_uploaded_by, contract_uploaded_by_name,
       booked_slot, notes, added_by, added_by_name,
+      profile_incomplete, source,
     } = req.body || {};
     if (!couple_id || !name) {
       return res.status(400).json({ success: false, error: 'couple_id and name required' });
@@ -10169,6 +10170,8 @@ app.post('/api/couple/vendors', async (req, res) => {
         notes: notes || null,
         added_by: added_by || null,
         added_by_name: added_by_name || null,
+        profile_incomplete: profile_incomplete || false,
+        source: source || null,
       }])
       .select().single();
     if (error) throw error;
