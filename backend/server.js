@@ -75,7 +75,7 @@ async function loadSchemaCache() {
         couple_expenses:  ['id','couple_id','vendor_name','description','actual_amount','category','payment_status','event','created_at'],
         couple_vendors:   ['id','couple_id','name','category','phone','quoted_total','status','events','source','created_at','updated_at'],
         couple_guests:    ['id','couple_id','name','phone','side','rsvp_status','created_at'],
-        couple_checklist: ['id','couple_id','text','due_date','event','priority','is_complete','completed_at','created_at'],
+        couple_checklist: ['id','couple_id','text','title','due_date','event','priority','is_complete','completed_at','created_at','notes','assigned_to','vendor_id','is_custom','seeded_from_template','status','updated_at'],
         moodboard_items:  ['id','user_id','vendor_id','image_url','source_url','function_tag','created_at'],
         vendor_enquiries: ['id','couple_id','vendor_id','initial_message','wedding_date','last_message_at','last_message_preview','last_message_from','vendor_unread_count','couple_unread_count','status','created_at'],
         vendor_enquiry_messages: ['id','enquiry_id','from_role','content','created_at'],
@@ -9396,7 +9396,7 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
 app.patch('/api/couple/checklist/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params;
-    const updates = { ...(req.body || {}) };
+    const updates = safePayload('couple_checklist', { ...(req.body || {}) });
     // Auto-stamp completed_at when flipping is_complete
     if (updates.is_complete === true) updates.completed_at = new Date().toISOString();
     if (updates.is_complete === false) updates.completed_at = null;
