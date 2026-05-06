@@ -6486,6 +6486,28 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       }
     }
 
+    // P6: Fill remaining slots with preset tasks due soonest (framing: plan_ahead)
+    if (moments.length < 3) {
+      const presetTasks = (allTasks || [])
+        .filter(t => t.is_custom === false && t.due_date && t.due_date >= todayStr)
+        .sort((a, b) => a.due_date.localeCompare(b.due_date));
+      for (const t of presetTasks) {
+        if (moments.length >= 3) break;
+        // Skip if already added as P1/P4
+        if (moments.some(m => m.task_id === t.id)) continue;
+        moments.push({
+          type: 'preset_task',
+          priority: 6,
+          framing: 'plan_ahead',
+          title: 'Plan ahead',
+          body: t.text || t.title || 'Upcoming task',
+          action: `Review: ${t.text || t.title}`,
+          task_id: t.id,
+          due_date: t.due_date,
+        });
+      }
+    }
+
     // ── Muse saves enrichment ─────────────────────────────────────────────────
     const museSaves = museItems || [];
     let museSavesEnriched = museSaves;
@@ -6501,8 +6523,9 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
     // ── This week events ──────────────────────────────────────────────────────
     const thisWeekEvents = (allEvents || []).filter(e => e.event_date >= todayStr && e.event_date <= in7Str);
 
-    // ── Upcoming payments ─────────────────────────────────────────────────────
-    const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in7Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
+    // ── Upcoming payments — next 30 days ─────────────────────────────────────
+    const in30Str = new Date(now.getTime() + 30*24*60*60*1000).toISOString().split('T')[0];
+    const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date && e.due_date >= todayStr && e.due_date <= in30Str).sort((a,b) => a.due_date.localeCompare(b.due_date));
 
     // ── Quiet activity ────────────────────────────────────────────────────────
     // Enrich with vendor names
