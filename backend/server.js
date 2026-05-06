@@ -75,7 +75,7 @@ async function loadSchemaCache() {
         couple_expenses:  ['id','couple_id','vendor_name','description','actual_amount','category','payment_status','event','created_at'],
         couple_vendors:   ['id','couple_id','name','category','phone','quoted_total','status','events','source','created_at','updated_at'],
         couple_guests:    ['id','couple_id','name','phone','side','rsvp_status','created_at'],
-        couple_checklist: ['id','couple_id','text','title','due_date','event','priority','is_complete','completed_at','created_at','notes','assigned_to','vendor_id','is_custom','seeded_from_template','updated_at'],
+        couple_checklist: ['id','couple_id','text','title','due_date','event','priority','is_complete','completed_at','created_at','notes','assigned_to','vendor_id','is_custom','seeded_from_template','status','updated_at'],
         moodboard_items:  ['id','user_id','vendor_id','image_url','source_url','function_tag','created_at'],
         vendor_enquiries: ['id','couple_id','vendor_id','initial_message','wedding_date','last_message_at','last_message_preview','last_message_from','vendor_unread_count','couple_unread_count','status','created_at'],
         vendor_enquiry_messages: ['id','enquiry_id','from_role','content','created_at'],
@@ -6484,6 +6484,39 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
           event_name: ev.event_name,
         });
       }
+    }
+
+    // P6: Preset task fallback — fills remaining slots up to 3 total
+    // Only fires if P1-P5 produced fewer than 3 moments
+    // Uses allTasks (already fetched, is_complete=false) — no extra DB query
+    if (moments.length < 3) {
+      const slotsRemaining = 3 - moments.length;
+      const shownTaskIds = new Set(moments.filter(m => m.task_id).map(m => m.task_id));
+      // Filter to preset tasks (is_custom=false) not already shown, ordered by due_date ascending
+      const fallbackTasks = (allTasks || [])
+        .filter(t => !t.is_custom && !shownTaskIds.has(t.id))
+        .sort((a, b) => {
+          if (!a.due_date && !b.due_date) return 0;
+          if (!a.due_date) return 1;
+          if (!b.due_date) return -1;
+          return a.due_date.localeCompare(b.due_date);
+        })
+        .slice(0, slotsRemaining);
+      fallbackTasks.forEach(task => {
+        moments.push({
+          type: 'preset_task',
+          task_id: task.id,
+          title: task.text || task.title || 'Task',
+          body: task.due_date
+            ? `Due ${new Date(task.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+            : 'Add to your plan',
+          action: 'VIEW TASK',
+          priority: task.priority || 'medium',
+          event: task.event || null,
+          due_date: task.due_date || null,
+          framing: 'plan_ahead',
+        });
+      });
     }
 
     // ── Muse saves enrichment ─────────────────────────────────────────────────
