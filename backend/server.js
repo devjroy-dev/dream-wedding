@@ -10245,7 +10245,7 @@ app.get('/api/v2/discover/featured', async (req, res) => {
     const collections = [
       {
         id: 'feat-1',
-        title: 'Delhi's Finest',
+        title: "Delhi's Finest",
         subtitle: 'Curated by TDW',
         cover_image: vendors[0]?.featured_photos?.[0] || vendors[0]?.portfolio_images?.[0] || null,
         vendor_ids: vendors.filter(v => v.city?.includes('Delhi')).slice(0, 6).map(v => v.id),
