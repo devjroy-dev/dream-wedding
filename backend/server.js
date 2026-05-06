@@ -15393,6 +15393,76 @@ app.post('/api/v2/dreamai/vendor-action/send-client-reminder', async (req, res) 
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+
+// ─── Couple DreamAi in-app action endpoints ────────────────────────────────
+// V6: Four endpoints exposing couple tool handlers as HTTP action endpoints.
+// Called by native app action card Confirm button. Mirrors vendor-action pattern.
+// The vendor arg carries { id: couple_id } — this is the established pattern
+// for how couple tools resolve ownership inside executeToolCall().
+
+// POST /api/v2/dreamai/couple-action/complete-task
+app.post('/api/v2/dreamai/couple-action/complete-task', async (req, res) => {
+  try {
+    const { couple_id, task_id } = req.body || {};
+    if (!couple_id || !task_id) {
+      return res.status(400).json({ success: false, error: 'couple_id and task_id required' });
+    }
+    const result = await executeToolCall('complete_task', { task_id }, { id: couple_id });
+    res.json({ success: true, message: result });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/couple-action/mark-expense-paid
+app.post('/api/v2/dreamai/couple-action/mark-expense-paid', async (req, res) => {
+  try {
+    const { couple_id, expense_id, vendor_name } = req.body || {};
+    if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    if (!expense_id && !vendor_name) return res.status(400).json({ success: false, error: 'expense_id or vendor_name required' });
+    const result = await executeToolCall(
+      'mark_expense_paid',
+      { expense_id: expense_id || null, vendor_name: vendor_name || null },
+      { id: couple_id }
+    );
+    res.json({ success: true, message: result });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/couple-action/update-vendor-status
+app.post('/api/v2/dreamai/couple-action/update-vendor-status', async (req, res) => {
+  try {
+    const { couple_id, vendor_name, status, quoted_price, advance, event } = req.body || {};
+    if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    if (!status) return res.status(400).json({ success: false, error: 'status required' });
+    if (!vendor_name) return res.status(400).json({ success: false, error: 'vendor_name required' });
+    const result = await executeToolCall(
+      'update_vendor_status',
+      {
+        vendor_name,
+        status,
+        quoted_price: quoted_price ? Number(quoted_price) : undefined,
+        advance: advance ? Number(advance) : undefined,
+        event: event || null,
+      },
+      { id: couple_id }
+    );
+    res.json({ success: true, message: result });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// POST /api/v2/dreamai/couple-action/send-enquiry
+app.post('/api/v2/dreamai/couple-action/send-enquiry', async (req, res) => {
+  try {
+    const { couple_id, vendor_id, message } = req.body || {};
+    if (!couple_id || !vendor_id) return res.status(400).json({ success: false, error: 'couple_id and vendor_id required' });
+    const result = await executeToolCall(
+      'send_enquiry',
+      { vendor_id, message: message || 'Hello, I am interested in your work.' },
+      { id: couple_id }
+    );
+    res.json({ success: true, message: result });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
 // POST /api/v2/vendor/calendar/import/:vendorId — parse .ics and block dates in TDW
 app.post('/api/v2/vendor/calendar/import/:vendorId', async (req, res) => {
   try {
