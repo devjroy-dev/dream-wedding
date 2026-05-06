@@ -3809,10 +3809,6 @@ const TDW_AI_TOOLS = [
       required: ['client_name'],
     },
   },
-  {
-    type: 'web_search_20250305',
-    name: 'web_search',
-  },
 ];
 
 const TDW_COUPLE_TOOLS = [
@@ -3965,17 +3961,6 @@ const TDW_COUPLE_TOOLS = [
         reply: { type: 'string', description: 'Response to the couple' },
       },
       required: ['reply'],
-    },
-  },
-  {
-    name: 'get_muse_saves',
-    description: "Fetch the bride's current Muse board — saved vendor cards, inspiration images, and links. Use this when the bride asks about her saved items or to power the SURPRISE ME aesthetic feature.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Max saves to return. Defaults to 10.' },
-      },
-      required: [],
     },
   },
 ];
@@ -4364,23 +4349,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         return "Your vendors (" + v.length + "): " + lines.join("; ");
       }
 
-      
-      case 'get_muse_saves': {
-        const limit = toolInput.limit || 10;
-        const { data: museData, error: museError } = await supabase
-          .from('couple_muse')
-          .select('id, image_url, source_url, vendor_id, function_tag, created_at')
-          .eq('couple_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(limit);
-        if (museError) {
-          toolResults.push({ tool: toolName, result: { success: false, error: museError.message } });
-        } else {
-          toolResults.push({ tool: toolName, result: { success: true, saves: museData || [], count: (museData || []).length } });
-        }
-        break;
-      }
-case 'general_reply':
+      case 'general_reply':
         return toolInput.reply;
 
       case 'log_expense': {
@@ -5990,109 +5959,11 @@ app.get("/api/v2/couple/guests/:userId", async (req, res) => {
 app.get("/api/v2/couple/events/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
-    // Fetch events + all linked data in parallel for real counts
-    const [
-      { data: events, error },
-      { data: tasks },
-      { data: vendors },
-      { data: guests },
-    ] = await Promise.all([
-      supabase.from("couple_events").select("*").eq("couple_id", userId).order("event_date", { ascending: true }),
-      supabase.from("couple_checklist").select("id, event, is_complete").eq("couple_id", userId),
-      supabase.from("couple_vendors").select("id, name, category, status, events, quoted_total").eq("couple_id", userId),
-      supabase.from("couple_guests").select("id, name, rsvp_status").eq("couple_id", userId),
-    ]);
+    const { data, error } = await supabase.from("couple_events").select("*").eq("couple_id", userId).order("event_date", { ascending: true });
     if (error) throw error;
-
-    const rows = (events || []).map(e => {
-      const evName = e.event_name || e.event_type || "";
-      // Count tasks linked to this event by name
-      const taskCount = (tasks || []).filter(t => t.event === evName || t.event === evName.toLowerCase()).length;
-      // Count vendors linked to this event (events array contains event name)
-      const vendorCount = (vendors || []).filter(v =>
-        Array.isArray(v.events) && v.events.some(n => n.toLowerCase() === evName.toLowerCase()) &&
-        (v.status === 'booked' || v.status === 'paid')
-      ).length;
-      // Count guests invited to this event (rsvp_status keys = event names)
-      const guestCount = (guests || []).filter(g =>
-        g.rsvp_status && Object.keys(g.rsvp_status).some(k => k.toLowerCase() === evName.toLowerCase())
-      ).length;
-      return {
-        ...e,
-        name: evName,
-        date: e.event_date || null,
-        venue: e.venue || e.event_city || null,
-        task_count: taskCount,
-        vendor_count: vendorCount,
-        guest_count: guestCount,
-      };
-    });
+    const rows = (data || []).map(e => ({ ...e, name: e.event_name || e.event_type || "", date: e.event_date || null, venue: e.venue || e.event_city || null, task_count: e.task_count ?? null, vendor_count: e.vendor_count ?? null, guest_count: e.guest_count ?? null }));
     res.json(rows);
-  } catch (err) {
-    console.error("events v2 error:", err.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /api/v2/couple/events/:userId/:eventName/detail
-// Returns tasks, vendors, guests linked to a specific event
-app.get("/api/v2/couple/events/:userId/:eventName/detail", async (req, res) => {
-  const { userId, eventName } = req.params;
-  const evName = decodeURIComponent(eventName);
-  try {
-    const [
-      { data: tasks },
-      { data: vendors },
-      { data: guests },
-    ] = await Promise.all([
-      supabase.from("couple_checklist").select("id, text, is_complete, due_date, priority, event, assigned_to, notes").eq("couple_id", userId),
-      supabase.from("couple_vendors").select("id, name, category, status, events, quoted_total, phone").eq("couple_id", userId),
-      supabase.from("couple_guests").select("id, name, phone, rsvp_status, side").eq("couple_id", userId),
-    ]);
-
-    const eventTasks = (tasks || []).filter(t =>
-      t.event === evName || t.event === evName.toLowerCase()
-    ).map(t => ({
-      id: t.id,
-      title: t.text,
-      is_complete: t.is_complete,
-      due_date: t.due_date,
-      priority: t.priority,
-      assigned_to: t.assigned_to,
-      notes: t.notes,
-    }));
-
-    const eventVendors = (vendors || []).filter(v =>
-      Array.isArray(v.events) && v.events.some(n => n.toLowerCase() === evName.toLowerCase())
-    ).map(v => ({
-      id: v.id,
-      name: v.name,
-      category: v.category,
-      status: v.status,
-      quoted_total: v.quoted_total,
-      phone: v.phone,
-    }));
-
-    const eventGuests = (guests || []).filter(g =>
-      g.rsvp_status && Object.keys(g.rsvp_status).some(k => k.toLowerCase() === evName.toLowerCase())
-    ).map(g => ({
-      id: g.id,
-      name: g.name,
-      phone: g.phone,
-      side: g.side,
-      rsvp: g.rsvp_status[evName] || g.rsvp_status[Object.keys(g.rsvp_status).find(k => k.toLowerCase() === evName.toLowerCase())] || 'pending',
-    }));
-
-    res.json({
-      event_name: evName,
-      tasks: eventTasks,
-      vendors: eventVendors,
-      guests: eventGuests,
-    });
-  } catch (err) {
-    console.error("event detail error:", err.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 
@@ -10176,7 +10047,6 @@ app.post('/api/couple/vendors', async (req, res) => {
       events, status, quoted_total, balance_due_date,
       contract_url, contract_uploaded_by, contract_uploaded_by_name,
       booked_slot, notes, added_by, added_by_name,
-      profile_incomplete, source,
     } = req.body || {};
     if (!couple_id || !name) {
       return res.status(400).json({ success: false, error: 'couple_id and name required' });
@@ -10201,8 +10071,6 @@ app.post('/api/couple/vendors', async (req, res) => {
         notes: notes || null,
         added_by: added_by || null,
         added_by_name: added_by_name || null,
-        profile_incomplete: profile_incomplete || false,
-        source: source || null,
       }])
       .select().single();
     if (error) throw error;

@@ -3809,10 +3809,6 @@ const TDW_AI_TOOLS = [
       required: ['client_name'],
     },
   },
-  {
-    type: 'web_search_20250305',
-    name: 'web_search',
-  },
 ];
 
 const TDW_COUPLE_TOOLS = [
@@ -3965,17 +3961,6 @@ const TDW_COUPLE_TOOLS = [
         reply: { type: 'string', description: 'Response to the couple' },
       },
       required: ['reply'],
-    },
-  },
-  {
-    name: 'get_muse_saves',
-    description: "Fetch the bride's current Muse board — saved vendor cards, inspiration images, and links. Use this when the bride asks about her saved items or to power the SURPRISE ME aesthetic feature.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Max saves to return. Defaults to 10.' },
-      },
-      required: [],
     },
   },
 ];
@@ -4364,23 +4349,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         return "Your vendors (" + v.length + "): " + lines.join("; ");
       }
 
-      
-      case 'get_muse_saves': {
-        const limit = toolInput.limit || 10;
-        const { data: museData, error: museError } = await supabase
-          .from('couple_muse')
-          .select('id, image_url, source_url, vendor_id, function_tag, created_at')
-          .eq('couple_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(limit);
-        if (museError) {
-          toolResults.push({ tool: toolName, result: { success: false, error: museError.message } });
-        } else {
-          toolResults.push({ tool: toolName, result: { success: true, saves: museData || [], count: (museData || []).length } });
-        }
-        break;
-      }
-case 'general_reply':
+      case 'general_reply':
         return toolInput.reply;
 
       case 'log_expense': {

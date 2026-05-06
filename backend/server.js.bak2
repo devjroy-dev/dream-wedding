@@ -3809,10 +3809,6 @@ const TDW_AI_TOOLS = [
       required: ['client_name'],
     },
   },
-  {
-    type: 'web_search_20250305',
-    name: 'web_search',
-  },
 ];
 
 const TDW_COUPLE_TOOLS = [
@@ -3965,17 +3961,6 @@ const TDW_COUPLE_TOOLS = [
         reply: { type: 'string', description: 'Response to the couple' },
       },
       required: ['reply'],
-    },
-  },
-  {
-    name: 'get_muse_saves',
-    description: "Fetch the bride's current Muse board — saved vendor cards, inspiration images, and links. Use this when the bride asks about her saved items or to power the SURPRISE ME aesthetic feature.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Max saves to return. Defaults to 10.' },
-      },
-      required: [],
     },
   },
 ];
