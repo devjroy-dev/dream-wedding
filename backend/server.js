@@ -80,7 +80,7 @@ async function loadSchemaCache() {
         vendor_enquiries: ['id','couple_id','vendor_id','initial_message','wedding_date','last_message_at','last_message_preview','last_message_from','vendor_unread_count','couple_unread_count','status','created_at'],
         vendor_enquiry_messages: ['id','enquiry_id','from_role','content','created_at'],
         bookings:         ['id','user_id','vendor_id','event_date','status','amount','escrow_status','created_at'],
-        vendors:          ['id','name','phone','email','category','city','bio','is_approved','ai_enabled','ai_commands_used','ai_access_requested','discover_listed','vendor_discover_enabled','created_at'],
+        vendors:          ['id','name','phone','email','category','city','bio','is_approved','ai_enabled','ai_commands_used','ai_access_requested','discover_listed','vendor_discover_enabled','created_at','last_whatsapp_activity'],
         users:            ['id','name','phone','email','wedding_date','couple_tier','founding_bride','grace_tokens_remaining','dreamai_cap_hit_dates','checklist_seeded','created_at'],
       };
       Object.entries(criticalTables).forEach(([table, cols]) => {
@@ -9289,58 +9289,58 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
     }
 
     const WEDDING_TASK_TEMPLATES = [
-      { text: 'Set your total wedding budget', event: 'general', priority: 'high' },
-      { text: 'Create guest list (draft)', event: 'general', priority: 'high' },
-      { text: 'Choose wedding date', event: 'general', priority: 'high' },
-      { text: 'Book wedding venue', event: 'reception', priority: 'high' },
-      { text: 'Book ceremony venue', event: 'wedding', priority: 'high' },
-      { text: 'Shortlist and book MUA', event: 'general', priority: 'high' },
-      { text: 'Shortlist photographers — review portfolios', event: 'general', priority: 'high' },
-      { text: 'Book photographer', event: 'general', priority: 'high' },
-      { text: 'Book videographer', event: 'general', priority: 'high' },
-      { text: 'Start bridal lehenga shopping', event: 'general', priority: 'high' },
-      { text: 'Shortlist and book decorator', event: 'reception', priority: 'high' },
-      { text: 'Shortlist and book caterer', event: 'reception', priority: 'normal' },
-      { text: 'Book mehendi artist', event: 'mehendi', priority: 'high' },
-      { text: 'Send save-the-dates (outstation guests)', event: 'general', priority: 'normal' },
-      { text: 'Book DJ or live music for sangeet', event: 'sangeet', priority: 'normal' },
-      { text: 'Finalise bridal lehenga', event: 'general', priority: 'high' },
-      { text: 'Book hotel room block for outstation guests', event: 'general', priority: 'normal' },
-      { text: 'Discuss decor theme and mood board with decorator', event: 'general', priority: 'normal' },
-      { text: 'Shortlist and book pandit / officiant', event: 'wedding', priority: 'high' },
-      { text: 'Finalise guest list (final headcount)', event: 'general', priority: 'high' },
-      { text: 'Order bridal jewellery', event: 'general', priority: 'high' },
-      { text: 'Plan sangeet performances and rehearsal schedule', event: 'sangeet', priority: 'normal' },
-      { text: 'Design and order wedding invitations', event: 'general', priority: 'high' },
-      { text: 'Book honeymoon', event: 'general', priority: 'normal' },
-      { text: 'Groom — finalise sherwani / suit', event: 'general', priority: 'normal' },
-      { text: 'Confirm headcount with venue and caterer', event: 'general', priority: 'high' },
-      { text: 'Send wedding invitations', event: 'general', priority: 'high' },
-      { text: 'Schedule pre-wedding shoot', event: 'general', priority: 'normal' },
-      { text: 'Finalise decor details with decorator', event: 'general', priority: 'normal' },
-      { text: 'Book makeup trials for bridesmaids / family', event: 'general', priority: 'normal' },
-      { text: 'Confirm pandit — discuss rituals and timings', event: 'wedding', priority: 'high' },
-      { text: 'Pre-wedding shoot', event: 'general', priority: 'normal' },
-      { text: 'Confirm all vendor payment schedules', event: 'general', priority: 'high' },
-      { text: 'Collect RSVPs and share final count', event: 'general', priority: 'high' },
-      { text: 'Bridal lehenga final fitting', event: 'general', priority: 'high' },
-      { text: 'Prepare vendor advance payment list', event: 'general', priority: 'high' },
-      { text: 'Sangeet rehearsals begin', event: 'sangeet', priority: 'normal' },
-      { text: 'Confirm hotel rooming list for guests', event: 'general', priority: 'normal' },
-      { text: 'Pack bridal emergency kit', event: 'general', priority: 'normal' },
-      { text: 'Confirm all vendors — final call / WhatsApp', event: 'general', priority: 'high' },
-      { text: 'Mehendi ceremony', event: 'mehendi', priority: 'high' },
-      { text: 'Sangeet ceremony', event: 'sangeet', priority: 'high' },
-      { text: 'Haldi ceremony', event: 'haldi', priority: 'normal' },
-      { text: 'Wedding day — confirm call time with MUA', event: 'wedding', priority: 'high' },
-      { text: 'Wedding day — confirm call time with photographer', event: 'wedding', priority: 'high' },
-      { text: 'Wedding ceremony', event: 'wedding', priority: 'high' },
-      { text: 'Wedding reception', event: 'reception', priority: 'high' },
-      { text: 'Pay all final vendor balances', event: 'general', priority: 'high' },
-      { text: 'Share wedding photos with family and friends', event: 'general', priority: 'normal' },
-      { text: 'Write reviews for your vendors on TDW', event: 'general', priority: 'normal' },
-      { text: 'Send thank-you notes to vendors', event: 'general', priority: 'normal' },
-      { text: 'Start honeymoon!', event: 'general', priority: 'normal' },
+      { text: 'Set your total wedding budget', event: 'General', priority: 'high' },
+      { text: 'Create guest list (draft)', event: 'General', priority: 'high' },
+      { text: 'Choose wedding date', event: 'General', priority: 'high' },
+      { text: 'Book wedding venue', event: 'Reception', priority: 'high' },
+      { text: 'Book ceremony venue', event: 'Ceremony', priority: 'high' },
+      { text: 'Shortlist and book MUA', event: 'General', priority: 'high' },
+      { text: 'Shortlist photographers — review portfolios', event: 'General', priority: 'high' },
+      { text: 'Book photographer', event: 'General', priority: 'high' },
+      { text: 'Book videographer', event: 'General', priority: 'high' },
+      { text: 'Start bridal lehenga shopping', event: 'General', priority: 'high' },
+      { text: 'Shortlist and book decorator', event: 'Reception', priority: 'high' },
+      { text: 'Shortlist and book caterer', event: 'Reception', priority: 'normal' },
+      { text: 'Book mehendi artist', event: 'Mehendi', priority: 'high' },
+      { text: 'Send save-the-dates (outstation guests)', event: 'General', priority: 'normal' },
+      { text: 'Book DJ or live music for sangeet', event: 'Sangeet', priority: 'normal' },
+      { text: 'Finalise bridal lehenga', event: 'General', priority: 'high' },
+      { text: 'Book hotel room block for outstation guests', event: 'General', priority: 'normal' },
+      { text: 'Discuss decor theme and mood board with decorator', event: 'General', priority: 'normal' },
+      { text: 'Shortlist and book pandit / officiant', event: 'Ceremony', priority: 'high' },
+      { text: 'Finalise guest list (final headcount)', event: 'General', priority: 'high' },
+      { text: 'Order bridal jewellery', event: 'General', priority: 'high' },
+      { text: 'Plan sangeet performances and rehearsal schedule', event: 'Sangeet', priority: 'normal' },
+      { text: 'Design and order wedding invitations', event: 'General', priority: 'high' },
+      { text: 'Book honeymoon', event: 'General', priority: 'normal' },
+      { text: 'Groom — finalise sherwani / suit', event: 'General', priority: 'normal' },
+      { text: 'Confirm headcount with venue and caterer', event: 'General', priority: 'high' },
+      { text: 'Send wedding invitations', event: 'General', priority: 'high' },
+      { text: 'Schedule pre-wedding shoot', event: 'General', priority: 'normal' },
+      { text: 'Finalise decor details with decorator', event: 'General', priority: 'normal' },
+      { text: 'Book makeup trials for bridesmaids / family', event: 'General', priority: 'normal' },
+      { text: 'Confirm pandit — discuss rituals and timings', event: 'Ceremony', priority: 'high' },
+      { text: 'Pre-wedding shoot', event: 'General', priority: 'normal' },
+      { text: 'Confirm all vendor payment schedules', event: 'General', priority: 'high' },
+      { text: 'Collect RSVPs and share final count', event: 'General', priority: 'high' },
+      { text: 'Bridal lehenga final fitting', event: 'General', priority: 'high' },
+      { text: 'Prepare vendor advance payment list', event: 'General', priority: 'high' },
+      { text: 'Sangeet rehearsals begin', event: 'Sangeet', priority: 'normal' },
+      { text: 'Confirm hotel rooming list for guests', event: 'General', priority: 'normal' },
+      { text: 'Pack bridal emergency kit', event: 'General', priority: 'normal' },
+      { text: 'Confirm all vendors — final call / WhatsApp', event: 'General', priority: 'high' },
+      { text: 'Mehendi ceremony', event: 'Mehendi', priority: 'high' },
+      { text: 'Sangeet ceremony', event: 'Sangeet', priority: 'high' },
+      { text: 'Haldi ceremony', event: 'Haldi', priority: 'normal' },
+      { text: 'Wedding day — confirm call time with MUA', event: 'Ceremony', priority: 'high' },
+      { text: 'Wedding day — confirm call time with photographer', event: 'Ceremony', priority: 'high' },
+      { text: 'Wedding ceremony', event: 'Ceremony', priority: 'high' },
+      { text: 'Wedding reception', event: 'Reception', priority: 'high' },
+      { text: 'Pay all final vendor balances', event: 'General', priority: 'high' },
+      { text: 'Share wedding photos with family and friends', event: 'General', priority: 'normal' },
+      { text: 'Write reviews for your vendors on TDW', event: 'General', priority: 'normal' },
+      { text: 'Send thank-you notes to vendors', event: 'General', priority: 'normal' },
+      { text: 'Start honeymoon!', event: 'General', priority: 'normal' },
     ];
 
     const rows = WEDDING_TASK_TEMPLATES.map(t => ({
@@ -9357,6 +9357,34 @@ app.post('/api/couple/checklist/seed/:coupleId', async (req, res) => {
     if (error) throw error;
 
     await supabase.from('users').update(safePayload('users', { checklist_seeded: true })).eq('id', coupleId);
+
+    // Auto-seed couple_events if empty (D-09 Part A)
+    const { data: existingEvents } = await supabase.from('couple_events').select('id').eq('couple_id', coupleId);
+    if (!existingEvents || existingEvents.length === 0) {
+      const { data: coupleUser } = await supabase.from('users').select('wedding_date').eq('id', coupleId).maybeSingle();
+      const weddingDate = coupleUser?.wedding_date ? new Date(coupleUser.wedding_date) : new Date();
+      const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r.toISOString().split('T')[0]; };
+      const STANDARD_EVENTS = [
+        { event_name: 'Mehendi',   event_type: 'mehendi',   days_before: -2 },
+        { event_name: 'Haldi',     event_type: 'haldi',     days_before: -1 },
+        { event_name: 'Sangeet',   event_type: 'sangeet',   days_before: -1 },
+        { event_name: 'Ceremony',  event_type: 'ceremony',  days_before: 0 },
+        { event_name: 'Reception', event_type: 'reception', days_before: 0 },
+      ];
+      const eventRows = STANDARD_EVENTS.map((ev, i) => ({
+        couple_id: coupleId,
+        event_type: ev.event_type,
+        event_name: ev.event_name,
+        event_date: addDays(weddingDate, ev.days_before),
+        is_active: true,
+        vibe_tags: [],
+        sort_order: i + 1,
+      }));
+      const { error: evErr } = await supabase.from('couple_events').insert(eventRows);
+      if (evErr) console.error('[seed] couple_events seed error:', evErr.message);
+      else console.log('[seed] couple_events seeded for couple:', coupleId);
+    }
+
     res.json({ success: true, seeded: true, count: data?.length || 0 });
   } catch (error) {
     console.error('checklist seed error:', error.message);
