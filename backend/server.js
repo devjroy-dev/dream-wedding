@@ -73,7 +73,7 @@ async function loadSchemaCache() {
         blocked_dates:    ['id','vendor_id','date','reason','notes','created_at'],
         vendor_availability_blocks: ['id','vendor_id','blocked_date','reason','created_at'],
         couple_expenses:  ['id','couple_id','vendor_name','description','actual_amount','category','payment_status','event','created_at'],
-        couple_vendors:   ['id','couple_id','name','category','phone','quoted_total','status','events','source','created_at','updated_at'],
+        couple_vendors:   ['id','couple_id','name','category','phone','quoted_total','status','events','source','profile_incomplete','notes','created_at','updated_at'],
         couple_guests:    ['id','couple_id','name','phone','side','rsvp_status','created_at'],
         couple_checklist: ['id','couple_id','text','title','due_date','event','priority','is_complete','completed_at','created_at','notes','assigned_to','vendor_id','is_custom','seeded_from_template','status','updated_at'],
         moodboard_items:  ['id','user_id','vendor_id','image_url','source_url','function_tag','created_at'],
