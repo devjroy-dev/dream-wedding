@@ -9400,13 +9400,12 @@ app.patch('/api/couple/checklist/:taskId', async (req, res) => {
     // Auto-stamp completed_at when flipping is_complete
     if (updates.is_complete === true) updates.completed_at = new Date().toISOString();
     if (updates.is_complete === false) updates.completed_at = null;
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('couple_checklist')
       .update(updates)
-      .eq('id', taskId)
-      .select().single();
+      .eq('id', taskId);
     if (error) throw error;
-    res.json({ success: true, data });
+    res.json({ success: true });
   } catch (error) {
     console.error('checklist update error:', error.message);
     res.status(500).json({ success: false, error: error.message });
