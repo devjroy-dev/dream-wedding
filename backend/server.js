@@ -6486,39 +6486,6 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
       }
     }
 
-    // P6: Preset task fallback — fills remaining slots up to 3 total
-    // Only fires if P1-P5 produced fewer than 3 moments
-    // Uses allTasks (already fetched, is_complete=false) — no extra DB query
-    if (moments.length < 3) {
-      const slotsRemaining = 3 - moments.length;
-      const shownTaskIds = new Set(moments.filter(m => m.task_id).map(m => m.task_id));
-      // Filter to preset tasks (is_custom=false) not already shown, ordered by due_date ascending
-      const fallbackTasks = (allTasks || [])
-        .filter(t => !t.is_custom && !shownTaskIds.has(t.id))
-        .sort((a, b) => {
-          if (!a.due_date && !b.due_date) return 0;
-          if (!a.due_date) return 1;
-          if (!b.due_date) return -1;
-          return a.due_date.localeCompare(b.due_date);
-        })
-        .slice(0, slotsRemaining);
-      fallbackTasks.forEach(task => {
-        moments.push({
-          type: 'preset_task',
-          task_id: task.id,
-          title: task.text || task.title || 'Task',
-          body: task.due_date
-            ? `Due ${new Date(task.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
-            : 'Add to your plan',
-          action: 'VIEW TASK',
-          priority: task.priority || 'medium',
-          event: task.event || null,
-          due_date: task.due_date || null,
-          framing: 'plan_ahead',
-        });
-      });
-    }
-
     // ── Muse saves enrichment ─────────────────────────────────────────────────
     const museSaves = museItems || [];
     let museSavesEnriched = museSaves;
@@ -9495,10 +9462,11 @@ app.patch('/api/couple/budget/:coupleId', async (req, res) => {
     const updates = { updated_at: new Date().toISOString() };
     if (total_budget !== undefined) updates.total_budget = total_budget;
     if (event_envelopes !== undefined) updates.event_envelopes = event_envelopes;
+    // Upsert — creates row if none exists, updates if it does
+    const upsertPayload = { couple_id: coupleId, ...updates };
     const { data, error } = await supabase
       .from('couple_budget')
-      .update(updates)
-      .eq('couple_id', coupleId)
+      .upsert(upsertPayload, { onConflict: 'couple_id' })
       .select().single();
     if (error) throw error;
     // Keep couple_profiles in sync so money dashboard reflects new total
