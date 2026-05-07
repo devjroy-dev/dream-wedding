@@ -11139,7 +11139,7 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
   try {
     let { phone, pin, role } = req.body;
     if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
-    const cleanPhone = '+91' + phone.replace(/\D/g, '').replace(/^91/, '');
+    const cleanPhone = '+91' + phone.replace(/\D/g, '').replace(/^\+?91/, '');
     const table = role === 'vendor' ? 'vendors' : 'users';
     const { data, error } = await supabase
       .from(table)
