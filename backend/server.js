@@ -11146,7 +11146,7 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
       .select('id, password_hash, couple_tier, vendor_tier, name')
       .eq('phone', cleanPhone)
       .maybeSingle();
-    if (error || !data) return res.status(401).json({ error: 'Account not found' });
+    if (!data) return res.status(401).json({ error: "Account not found" });
     const bcrypt = require('bcryptjs');
     const hashToCheck = data.password_hash || data.pin_hash;
     const valid = await bcrypt.compare(pin, hashToCheck);
