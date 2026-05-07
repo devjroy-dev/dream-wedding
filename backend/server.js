@@ -11765,7 +11765,7 @@ app.get('/api/v3/admin/makers', async (req, res) => {
   try {
     const { search, tier, limit = '200' } = req.query;
     let q = supabase.from('vendors')
-      .select('id, name, category, city, phone, is_verified, is_luxury, subscription_active, created_at, discover_enabled, vendor_tier, featured_photos')
+      .select('id, name, category, city, phone, is_verified, is_luxury, subscription_active, created_at, vendor_discover_enabled, vendor_tier, featured_photos')
       .order('created_at', { ascending: false })
       .limit(parseInt(limit));
     if (search) {
@@ -11783,7 +11783,7 @@ app.get('/api/v3/admin/makers', async (req, res) => {
       for (const s of (subs || [])) subMap[s.vendor_id] = s;
       makers = makers.map(v => {
         const s = subMap[v.id];
-        return { ...v, tier: v.vendor_tier || s?.tier || 'essential', subscription_active: s?.status === 'active' || v.subscription_active || false };
+        return { ...v, tier: v.vendor_tier, discover_enabled: v.vendor_discover_enabled || s?.tier || 'essential', subscription_active: s?.status === 'active' || v.subscription_active || false };
       });
     }
     if (tier && tier !== 'all') makers = makers.filter(m => m.tier === tier);
