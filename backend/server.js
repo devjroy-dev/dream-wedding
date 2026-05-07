@@ -11765,7 +11765,7 @@ app.get('/api/v3/admin/makers', async (req, res) => {
   try {
     const { search, tier, limit = '200' } = req.query;
     let q = supabase.from('vendors')
-      .select('id, name, category, city, phone, is_verified, is_luxury, subscription_active, created_at, vendor_discover_enabled, vendor_tier, featured_photos')
+      .select('id, name, category, city, phone, is_verified, is_luxury, subscription_active, created_at, vendor_discover_enabled, featured_photos')
       .order('created_at', { ascending: false })
       .limit(parseInt(limit));
     if (search) {
