@@ -11139,13 +11139,13 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
   try {
     let { phone, pin, role } = req.body;
     if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
-    if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
+    const cleanPhone = '+91' + phone.replace(/\D/g, '').replace(/^91/, '');
     const table = role === 'vendor' ? 'vendors' : 'users';
     const { data, error } = await supabase
       .from(table)
-      .select('id, pin_hash, password_hash, couple_tier, vendor_tier, name')
-      .eq('phone', phone)
-      .single();
+      .select('id, password_hash, couple_tier, vendor_tier, name')
+      .eq('phone', cleanPhone)
+      .maybeSingle();
     if (error || !data) return res.status(401).json({ error: 'Account not found' });
     const bcrypt = require('bcryptjs');
     const hashToCheck = data.password_hash || data.pin_hash;
