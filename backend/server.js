@@ -12140,7 +12140,7 @@ app.get('/api/v2/admin/invites', async (req, res) => {
   if (!checkAdminAuth(req, res)) return;
   try {
     const { data, error } = await supabase.from('access_codes')
-      .select('id, code, type, tier, used, used_count, used_at, created_at, expires_at, created_by, note, vendor_name')
+      .select('id, code, type, tier, used, used_count, created_at, expires_at, created_by, note, vendor_name')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) { console.error('[admin/invites]', error); return res.status(500).json({ success: false, error: error.message }); }
