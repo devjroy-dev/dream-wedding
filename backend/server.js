@@ -11148,7 +11148,7 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
       .single();
     if (error || !data) return res.status(401).json({ error: 'Account not found' });
     const bcrypt = require('bcryptjs');
-    const hashToCheck = data.pin_hash || data.password_hash;
+    const hashToCheck = data.password_hash || data.pin_hash;
     const valid = await bcrypt.compare(pin, hashToCheck);
     if (!valid) return res.status(401).json({ error: 'Invalid PIN' });
     const sessionKey = role === 'vendor' ? 'vendor_session' : 'couple_session';
