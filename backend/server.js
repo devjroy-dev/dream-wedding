@@ -11118,44 +11118,7 @@ app.post('/api/couple/checklist/seed/:userId', async (req, res) => {
 });
 // ══════════════════════════════════════════════════════════════════════════════
 // V8.1 BACKEND FIX — cover photos + exploring photos endpoints
-// Append to backend/server.js in dream-wedding repo before 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/v2/auth/pin-status
-// Used by login screen to check if user exists and has a PIN set.
-// Query params: phone (10 digits), role ('couple' | 'vendor')
-// Returns: { found, userId, pin_set }
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/v2/auth/pin-status', async (req, res) => {
-  try {
-    const { phone, role } = req.query;
-    if (!phone || !role) return res.status(400).json({ found: false, error: 'phone and role required' });
-
-    const bare = String(phone).replace(/\D/g, '').slice(-10);
-
-    if (role === 'vendor') {
-      const { data } = await supabase
-        .from('vendors')
-        .select('id, pin, phone')
-        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
-        .maybeSingle();
-      if (!data) return res.json({ found: false, userId: null, pin_set: false });
-      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin) });
-    } else {
-      const { data } = await supabase
-        .from('users')
-        .select('id, pin, name, phone')
-        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
-        .maybeSingle();
-      if (!data) return res.json({ found: false, userId: null, pin_set: false });
-      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin), name: data.name });
-    }
-  } catch (error) {
-    console.error('[GET /api/v2/auth/pin-status] error:', error.message);
-    res.status(500).json({ found: false, error: error.message });
-  }
-});
-
-app.listen().
+// Append to backend/server.js in dream-wedding repo before app.listen().
 // No headers. No requires. Route handlers only.
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -11168,7 +11131,8 @@ app.get('/api/v2/cover-photos', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('cover_photos')
-      .select('id, image_url, display_order')
+      .select('id, image_url, photographer_name, vendor_id, display_order, is_active')
+      .eq('is_active', true)
       .order('display_order', { ascending: true });
     if (error) throw error;
     const photos = (data || []).map(p => ({ id: p.id, image_url: p.image_url }));
