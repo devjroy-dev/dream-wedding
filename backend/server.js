@@ -11044,7 +11044,7 @@ app.post('/api/couple/budget-categories/:userId', async (req, res) => {
 
     await supabase.from('couple_budget_categories').delete().eq('couple_id', userId);
     if (categories.length > 0) {
-      const rows = categories.map(c => ({ couple_id: userId, category_key: c.category_key || c.key || '', display_name: c.display_name || c.label || c.category_key || '', allocated_amount: c.allocated_amount || 0, pct: c.pct || 0 }));
+      const rows = categories.map(c => ({ couple_id: userId, category_key: String(c.category_key || c.key || ''), display_name: String(c.display_name || c.label || c.category_key || ''), allocated_amount: Number(c.allocated_amount || 0), pct: Number(c.pct || 0) }));
       const { data, error } = await supabase.from('couple_budget_categories').insert(rows).select();
       if (error) throw error;
       return res.json({ success: true, data: data || [] });
