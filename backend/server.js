@@ -11115,3 +11115,20 @@ app.post('/api/couple/checklist/seed/:userId', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// V9 restore: pin-status endpoint
+app.get('/api/v2/auth/pin-status', async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ error: 'Phone required' });
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, pin_hash')
+      .eq('phone', phone)
+      .single();
+    if (error || !data) return res.json({ exists: false, hasPin: false });
+    return res.json({ exists: true, hasPin: !!data.pin_hash });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
