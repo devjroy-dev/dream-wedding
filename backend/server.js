@@ -11130,9 +11130,9 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 1. Vendor row ────────────────────────────────────────────────────────
     const { data: vendor } = await supabase
       .from('vendors')
-      .select('id, name, category, tier')
+      .select('id, name, category')
       .eq('id', vendorId)
-      .single();
+      .maybeSingle();
 
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
