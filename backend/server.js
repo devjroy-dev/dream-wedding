@@ -8982,8 +8982,9 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
   try {
     const { couple_id } = req.params;
     if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    // Fetch ALL saves — vendor saves AND image/camera saves (no vendor_id filter)
     const { data: saves } = await supabase.from('moodboard_items')
-      .select('*').eq('user_id', couple_id).not('vendor_id', 'is', null)
+      .select('*').eq('user_id', couple_id)
       .order('created_at', { ascending: false });
     const vendorIds = [...new Set((saves || []).map(s => s.vendor_id).filter(Boolean))];
     let vendorMap = {};
@@ -8993,7 +8994,7 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
         .in('id', vendorIds);
       (vendors || []).forEach(v => { vendorMap[v.id] = v; });
     }
-    const enriched = (saves || []).map(s => ({ ...s, vendor: vendorMap[s.vendor_id] || null }));
+    const enriched = (saves || []).map(s => ({ ...s, vendor: s.vendor_id ? (vendorMap[s.vendor_id] || null) : null }));
     res.json({ success: true, data: enriched });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
