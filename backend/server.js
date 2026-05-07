@@ -11127,12 +11127,39 @@ app.post('/api/couple/checklist/seed/:userId', async (req, res) => {
 // Returns { photos: [{ image_url }] }
 // Used by landing screen carousel. Pulls from discover-listed vendors.
 // ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/v2/auth/pin-status', async (req, res) => {
+  try {
+    const { phone, role } = req.query;
+    if (!phone || !role) return res.status(400).json({ found: false, error: 'phone and role required' });
+    const bare = String(phone).replace(/\D/g, '').slice(-10);
+    if (role === 'vendor') {
+      const { data } = await supabase
+        .from('vendors')
+        .select('id, pin, phone')
+        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
+        .maybeSingle();
+      if (!data) return res.json({ found: false, userId: null, pin_set: false });
+      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin) });
+    } else {
+      const { data } = await supabase
+        .from('users')
+        .select('id, pin, name, phone')
+        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
+        .maybeSingle();
+      if (!data) return res.json({ found: false, userId: null, pin_set: false });
+      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin), name: data.name });
+    }
+  } catch (error) {
+    console.error('[GET /api/v2/auth/pin-status] error:', error.message);
+    res.status(500).json({ found: false, error: error.message });
+  }
+});
+
 app.get('/api/v2/cover-photos', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('cover_photos')
-      .select('id, image_url, photographer_name, vendor_id, display_order, is_active')
-      .eq('is_active', true)
+      .select('id, image_url, display_order')
       .order('display_order', { ascending: true });
     if (error) throw error;
     const photos = (data || []).map(p => ({ id: p.id, image_url: p.image_url }));
