@@ -11132,11 +11132,12 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
     const { phone, role } = req.query;
     if (!phone || !role) return res.status(400).json({ found: false, error: 'phone and role required' });
     const bare = String(phone).replace(/\D/g, '').slice(-10);
+    const fullPhone = '+91' + bare;
     if (role === 'vendor') {
       const { data } = await supabase
         .from('vendors')
         .select('id, pin, phone')
-        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
+        .eq('phone', fullPhone)
         .maybeSingle();
       if (!data) return res.json({ found: false, userId: null, pin_set: false });
       return res.json({ found: true, userId: data.id, pin_set: !!(data.pin) });
@@ -11144,7 +11145,7 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
       const { data } = await supabase
         .from('users')
         .select('id, pin, name, phone')
-        .or(`phone.eq.${bare},phone.eq.+91${bare},phone.eq.91${bare}`)
+        .eq('phone', fullPhone)
         .maybeSingle();
       if (!data) return res.json({ found: false, userId: null, pin_set: false });
       return res.json({ found: true, userId: data.id, pin_set: !!(data.pin), name: data.name });
