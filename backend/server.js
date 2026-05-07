@@ -5022,7 +5022,7 @@ app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!description) return res.status(400).json({ success: false, error: 'description required' });
     if (!amount) return res.status(400).json({ success: false, error: 'amount required' });
-    const { error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description, amount: Number(amount), category: category || 'general', date: date || new Date().toISOString().slice(0, 10) }]);
+    const { error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description, amount: Number(amount), category: category || 'general', expense_date: date || new Date().toISOString().slice(0, 10) }]);
     if (error) throw error;
     res.json({ success: true, message: 'Expense logged: ' + description + ' - Rs ' + Number(amount).toLocaleString('en-IN') + ' (' + (category || 'general') + ')' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
