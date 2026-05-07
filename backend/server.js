@@ -11119,8 +11119,9 @@ app.post('/api/couple/checklist/seed/:userId', async (req, res) => {
 // V9 restore: pin-status endpoint
 app.get('/api/v2/auth/pin-status', async (req, res) => {
   try {
-    const { phone } = req.query;
+    let { phone } = req.query;
     if (!phone) return res.status(400).json({ error: 'Phone required' });
+    if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
     const { data, error } = await supabase
       .from('users')
       .select('id, pin_hash')
