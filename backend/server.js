@@ -11017,7 +11017,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       const wd = new Date(user.wedding_date); wd.setHours(0,0,0,0);
       daysUntilWedding = Math.round((wd.getTime() - now.getTime()) / 86400000);
     }
-    res.json({ success: true, data: {
+    res.json({
       couple: { id: userId, name: user?.name||null, partner_name: user?.partner_name||null, wedding_date: user?.wedding_date||null, days_until_wedding: daysUntilWedding, tier: user?.couple_tier||'lite', token_balance: tokenBalance, wedding_events: user?.wedding_events||[], city: user?.residence_country||null, wedding_city: user?.wedding_country||null },
       tasks: { total: tasks.length, pending: pendingTasks.length, completed: tasks.length - pendingTasks.length, pending_list: pendingTasks.slice(0,20).map(t => ({ id:t.id, text:t.text, event:t.event, priority:t.priority, due_date:t.due_date, notes:t.notes })) },
       vendors: { total: vendors.length, booked: bookedVendors.length, pending: vendors.filter(v=>v.status==='enquired'||v.status==='negotiating').length, list: vendors.slice(0,20).map(v => ({ id:v.id, name:v.name, category:v.category, status:v.status, quoted_total:v.quoted_total, events:v.events, balance_due_date:v.balance_due_date, notes:v.notes })) },
@@ -11025,7 +11025,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       events: events.map(e => ({ id:e.id, name:e.event_name||e.event_type, date:e.event_date, city:e.event_city, budget_total:e.budget_total, is_active:e.is_active })),
       budget: { total: budget?.total_budget||0, committed: totalExpenses, paid: paidExpenses, remaining: (budget?.total_budget||0) - totalExpenses, event_envelopes: budget?.event_envelopes||{} },
       upcoming_payments: upcomingPayments.map(e => ({ id:e.id, vendor_name:e.vendor_name, category:e.category, amount:e.amount, due_date:e.due_date, description:e.description })),
-    }});
+    });
   } catch (error) {
     console.error('[GET /api/v2/dreamai/couple-context] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
