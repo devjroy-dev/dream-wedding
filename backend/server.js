@@ -4942,62 +4942,50 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
 });
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VENDOR DREAMAI ACTION ENDPOINTS — TDW_VENDOR_ACTIONS_V1
-// ─────────────────────────────────────────────────────────────────────────────
 
-// POST /api/v2/dreamai/vendor-action/create-invoice
+// TDW_VENDOR_ACTIONS_V1 — all 9 vendor DreamAi action endpoints
+
 app.post('/api/v2/dreamai/vendor-action/create-invoice', async (req, res) => {
   try {
-    const { vendor_id, client_name, amount, advance_received = 0, event_type = 'Wedding' } = req.body || {};
+    const { vendor_id, client_name, amount, advance_received, event_type } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!client_name) return res.status(400).json({ success: false, error: 'client_name required' });
     if (!amount) return res.status(400).json({ success: false, error: 'amount required' });
-    const result = await executeToolCall('create_invoice', {
-      client_name, amount: Number(amount), advance_received: Number(advance_received), event_type,
-    }, { id: vendor_id });
+    const result = await executeToolCall('create_invoice', { client_name, amount: Number(amount), advance_received: Number(advance_received || 0), event_type: event_type || 'Wedding' }, { id: vendor_id });
     res.json({ success: true, message: result });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/add-client
 app.post('/api/v2/dreamai/vendor-action/add-client', async (req, res) => {
   try {
-    const { vendor_id, client_name, phone = '', event_date = null, event_type = 'Wedding', budget = null } = req.body || {};
+    const { vendor_id, client_name, phone, event_date, event_type, budget } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!client_name) return res.status(400).json({ success: false, error: 'client_name required' });
-    const result = await executeToolCall('add_client', {
-      client_name, phone, event_date, event_type, budget: budget ? Number(budget) : null,
-    }, { id: vendor_id });
+    const result = await executeToolCall('add_client', { client_name, phone: phone || '', event_date: event_date || null, event_type: event_type || 'Wedding', budget: budget ? Number(budget) : null }, { id: vendor_id });
     res.json({ success: true, message: result });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/create-task
 app.post('/api/v2/dreamai/vendor-action/create-task', async (req, res) => {
   try {
-    const { vendor_id, task, assignee = '', due_date = null } = req.body || {};
+    const { vendor_id, task, assignee, due_date } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!task) return res.status(400).json({ success: false, error: 'task required' });
-    const result = await executeToolCall('create_task', { task, assignee, due_date }, { id: vendor_id });
+    const result = await executeToolCall('create_task', { task, assignee: assignee || '', due_date: due_date || null }, { id: vendor_id });
     res.json({ success: true, message: result });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/block-date
 app.post('/api/v2/dreamai/vendor-action/block-date', async (req, res) => {
   try {
-    const { vendor_id, client_name, dates, notes = '' } = req.body || {};
+    const { vendor_id, client_name, dates, notes } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!dates || !Array.isArray(dates) || dates.length === 0) return res.status(400).json({ success: false, error: 'dates array required' });
-    const result = await executeToolCall('block_calendar_dates', {
-      client_name: client_name || 'Blocked', dates, notes,
-    }, { id: vendor_id });
+    const result = await executeToolCall('block_calendar_dates', { client_name: client_name || 'Blocked', dates, notes: notes || '' }, { id: vendor_id });
     res.json({ success: true, message: result });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/send-payment-reminder
 app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res) => {
   try {
     const { vendor_id, client_name, amount, custom_message } = req.body || {};
@@ -5009,46 +4997,37 @@ app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res)
     if (!client.phone) return res.json({ success: false, message: client.name + ' has no phone number saved.' });
     const { data: vendor } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
     const vendorName = vendor ? vendor.name : 'Your vendor';
-    const amountStr = amount ? String(Number(amount).toLocaleString('en-IN')) : null;
-    const msg = custom_message || (amountStr
-      ? 'Hi ' + client.name + ', gentle reminder that ₹' + amountStr + ' is due. Please let us know when you would like to settle. Thanks! — ' + vendorName
-      : 'Hi ' + client.name + ', gentle reminder about your pending payment. Thanks! — ' + vendorName);
+    const amountStr = amount ? 'Rs ' + Number(amount).toLocaleString('en-IN') : null;
+    const msg = custom_message || (amountStr ? 'Hi ' + client.name + ', gentle reminder that ' + amountStr + ' is due. Please let us know when you would like to settle. Thanks! - ' + vendorName : 'Hi ' + client.name + ', gentle reminder about your pending payment. Thanks! - ' + vendorName);
     const phone = '+91' + client.phone.replace(/D/g, '').slice(-10);
     const sent = await sendWhatsApp(phone, msg);
-    res.json({ success: true, message: sent ? '✓ Reminder sent to ' + client.name : 'Could not send to ' + client.name + '. They may not be on WhatsApp.' });
+    res.json({ success: true, message: sent ? 'Reminder sent to ' + client.name : 'Could not send to ' + client.name + '. They may not be on WhatsApp.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/send-client-reminder
 app.post('/api/v2/dreamai/vendor-action/send-client-reminder', async (req, res) => {
   try {
-    const { vendor_id, client_name, reminder_type = 'general', custom_message } = req.body || {};
+    const { vendor_id, client_name, reminder_type, custom_message } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!client_name) return res.status(400).json({ success: false, error: 'client_name required' });
     const { data: vendor } = await supabase.from('vendors').select('name').eq('id', vendor_id).maybeSingle();
-    const result = await executeToolCall('send_client_reminder', { client_name, reminder_type, custom_message }, { id: vendor_id, name: vendor ? vendor.name : '' });
+    const result = await executeToolCall('send_client_reminder', { client_name, reminder_type: reminder_type || 'general', custom_message }, { id: vendor_id, name: vendor ? vendor.name : '' });
     res.json({ success: true, message: result });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/log-expense
 app.post('/api/v2/dreamai/vendor-action/log-expense', async (req, res) => {
   try {
-    const { vendor_id, description, amount, category = 'general', date = null } = req.body || {};
+    const { vendor_id, description, amount, category, date } = req.body || {};
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!description) return res.status(400).json({ success: false, error: 'description required' });
     if (!amount) return res.status(400).json({ success: false, error: 'amount required' });
-    const { error } = await supabase.from('vendor_expenses').insert([{
-      vendor_id, description, amount: Number(amount), category,
-      date: date || new Date().toISOString().slice(0, 10),
-    }]);
+    const { error } = await supabase.from('vendor_expenses').insert([{ vendor_id, description, amount: Number(amount), category: category || 'general', date: date || new Date().toISOString().slice(0, 10) }]);
     if (error) throw error;
-    res.json({ success: true, message: '✓ Expense logged: ' + description + '
-₹' + Number(amount).toLocaleString('en-IN') + ' · ' + category });
+    res.json({ success: true, message: 'Expense logged: ' + description + ' - Rs ' + Number(amount).toLocaleString('en-IN') + ' (' + (category || 'general') + ')' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/reply-to-enquiry
 app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
   try {
     const { vendor_id, enquiry_id, message } = req.body || {};
@@ -5063,12 +5042,10 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
       const phone = '+91' + enquiry.couple_phone.replace(/D/g, '').slice(-10);
       sent = await sendWhatsApp(phone, message);
     }
-    const coupleName = enquiry.couple_name || 'couple';
-    res.json({ success: true, message: sent ? '✓ Reply sent to ' + coupleName : '✓ Enquiry marked as replied' });
+    res.json({ success: true, message: sent ? 'Reply sent to ' + (enquiry.couple_name || 'couple') : 'Enquiry marked as replied' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/v2/dreamai/vendor-action/record-payment
 app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
   try {
     const { vendor_id, client_name, amount, invoice_id } = req.body || {};
@@ -5086,8 +5063,7 @@ app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
     const { error } = await supabase.from('vendor_invoices').update({ status: 'paid', paid_date: new Date().toISOString().slice(0, 10) }).eq('id', invoice.id);
     if (error) throw error;
     const paidAmount = amount || invoice.balance || invoice.total || 0;
-    res.json({ success: true, message: '✓ Payment recorded for ' + invoice.client_name + '
-₹' + Number(paidAmount).toLocaleString('en-IN') + ' marked as paid' });
+    res.json({ success: true, message: 'Payment recorded for ' + invoice.client_name + ' - Rs ' + Number(paidAmount).toLocaleString('en-IN') + ' marked as paid' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
