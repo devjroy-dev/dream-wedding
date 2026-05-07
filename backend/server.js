@@ -11143,7 +11143,7 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
     const table = role === 'vendor' ? 'vendors' : 'users';
     const { data, error } = await supabase
       .from(table)
-      .select('id, password_hash, couple_tier, vendor_tier, name')
+      .select('id, password_hash, couple_tier, name')
       .eq('phone', cleanPhone)
       .maybeSingle();
     if (!data) return res.status(401).json({ error: "Account not found" });
