@@ -11143,12 +11143,13 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
     const table = role === 'vendor' ? 'vendors' : 'users';
     const { data, error } = await supabase
       .from(table)
-      .select('id, pin_hash, couple_tier, vendor_tier, name')
+      .select('id, pin_hash, password_hash, couple_tier, vendor_tier, name')
       .eq('phone', phone)
       .single();
     if (error || !data) return res.status(401).json({ error: 'Account not found' });
     const bcrypt = require('bcryptjs');
-    const valid = await bcrypt.compare(pin, data.pin_hash);
+    const hashToCheck = data.pin_hash || data.password_hash;
+    const valid = await bcrypt.compare(pin, hashToCheck);
     if (!valid) return res.status(401).json({ error: 'Invalid PIN' });
     const sessionKey = role === 'vendor' ? 'vendor_session' : 'couple_session';
     return res.json({ success: true, userId: data.id, [sessionKey]: data.id });
