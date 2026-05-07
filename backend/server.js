@@ -11133,3 +11133,47 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
     return res.status(500).json({ error: e.message });
   }
 });
+
+// V9 restore: verify-pin and set-pin endpoints
+app.post('/api/v2/auth/verify-pin', async (req, res) => {
+  try {
+    let { phone, pin, role } = req.body;
+    if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
+    if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    const { data, error } = await supabase
+      .from(table)
+      .select('id, pin_hash, couple_tier, vendor_tier, name')
+      .eq('phone', phone)
+      .single();
+    if (error || !data) return res.status(401).json({ error: 'Account not found' });
+    const bcrypt = require('bcryptjs');
+    const valid = await bcrypt.compare(pin, data.pin_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid PIN' });
+    const sessionKey = role === 'vendor' ? 'vendor_session' : 'couple_session';
+    return res.json({ success: true, userId: data.id, [sessionKey]: data.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/v2/auth/set-pin', async (req, res) => {
+  try {
+    let { phone, pin, role } = req.body;
+    if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
+    if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
+    const bcrypt = require('bcryptjs');
+    const pin_hash = await bcrypt.hash(pin, 10);
+    const table = role === 'vendor' ? 'vendors' : 'users';
+    const { data, error } = await supabase
+      .from(table)
+      .update({ pin_hash })
+      .eq('phone', phone)
+      .select('id')
+      .single();
+    if (error || !data) return res.status(400).json({ error: 'Account not found' });
+    return res.json({ success: true, userId: data.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
