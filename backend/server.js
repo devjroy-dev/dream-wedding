@@ -8982,9 +8982,8 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
   try {
     const { couple_id } = req.params;
     if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
-    // Fetch ALL saves — vendor saves AND image/camera saves (no vendor_id filter)
     const { data: saves } = await supabase.from('moodboard_items')
-      .select('*').eq('user_id', couple_id)
+      .select('*').eq('user_id', couple_id).not('vendor_id', 'is', null)
       .order('created_at', { ascending: false });
     const vendorIds = [...new Set((saves || []).map(s => s.vendor_id).filter(Boolean))];
     let vendorMap = {};
@@ -8994,7 +8993,7 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
         .in('id', vendorIds);
       (vendors || []).forEach(v => { vendorMap[v.id] = v; });
     }
-    const enriched = (saves || []).map(s => ({ ...s, vendor: s.vendor_id ? (vendorMap[s.vendor_id] || null) : null }));
+    const enriched = (saves || []).map(s => ({ ...s, vendor: vendorMap[s.vendor_id] || null }));
     res.json({ success: true, data: enriched });
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -11045,7 +11044,7 @@ app.post('/api/couple/budget-categories/:userId', async (req, res) => {
 
     await supabase.from('couple_budget_categories').delete().eq('couple_id', userId);
     if (categories.length > 0) {
-      const rows = categories.map(c => ({ couple_id: userId, category_key: String(c.category_key || c.key || ''), display_name: String(c.display_name || c.label || c.category_key || ''), allocated_amount: Number(c.allocated_amount || 0), pct: Number(c.pct || 0) }));
+      const rows = categories.map(c => ({ couple_id: userId, category_key: c.category_key || c.key || '', display_name: c.display_name || c.label || c.category_key || '', allocated_amount: c.allocated_amount || 0, pct: c.pct || 0 }));
       const { data, error } = await supabase.from('couple_budget_categories').insert(rows).select();
       if (error) throw error;
       return res.json({ success: true, data: data || [] });
@@ -11114,100 +11113,5 @@ app.post('/api/couple/checklist/seed/:userId', async (req, res) => {
   } catch (error) {
     console.error('[POST /api/couple/checklist/seed] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
-  }
-});
-// ══════════════════════════════════════════════════════════════════════════════
-// V8.1 BACKEND FIX — cover photos + exploring photos endpoints
-// Append to backend/server.js in dream-wedding repo before app.listen().
-// No headers. No requires. Route handlers only.
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/v2/cover-photos
-// Returns { photos: [{ image_url }] }
-// Used by landing screen carousel. Pulls from discover-listed vendors.
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/v2/auth/pin-status', async (req, res) => {
-  try {
-    const { phone, role } = req.query;
-    if (!phone || !role) return res.status(400).json({ found: false, error: 'phone and role required' });
-    const bare = String(phone).replace(/\D/g, '').slice(-10);
-    const fullPhone = '+91' + bare;
-    if (role === 'vendor') {
-      const { data } = await supabase
-        .from('vendors')
-        .select('id, pin, phone')
-        .eq('phone', fullPhone)
-        .maybeSingle();
-      if (!data) return res.json({ found: false, userId: null, pin_set: false });
-      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin) });
-    } else {
-      const { data } = await supabase
-        .from('users')
-        .select('id, pin, name, phone')
-        .eq('phone', fullPhone)
-        .maybeSingle();
-      if (!data) return res.json({ found: false, userId: null, pin_set: false });
-      return res.json({ found: true, userId: data.id, pin_set: !!(data.pin), name: data.name });
-    }
-  } catch (error) {
-    console.error('[GET /api/v2/auth/pin-status] error:', error.message);
-    res.status(500).json({ found: false, error: error.message });
-  }
-});
-
-app.get('/api/v2/cover-photos', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('cover_photos')
-      .select('id, image_url, display_order')
-      .order('display_order', { ascending: true });
-    if (error) throw error;
-    const photos = (data || []).map(p => ({ id: p.id, image_url: p.image_url }));
-    res.json({ success: true, photos });
-  } catch (error) {
-    console.error('[GET /api/v2/cover-photos] error:', error.message);
-    res.json({ success: true, photos: [] });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/v2/exploring-photos
-// Returns { success: true, photos: [{ id, image_url, display_order, caption }] }
-// Used by "Just Exploring" flow on landing screen.
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/v2/exploring-photos', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('exploring_photos')
-      .select('id, image_url, display_order, caption, active')
-      .eq('active', true)
-      .order('display_order', { ascending: true });
-    if (error) throw error;
-    res.json({ success: true, photos: data || [] });
-  } catch (error) {
-    console.error('[GET /api/v2/exploring-photos] error:', error.message);
-    res.json({ success: true, photos: [] });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/v2/preview-vendors
-// Fallback used by exploring flow. Returns discover-listed vendors.
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/v2/preview-vendors', async (req, res) => {
-  try {
-    const { data } = await supabase
-      .from('vendors')
-      .select('id, name, category, city, featured_photos, portfolio_images, starting_price, rating')
-      .eq('discover_listed', true)
-      .eq('vendor_discover_enabled', true)
-      .order('rating', { ascending: false })
-      .limit(12);
-
-    res.json({ success: true, data: data || [] });
-  } catch (error) {
-    console.error('[GET /api/v2/preview-vendors] error:', error.message);
-    res.json({ success: true, data: [] });
   }
 });
