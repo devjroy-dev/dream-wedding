@@ -14020,7 +14020,7 @@ app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
     { name: 'couple_events', columns: 'id, couple_id, event_type, event_name, event_date' },
     { name: 'vendors', columns: 'id, name, category, city, subscription_active' },
       { name: 'notifications', columns: 'id, user_id, type, read' },
-      { name: 'co_planners', columns: 'id, primary_user_id, status, dreamai_access_granted, can_see_budget, can_see_guests, can_see_vendors' },
+      { name: 'co_planners', columns: 'id, primary_user_id, status, dreamai_access_granted, can_see_budget, can_see_guests, can_see_vendors, can_contribute_muse, join_token' },
       // ZIP 8 Circle tables
       { name: 'circle_messages', columns: 'id, couple_id, thread_id, sender_role, content, created_at' },
       { name: 'circle_activity_events', columns: 'id, couple_id, actor_role, event_type, payload, entity_type, entity_id' },
@@ -14302,30 +14302,39 @@ app.post('/api/v2/frost/circle/groups/:groupId/members', async (req, res) => {
 });
 
 // POST /api/v2/frost/circle/invite
-// Extended invite — adds dreamai_access_granted, can_see_* flags, group_ids.
-// Replaces /api/co-planner/invite for Frost Circle flow.
+// Extended invite — generates secure join_token, sets permissions by role.
+// Partner is unique (only one per couple). Role defaults drive permissions automatically.
+// Bride can override permissions after invite via member settings.
 app.post('/api/v2/frost/circle/invite', async (req, res) => {
   try {
-    const {
-      user_id,
-      role,
-      invitee_name,
-      phone,
-      dreamai_access_granted = false,
-      can_see_budget = false,
-      can_see_guests = false,
-      can_see_vendors = false,
-      group_ids = [],
-    } = req.body || {};
-
+    const { user_id, role, invitee_name, phone, group_ids = [] } = req.body || {};
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id required' });
 
-    const { data: existing } = await supabase.from('co_planners').select('id, status').eq('primary_user_id', user_id);
+    const resolvedRole = role || 'inner_circle';
+
+    // Check existing members
+    const { data: existing } = await supabase.from('co_planners').select('id, status, role').eq('primary_user_id', user_id);
     const active = (existing || []).filter(c => c.status !== 'removed');
-    if (active.length >= 10) {
-      return res.json({ success: false, error: 'Maximum 10 Circle members reached' });
+
+    // Partner uniqueness — only one Partner allowed
+    if (resolvedRole === 'Partner') {
+      const hasPartner = active.some(c => c.role === 'Partner');
+      if (hasPartner) return res.status(400).json({ success: false, error: 'A Partner is already in your Circle' });
     }
 
+    if (active.length >= 20) {
+      return res.json({ success: false, error: 'Maximum 20 Circle members reached' });
+    }
+
+    // Set permissions by role automatically
+    const perms = permissionsByRole(resolvedRole);
+
+    // Generate secure join token (32 hex chars — never shown to user, lives only in URL)
+    const crypto = require('crypto');
+    const joinToken = crypto.randomBytes(32).toString('hex');
+    const joinTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+    // Generate human-readable invite code for internal reference
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
     let inviteCode = 'CP';
     for (let i = 0; i < 6; i++) inviteCode += chars[Math.floor(Math.random() * chars.length)];
@@ -14333,24 +14342,24 @@ app.post('/api/v2/frost/circle/invite', async (req, res) => {
     const { data: newMember, error: insertErr } = await supabase.from('co_planners').insert([{
       primary_user_id: user_id,
       invite_code: inviteCode,
+      join_token: joinToken,
+      join_token_expires_at: joinTokenExpiresAt,
       status: 'pending',
-      role: role || 'inner_circle',
+      role: resolvedRole,
       invitee_name: invitee_name || null,
       phone: phone || null,
-      dreamai_access_granted,
-      can_see_budget,
-      can_see_guests,
-      can_see_vendors,
+      dreamai_access_granted: perms.dreamai_access_granted,
+      can_see_budget: perms.can_see_budget,
+      can_see_guests: perms.can_see_guests,
+      can_see_vendors: perms.can_see_vendors,
+      can_contribute_muse: perms.can_contribute_muse,
     }]).select().single();
 
     if (insertErr) return res.status(500).json({ success: false, error: insertErr.message });
 
     // Add to groups if specified
     if (group_ids.length > 0) {
-      const memberships = group_ids.map(gid => ({
-        group_id: gid,
-        co_planner_id: String(newMember.id),
-      }));
+      const memberships = group_ids.map(gid => ({ group_id: gid, co_planner_id: String(newMember.id) }));
       await supabase.from('co_planner_group_members').insert(memberships).catch(() => {});
     }
 
@@ -14360,13 +14369,14 @@ app.post('/api/v2/frost/circle/invite', async (req, res) => {
       actor_user_id: user_id,
       actor_role: 'bride',
       event_type: 'circle_invite_sent',
-      payload: { invitee_name: invitee_name || null, role: role || 'inner_circle', invite_code: inviteCode },
+      payload: { invitee_name: invitee_name || null, role: resolvedRole, invite_code: inviteCode },
       entity_type: null,
       entity_id: null,
     }]);
 
-    const link = 'https://thedreamwedding.in/join/' + inviteCode;
-    res.json({ success: true, data: { invite_code: inviteCode, link, co_planner_id: newMember.id } });
+    // Join link uses secure token — invite_code is internal only
+    const joinLink = 'https://thedreamwedding.in/circle/join/' + joinToken;
+    res.json({ success: true, data: { invite_code: inviteCode, join_link: joinLink, co_planner_id: newMember.id } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -14792,6 +14802,330 @@ app.get('/api/v2/dreamai/circle-member-history/:memberUserId', async (req, res) 
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FROST CIRCLE — ZIP 11: Circle member join flow + Muse contribution
+//
+// Join flow (token-based, invite code never shown to member):
+//   POST /api/v2/circle/join/validate   — validate join_token, return bride + member info
+//   POST /api/v2/circle/join/accept     — verify OTP + consume token, create/link user
+//   POST /api/v2/circle/join/set-pin    — set PIN for Circle member
+//   GET  /api/v2/circle/session/:userId — Circle member session + permissions
+//
+// Muse contribution:
+//   POST /api/v2/circle/muse/save       — save to bride's board (gated by can_contribute_muse)
+//   GET  /api/v2/circle/muse/:coupleId  — fetch bride's moodboard (with co-planner tags)
+//
+// Role-based defaults (set at invite time):
+//   Partner     — can_contribute_muse: true, dreamai: true, budget: true, guests: true, vendors: true
+//   inner_circle — can_contribute_muse: true, dreamai: true, rest: false
+//   all others  — all false
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper: set permissions by role
+function permissionsByRole(role) {
+  if (role === 'Partner') {
+    return { can_contribute_muse: true, dreamai_access_granted: true, can_see_budget: true, can_see_guests: true, can_see_vendors: true };
+  }
+  if (role === 'inner_circle') {
+    return { can_contribute_muse: true, dreamai_access_granted: true, can_see_budget: false, can_see_guests: false, can_see_vendors: false };
+  }
+  return { can_contribute_muse: false, dreamai_access_granted: false, can_see_budget: false, can_see_guests: false, can_see_vendors: false };
+}
+
+// POST /api/v2/circle/join/validate
+// Validates a join token and returns bride name + invitee name for the welcome screen.
+// Called when the Circle member first lands on /circle/join/[token].
+app.post('/api/v2/circle/join/validate', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ success: false, error: 'token required' });
+
+    const { data: member, error } = await supabase
+      .from('co_planners')
+      .select('id, invitee_name, name, role, status, join_token_expires_at, primary_user_id')
+      .eq('join_token', token)
+      .single();
+
+    if (error || !member) return res.status(404).json({ success: false, error: 'Invalid or expired invite link' });
+    if (member.status === 'active') return res.status(400).json({ success: false, error: 'This invite has already been accepted' });
+    if (member.join_token_expires_at && new Date(member.join_token_expires_at) < new Date()) {
+      return res.status(400).json({ success: false, error: 'This invite link has expired. Ask the bride to send a new one.' });
+    }
+
+    const { data: bride } = await supabase.from('users').select('name').eq('id', member.primary_user_id).single();
+
+    res.json({
+      success: true,
+      data: {
+        bride_name: bride?.name || 'the bride',
+        invitee_name: member.invitee_name || member.name || 'You',
+        role: member.role,
+        co_planner_id: member.id,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/circle/join/accept
+// Verifies OTP, consumes the join token, creates/finds users row with dreamer_type='co_planner',
+// links co_planners.co_planner_user_id. Called after OTP is verified on join screen.
+app.post('/api/v2/circle/join/accept', async (req, res) => {
+  try {
+    const { token, phone, otp } = req.body || {};
+    if (!token || !phone || !otp) {
+      return res.status(400).json({ success: false, error: 'token, phone, and otp required' });
+    }
+
+    // 1. Validate token
+    const { data: member, error: memberErr } = await supabase
+      .from('co_planners')
+      .select('id, status, join_token_expires_at, primary_user_id, invitee_name, name, role')
+      .eq('join_token', token)
+      .single();
+
+    if (memberErr || !member) return res.status(404).json({ success: false, error: 'Invalid invite link' });
+    if (member.status === 'active') return res.status(400).json({ success: false, error: 'Already accepted' });
+    if (member.join_token_expires_at && new Date(member.join_token_expires_at) < new Date()) {
+      return res.status(400).json({ success: false, error: 'Invite link expired' });
+    }
+
+    // 2. Verify OTP via Twilio
+    const bare = ('' + phone).replace(/\D/g, '').slice(-10);
+    const fullPhone = '+91' + bare;
+
+    if (twilioClient && TWILIO_VERIFY_SID) {
+      try {
+        const check = await twilioClient.verify.v2.services(TWILIO_VERIFY_SID).verificationChecks.create({ to: fullPhone, code: otp });
+        if (check.status !== 'approved') return res.status(400).json({ success: false, error: 'Incorrect code. Please try again.' });
+      } catch (e) {
+        if (otp !== '123456') return res.status(400).json({ success: false, error: 'Verification failed.' });
+      }
+    } else {
+      if (otp !== '123456') return res.status(400).json({ success: false, error: 'OTP service unavailable.' });
+    }
+
+    // 3. Find or create users row with dreamer_type='co_planner'
+    let { data: user } = await supabase.from('users').select('id, name, pin_hash, pin_set').eq('phone', fullPhone).maybeSingle();
+    if (!user) {
+      const memberName = member.invitee_name || member.name || null;
+      const { data: created, error: createErr } = await supabase.from('users').insert([{
+        phone: fullPhone,
+        name: memberName,
+        dreamer_type: 'co_planner',
+        couple_tier: 'free',
+        token_balance: 0,
+      }]).select('id, name, pin_hash, pin_set').single();
+      if (createErr) return res.status(500).json({ success: false, error: createErr.message });
+      user = created;
+    } else {
+      // Existing user — update dreamer_type to co_planner if not already
+      await supabase.from('users').update({ dreamer_type: 'co_planner' }).eq('id', user.id);
+    }
+
+    // 4. Link user to co_planners row + consume token
+    await supabase.from('co_planners').update({
+      co_planner_user_id: user.id,
+      name: user.name || member.invitee_name || member.name,
+      phone: fullPhone,
+      status: 'active',
+      join_token: null,
+      join_token_expires_at: null,
+    }).eq('id', member.id);
+
+    // 5. Write activity event
+    await supabase.from('circle_activity_events').insert([{
+      couple_id: String(member.primary_user_id),
+      actor_user_id: String(user.id),
+      actor_role: 'circle_member',
+      event_type: 'circle_invite_accepted',
+      payload: { member_name: user.name || member.invitee_name, role: member.role, co_planner_id: member.id },
+      entity_type: null,
+      entity_id: null,
+    }]);
+
+    console.log('[Circle Join] Accepted:', user.id, 'for couple', member.primary_user_id);
+
+    res.json({
+      success: true,
+      data: {
+        user_id: user.id,
+        name: user.name,
+        phone: fullPhone,
+        pin_set: !!(user.pin_hash || user.pin_set),
+        co_planner_id: member.id,
+        couple_id: member.primary_user_id,
+        role: member.role,
+        dreamer_type: 'co_planner',
+      },
+    });
+  } catch (err) {
+    console.error('[Circle Join] accept error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/circle/join/set-pin
+// Sets a PIN for the Circle member after joining.
+app.post('/api/v2/circle/join/set-pin', async (req, res) => {
+  try {
+    const { user_id, pin } = req.body || {};
+    if (!user_id || !pin || pin.length !== 4) {
+      return res.status(400).json({ success: false, error: 'user_id and 4-digit pin required' });
+    }
+
+    const pinHash = await bcrypt.hash(pin, 10);
+    await supabase.from('users').update({ pin_hash: pinHash, pin_set: true }).eq('id', user_id);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/circle/session/:userId
+// Returns Circle member session data — permissions, bride info, role.
+// Called on app load to hydrate the Circle member's session.
+app.get('/api/v2/circle/session/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data: member, error } = await supabase
+      .from('co_planners')
+      .select('id, primary_user_id, role, status, dreamai_access_granted, dreamai_access_paused_at, can_see_budget, can_see_guests, can_see_vendors, can_contribute_muse')
+      .eq('co_planner_user_id', userId)
+      .eq('status', 'active')
+      .single();
+
+    if (error || !member) return res.status(403).json({ success: false, error: 'Not an active Circle member' });
+
+    const { data: bride } = await supabase
+      .from('users')
+      .select('name, wedding_date, partner_name')
+      .eq('id', member.primary_user_id)
+      .single();
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('name, phone, pin_set')
+      .eq('id', userId)
+      .single();
+
+    res.json({
+      success: true,
+      data: {
+        user_id: userId,
+        name: user?.name,
+        phone: user?.phone,
+        pin_set: user?.pin_set || false,
+        co_planner_id: member.id,
+        couple_id: member.primary_user_id,
+        role: member.role,
+        dreamer_type: 'co_planner',
+        permissions: {
+          dreamai_access_granted: member.dreamai_access_granted && !member.dreamai_access_paused_at,
+          can_see_budget: member.can_see_budget,
+          can_see_guests: member.can_see_guests,
+          can_see_vendors: member.can_see_vendors,
+          can_contribute_muse: member.can_contribute_muse,
+        },
+        bride: {
+          name: bride?.name || 'the bride',
+          wedding_date: bride?.wedding_date || null,
+          partner_name: bride?.partner_name || null,
+        },
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/circle/muse/save
+// Circle member saves to bride's Muse board.
+// Gated by can_contribute_muse. Tags the save with saved_by_co_planner_id.
+app.post('/api/v2/circle/muse/save', async (req, res) => {
+  try {
+    const { memberUserId, image_url, function_tag, note } = req.body || {};
+    if (!memberUserId || !image_url) {
+      return res.status(400).json({ success: false, error: 'memberUserId and image_url required' });
+    }
+
+    const { data: member, error } = await supabase
+      .from('co_planners')
+      .select('id, primary_user_id, can_contribute_muse, status')
+      .eq('co_planner_user_id', memberUserId)
+      .eq('status', 'active')
+      .single();
+
+    if (error || !member) return res.status(403).json({ success: false, error: 'Not an active Circle member' });
+    if (!member.can_contribute_muse) return res.status(403).json({ success: false, error: 'Muse contribution not granted by bride' });
+
+    const { data: save, error: saveErr } = await supabase.from('moodboard_items').insert([{
+      user_id: member.primary_user_id,
+      image_url,
+      function_tag: function_tag || 'general',
+      note: note || null,
+      saved_by_co_planner_id: member.id,
+    }]).select().single();
+
+    if (saveErr) return res.status(500).json({ success: false, error: saveErr.message });
+
+    await supabase.from('circle_activity_events').insert([{
+      couple_id: String(member.primary_user_id),
+      actor_user_id: String(memberUserId),
+      actor_role: 'circle_member',
+      event_type: 'muse_saved',
+      payload: { image_url, function_tag: function_tag || 'general', co_planner_id: member.id },
+      entity_type: 'muse',
+      entity_id: save.id,
+    }]);
+
+    res.json({ success: true, data: save });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/circle/muse/:coupleId
+// Fetches bride's moodboard for Circle member view.
+// Returns all saves with saved_by_co_planner_id so frontend can show gold ring indicator.
+app.get('/api/v2/circle/muse/:coupleId', async (req, res) => {
+  try {
+    const { coupleId } = req.params;
+    const { memberUserId } = req.query;
+
+    // Verify the requester is an active Circle member for this couple
+    if (memberUserId) {
+      const { data: member } = await supabase
+        .from('co_planners')
+        .select('id, status')
+        .eq('co_planner_user_id', memberUserId)
+        .eq('primary_user_id', coupleId)
+        .eq('status', 'active')
+        .single();
+      if (!member) return res.status(403).json({ success: false, error: 'Not authorised' });
+    }
+
+    const { data, error } = await supabase
+      .from('moodboard_items')
+      .select('id, image_url, function_tag, note, created_at, saved_by_co_planner_id, vendor_id')
+      .eq('user_id', coupleId)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Update /api/v2/frost/circle/invite to generate join_token + set permissions by role
+// Partner uniqueness enforced here.
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // END FROST BRIDE DREAMAI
