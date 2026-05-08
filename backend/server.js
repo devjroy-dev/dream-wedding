@@ -13481,70 +13481,84 @@ function buildSearchQuery(profile, styleHint) {
   return parts.join(' ').slice(0, 200);
 }
 
-// SOURCE 1: Pinterest scrape — parse public search page HTML for og:image / inline JSON
-async function fetchPinterestSuggestions(query, limit) {
-  try {
-    const url = 'https://www.pinterest.com/search/pins/?q=' + encodeURIComponent(query);
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    // Pinterest embeds image URLs in inline JSON. Most reliably appear as
-    // "image_signature":"...","images":{"orig":{"url":"https://i.pinimg.com/originals/..."} ...}
-    // Simpler & more robust: capture all i.pinimg.com URLs (the CDN), filter unique.
-    const pinPattern = /https:\/\/i\.pinimg\.com\/(?:originals|736x|564x)\/[a-zA-Z0-9\/_.\-]+\.(?:jpg|jpeg|png|webp)/g;
-    const matches = html.match(pinPattern) || [];
-    const seen = new Set();
-    const unique = [];
-    for (const u of matches) {
-      // Prefer larger sizes — replace 236x/474x with 736x where present
-      const promoted = u.replace(/\/(?:236x|474x)\//, '/736x/');
-      if (seen.has(promoted)) continue;
-      seen.add(promoted);
-      unique.push(promoted);
-      if (unique.length >= limit) break;
-    }
-    return unique.map(u => ({
-      image_url: u,
-      source: 'pinterest',
-      suggestion_id: suggestionIdFor(u),
-      source_url: 'https://www.pinterest.com/search/pins/?q=' + encodeURIComponent(query),
-      caption: null,
-    }));
-  } catch (err) {
-    console.error('[surprise_me pinterest]', err.message);
-    return [];
-  }
+// SOURCE 1: Pinterest — DEPRECATED in ZIP 5b. Pinterest moved to fully client-side
+// rendering (search HTML returns a JS shell with no image URLs). Server-side scrape
+// is not viable. Future ZIP will re-add this once Pinterest dev account + official
+// API access is approved. For now: returns empty so the blend leans on web_search.
+async function fetchPinterestSuggestions(_query, _limit) {
+  return [];
 }
 
 // SOURCE 2: Anthropic web_search → Haiku extracts image URLs from results
+// Robust to: markdown fences, partial JSON, URLs in prose, missing captions.
 async function fetchWebSuggestions(query, limit) {
   try {
+    const prompt =
+      'Use the web_search tool to search for: ' + query + '\n\n' +
+      'Goal: find ' + limit + ' high-quality inspiration photos for an Indian wedding bride. ' +
+      'Photos should be visually rich — real weddings, editorial shoots, decor, outfits, makeup, table settings, mandap designs. ' +
+      'Pull direct image URLs (must end in .jpg, .jpeg, .png, or .webp) from the search results pages you find. ' +
+      'Avoid logos, icons, and stock-photo placeholders.\n\n' +
+      'Return ONLY a JSON object in this exact shape, no markdown, no commentary:\n' +
+      '{"images":[{"url":"https://...jpg","caption":"short label","source_url":"https://page-where-found.com"}]}';
+
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
+      max_tokens: 1200,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{
-        role: 'user',
-        content: 'Search the web for "' + query + '". From the results, extract up to ' + limit + ' direct image URLs (jpg/png/webp) that show ' + query + '. Return strictly JSON: {"images":[{"url":"...","caption":"short label"}]}. No markdown, no commentary.',
-      }],
+      messages: [{ role: 'user', content: prompt }],
     });
 
-    // Haiku may return text after using web_search tool. Get the final text content.
     let textOut = '';
     for (const block of (msg.content || [])) {
-      if (block.type === 'text') textOut += block.text;
+      if (block.type === 'text') textOut += block.text + '\n';
     }
-    if (!textOut) return [];
-    const cleaned = textOut.replace(/\`\`\`json|\`\`\`/g, '').trim();
-    let parsed;
-    try { parsed = JSON.parse(cleaned); } catch { return []; }
-    if (!parsed.images || !Array.isArray(parsed.images)) return [];
+    if (!textOut) {
+      console.error('[surprise_me web] no text content in response');
+      return [];
+    }
+
+    // Cleanup: strip markdown fences, leading/trailing prose
+    let cleaned = textOut.replace(/```json|```/g, '').trim();
+
+    // Try strict parse first
+    let parsed = null;
+    try { parsed = JSON.parse(cleaned); } catch {}
+
+    // Fallback 1: extract first {...} block
+    if (!parsed) {
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch {}
+      }
+    }
+
+    // Fallback 2: regex-extract image URLs directly from text
+    if (!parsed || !Array.isArray(parsed.images)) {
+      const urlPattern = /https:\/\/[^\s"'\)]+\.(?:jpg|jpeg|png|webp)/gi;
+      const urls = (textOut.match(urlPattern) || []);
+      const seen = new Set();
+      const uniqueUrls = [];
+      for (const u of urls) {
+        const cleanU = u.replace(/[.,;:)]+$/, ''); // trim trailing punctuation
+        if (!seen.has(cleanU)) {
+          seen.add(cleanU);
+          uniqueUrls.push(cleanU);
+        }
+        if (uniqueUrls.length >= limit) break;
+      }
+      if (uniqueUrls.length === 0) {
+        console.error('[surprise_me web] no images parsable from response');
+        return [];
+      }
+      return uniqueUrls.slice(0, limit).map(u => ({
+        image_url: u,
+        source: 'web',
+        suggestion_id: suggestionIdFor(u),
+        caption: null,
+        source_url: u,
+      }));
+    }
 
     return parsed.images
       .filter(img => img && img.url && /^https:\/\/.+\.(?:jpg|jpeg|png|webp)/i.test(img.url))
@@ -13554,7 +13568,7 @@ async function fetchWebSuggestions(query, limit) {
         source: 'web',
         suggestion_id: suggestionIdFor(img.url),
         caption: img.caption || null,
-        source_url: img.url,
+        source_url: img.source_url || img.url,
       }));
   } catch (err) {
     console.error('[surprise_me web]', err.message);
@@ -13562,33 +13576,52 @@ async function fetchWebSuggestions(query, limit) {
   }
 }
 
-// SOURCE 3: TDW vendors table — match by function_tag (in their package list) and vibe_tags
+// SOURCE 3: TDW vendors table — soft match by descriptors/colors, fallback to
+// random sampling so vendor slot always fills when vibe_tags don't overlap.
 async function fetchVendorSuggestions(profile, limit) {
   try {
-    let query = supabase.from('vendors')
+    const { data: vendors, error } = await supabase.from('vendors')
       .select('id, name, category, city, featured_photos, portfolio_images, vibe_tags')
       .eq('subscription_active', true)
-      .eq('discover_listed', true);
+      .eq('discover_listed', true)
+      .limit(80);
 
-    // If profile has a ceremony, prioritize vendors whose vibe_tags include matches
+    if (error) {
+      console.error('[surprise_me vendors] supabase error', error.message);
+      return [];
+    }
+    if (!vendors || vendors.length === 0) {
+      console.error('[surprise_me vendors] no active vendors found');
+      return [];
+    }
+
+    // Filter to vendors with at least one image
+    const withImages = vendors.filter(v => {
+      const imgs = [...(v.featured_photos || []), ...(v.portfolio_images || [])].filter(Boolean);
+      return imgs.length > 0;
+    });
+    if (withImages.length === 0) {
+      console.error('[surprise_me vendors] no vendors with images');
+      return [];
+    }
+
+    // Soft-rank: vendors whose vibe_tags overlap with profile get bonus, but
+    // unranked vendors are still candidates (no longer filtered out).
     const profileTokens = [
       ...(profile.descriptors || []),
       ...(profile.colors || []),
       profile.ceremony,
-    ].filter(Boolean).map(t => t.toLowerCase());
+    ].filter(Boolean).map(t => String(t).toLowerCase());
 
-    const { data: vendors } = await query.limit(50);
-    if (!vendors || vendors.length === 0) return [];
-
-    // Score each vendor by vibe_tags overlap
-    const scored = vendors.map(v => {
+    const scored = withImages.map(v => {
       const vtags = (v.vibe_tags || []).map(t => String(t).toLowerCase());
       let score = 0;
       for (const t of profileTokens) {
         if (vtags.some(vt => vt.includes(t) || t.includes(vt))) score += 1;
       }
-      return { vendor: v, score };
-    }).filter(s => s.score > 0 || profileTokens.length === 0);
+      // Random tiebreaker so the same vendor doesn't always come first
+      return { vendor: v, score: score + Math.random() * 0.5 };
+    });
 
     scored.sort((a, b) => b.score - a.score);
 
@@ -13596,8 +13629,7 @@ async function fetchVendorSuggestions(profile, limit) {
     for (const { vendor: v } of scored) {
       const imgs = [...(v.featured_photos || []), ...(v.portfolio_images || [])].filter(Boolean);
       if (imgs.length === 0) continue;
-      // Take up to 1 image per vendor to keep variety
-      const url = imgs[0];
+      const url = imgs[Math.floor(Math.random() * Math.min(imgs.length, 3))];
       out.push({
         image_url: url,
         source: 'vendor',
@@ -13628,11 +13660,12 @@ async function generateSurpriseSuggestions({ coupleId, functionTag, styleHint, c
   const query = buildSearchQuery(profile, styleHint);
 
   // Fetch in parallel. Each source has its own quota.
-  // Mix is roughly 50% Pinterest, 25% web, 25% vendor — Pinterest fills the
-  // grid most reliably for visual density.
-  const pinterestQuota = Math.max(2, Math.ceil(count * 0.5));
-  const webQuota       = Math.max(1, Math.ceil(count * 0.25));
-  const vendorQuota    = Math.max(1, Math.ceil(count * 0.25));
+  // ZIP 5b: Pinterest scrape disabled (Pinterest now JS-only). New mix:
+  // ~60% web_search, ~40% vendor. Pinterest helper still called but returns []
+  // so structure is preserved for when official Pinterest API replaces it.
+  const pinterestQuota = 0;
+  const webQuota       = Math.max(2, Math.ceil(count * 0.6));
+  const vendorQuota    = Math.max(2, Math.ceil(count * 0.4));
 
   const [pinterest, web, vendor, commerce] = await Promise.all([
     fetchPinterestSuggestions(query, pinterestQuota + 2),
