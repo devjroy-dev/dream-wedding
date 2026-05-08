@@ -15577,7 +15577,7 @@ app.get('/api/v2/discover-heroes', async (req, res) => {
 });
 
 // GET /api/v2/admin/discover-heroes — admin read (all rows, includes inactive)
-app.get('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
+app.get('/api/v2/admin/discover-heroes', checkAdminAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('discover_heroes')
@@ -15592,7 +15592,7 @@ app.get('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
 });
 
 // POST /api/v2/admin/discover-heroes — create hero
-app.post('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
+app.post('/api/v2/admin/discover-heroes', checkAdminAuth, async (req, res) => {
   try {
     const { image_url, caption, category_tag, cta_url,
             sort_order, visible_from, visible_to, is_active } = req.body;
@@ -15620,7 +15620,7 @@ app.post('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
 });
 
 // PUT /api/v2/admin/discover-heroes/:id — update (caption, sort_order, active, url, etc.)
-app.put('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) => {
+app.put('/api/v2/admin/discover-heroes/:id', checkAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const allowed = ['image_url', 'caption', 'category_tag', 'cta_url',
@@ -15647,7 +15647,7 @@ app.put('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/v2/admin/discover-heroes/:id
-app.delete('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) => {
+app.delete('/api/v2/admin/discover-heroes/:id', checkAdminAuth, async (req, res) => {
   try {
     const { error } = await supabase
       .from('discover_heroes')
@@ -15664,7 +15664,7 @@ app.delete('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) =
 // POST /api/v2/admin/discover-heroes/upload — multipart upload → cover-photos bucket
 // Uses the same multer + Supabase Storage pattern as cover-photos upload.
 // File goes to cover-photos/heroes/ subfolder (no new bucket needed).
-app.post('/api/v2/admin/discover-heroes/upload', requireAdmin, upload.single('file'), async (req, res) => {
+app.post('/api/v2/admin/discover-heroes/upload', checkAdminAuth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No file received' });
     const ext = (req.file.originalname || 'photo.jpg').split('.').pop() || 'jpg';
