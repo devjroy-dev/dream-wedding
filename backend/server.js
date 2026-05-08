@@ -14026,6 +14026,8 @@ app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
       { name: 'circle_activity_events', columns: 'id, couple_id, actor_role, event_type, payload, entity_type, entity_id' },
       { name: 'co_planner_groups', columns: 'id, couple_id, name, created_at' },
       { name: 'co_planner_group_members', columns: 'id, group_id, co_planner_id, created_at' },
+      // ZIP 10 Circle-member DreamAi
+      { name: 'circle_member_chat_messages', columns: 'id, co_planner_id, couple_id, role, content, created_at' },
   ];
 
   for (const t of tables) {
@@ -14397,6 +14399,395 @@ app.post('/api/v2/frost/circle/members/:coPlannerIdParam/dreamai-access', async 
     if (error) return res.status(500).json({ success: false, error: error.message });
 
     res.json({ success: true, granted: !!grant, member_name: member.name });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FROST CIRCLE — ZIP 10: Circle-member DreamAi engine
+//
+// Separate engine from bride-chat. Circle members ask read-only questions
+// about the bride's wedding. Token usage bills against the bride's quota.
+// Access is gated by co_planners.dreamai_access_granted (set by bride).
+// Conversations are persisted in circle_member_chat_messages.
+//
+// Toolkit (constrained, read-only):
+//   query_wedding_basics — always available (date, events, venue)
+//   query_budget         — gated by can_see_budget
+//   query_guests         — gated by can_see_guests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Build system prompt for Circle-member DreamAi
+async function buildCircleMemberSystemPrompt(coupleId, memberName, memberRole, permissions) {
+  // Fetch bride's basic wedding info
+  let brideName = 'the bride';
+  let weddingDate = null;
+  let daysUntil = null;
+  let events = [];
+
+  try {
+    const { data: bride } = await supabase
+      .from('users')
+      .select('name, wedding_date, partner_name, wedding_events')
+      .eq('id', coupleId)
+      .single();
+    if (bride) {
+      brideName = bride.name || 'the bride';
+      weddingDate = bride.wedding_date;
+      events = bride.wedding_events || [];
+      if (weddingDate) {
+        const today = new Date(); today.setHours(0,0,0,0);
+        const wd = new Date(weddingDate); wd.setHours(0,0,0,0);
+        daysUntil = Math.max(0, Math.round((wd.getTime() - today.getTime()) / 86400000));
+      }
+    }
+  } catch (e) {}
+
+  const permLines = [];
+  if (permissions.can_see_budget)  permLines.push('- You CAN answer questions about the budget.');
+  else                              permLines.push('- You CANNOT share budget details — redirect politely.');
+  if (permissions.can_see_guests)  permLines.push('- You CAN answer questions about the guest list.');
+  else                              permLines.push('- You CANNOT share guest list details — redirect politely.');
+
+  return `You are DreamAi — an AI assistant helping ${memberName} (${memberRole}) stay informed about ${brideName}'s wedding on The Dream Wedding platform.
+
+IMPORTANT: You are NOT the bride's personal assistant. You are helping a Circle member — someone the bride has invited to be part of her wedding team.
+
+Wedding basics:
+- Bride's name: ${brideName}
+- Wedding date: ${weddingDate || 'not set yet'}
+- Days until wedding: ${daysUntil !== null ? daysUntil : 'unknown'}
+- Events: ${events.length > 0 ? JSON.stringify(events) : 'not yet scheduled'}
+
+Your permissions for this member:
+${permLines.join(String.fromCharCode(10))}
+
+Rules you must follow:
+- Always say "${brideName}'s wedding" not "your wedding" — you are talking to a Circle member, not the bride.
+- Never use write tools. You are read-only.
+- If asked something outside your permissions, say "${brideName} hasn't shared that with you yet."
+- Be warm, helpful, and concise. This person is helping with the wedding.
+- Use ₹ for currency, lakh/crore for large amounts.
+- If you don't know something, say so honestly.`;
+}
+
+// Circle-member tool definitions (constrained read-only toolkit)
+const CIRCLE_MEMBER_TOOLS = [
+  {
+    name: 'query_wedding_basics',
+    description: "Answer questions about the bride's wedding date, events schedule, venue, or general wedding info. Use for: 'when is the wedding?', 'what events are there?', 'where is the reception?'",
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The question to answer from wedding basics.' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'query_budget',
+    description: "Answer questions about the wedding budget. Only callable if the bride has granted budget visibility to this member.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The budget question.' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'query_guests',
+    description: "Answer questions about the guest list. Only callable if the bride has granted guest list visibility to this member.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The guest list question.' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'general_reply',
+    description: "Use for general conversation, greetings, and questions that don't need data lookup.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string', description: 'Your reply text.' },
+      },
+      required: ['reply'],
+    },
+  },
+];
+
+// Execute Circle-member tool call
+async function executeCircleMemberTool(toolName, toolInput, coupleId, permissions) {
+  try {
+    switch (toolName) {
+      case 'query_wedding_basics': {
+        const { data: bride } = await supabase
+          .from('users')
+          .select('name, wedding_date, partner_name, wedding_events')
+          .eq('id', coupleId)
+          .single();
+        if (!bride) return 'Wedding details not available yet.';
+        const lines = [];
+        if (bride.name)         lines.push(`Bride: ${bride.name}`);
+        if (bride.partner_name) lines.push(`Partner: ${bride.partner_name}`);
+        if (bride.wedding_date) lines.push(`Wedding date: ${bride.wedding_date}`);
+        const events = bride.wedding_events || [];
+        if (events.length > 0)  lines.push(`Events: ${events.map(e => e.name || e).join(', ')}`);
+        return lines.join('\n') || 'Wedding details not set yet.';
+      }
+
+      case 'query_budget': {
+        if (!permissions.can_see_budget) {
+          return "The bride hasn't shared budget details with you yet.";
+        }
+        const { data: budget } = await supabase
+          .from('couple_budget')
+          .select('total_budget')
+          .eq('couple_id', coupleId)
+          .maybeSingle();
+        const { data: expenses } = await supabase
+          .from('couple_expenses')
+          .select('planned_amount, actual_amount, payment_status')
+          .eq('couple_id', coupleId);
+        const total = budget?.total_budget || 0;
+        const spent = (expenses || []).reduce((s, e) => s + (e.actual_amount || e.planned_amount || 0), 0);
+        return `Total budget: ₹${total.toLocaleString('en-IN')}
+Spent so far: ₹${spent.toLocaleString('en-IN')}
+Remaining: ₹${(total - spent).toLocaleString('en-IN')}`;
+      }
+
+      case 'query_guests': {
+        if (!permissions.can_see_guests) {
+          return "The bride hasn't shared guest list details with you yet.";
+        }
+        const { data: guests } = await supabase
+          .from('couple_guests')
+          .select('name, rsvp_status')
+          .eq('couple_id', coupleId);
+        const total = (guests || []).length;
+        const confirmed = (guests || []).filter(g => g.rsvp_status === 'confirmed').length;
+        const pending = (guests || []).filter(g => g.rsvp_status === 'pending' || !g.rsvp_status).length;
+        return `Total guests: ${total}
+Confirmed: ${confirmed}
+Pending RSVP: ${pending}`;
+      }
+
+      case 'general_reply':
+        return toolInput.reply || '';
+
+      default:
+        return 'I can only help with wedding basics, budget, and guest questions.';
+    }
+  } catch (err) {
+    console.error('[Circle member tool]', toolName, err.message);
+    return 'Something went wrong fetching that information.';
+  }
+}
+
+// POST /api/v2/dreamai/circle-member-chat
+// Circle member sends a message to DreamAi. Gated by dreamai_access_granted.
+// Token usage billed against bride's quota. History persisted in circle_member_chat_messages.
+app.post('/api/v2/dreamai/circle-member-chat', async (req, res) => {
+  try {
+    const { memberUserId, message, history = [] } = req.body || {};
+    if (!memberUserId || !message) {
+      return res.status(400).json({ success: false, error: 'memberUserId and message required' });
+    }
+    if (!anthropic) {
+      return res.status(503).json({ success: false, error: 'AI service not configured' });
+    }
+
+    // 1. Look up co_planners row by co_planner_user_id
+    const { data: member, error: memberErr } = await supabase
+      .from('co_planners')
+      .select('id, primary_user_id, name, role, status, dreamai_access_granted, dreamai_access_paused_at, can_see_budget, can_see_guests, can_see_vendors')
+      .eq('co_planner_user_id', memberUserId)
+      .eq('status', 'active')
+      .single();
+
+    if (memberErr || !member) {
+      return res.status(403).json({ success: false, error: 'Circle member not found or not active' });
+    }
+
+    // 2. Check DreamAi access
+    if (!member.dreamai_access_granted) {
+      return res.status(403).json({ success: false, error: 'DreamAi access not granted by bride' });
+    }
+    if (member.dreamai_access_paused_at) {
+      return res.status(403).json({ success: false, error: 'DreamAi access has been paused by the bride' });
+    }
+
+    const coupleId = member.primary_user_id;
+    const permissions = {
+      can_see_budget:  member.can_see_budget,
+      can_see_guests:  member.can_see_guests,
+      can_see_vendors: member.can_see_vendors,
+    };
+
+    // 3. Check bride's token quota
+    const { data: brideUser } = await supabase
+      .from('users')
+      .select('token_balance, couple_tier')
+      .eq('id', coupleId)
+      .single();
+
+    const tokenBalance = brideUser?.token_balance ?? 0;
+    if (tokenBalance <= 0) {
+      return res.status(429).json({ success: false, error: "The bride's DreamAi quota is used up for this month." });
+    }
+
+    // 4. Build system prompt + call Haiku
+    const systemPrompt = await buildCircleMemberSystemPrompt(
+      coupleId, member.name || 'Circle Member', member.role || 'inner_circle', permissions
+    );
+
+    const historyMessages = (history || []).slice(-8).map(h => ({
+      role: h.role === 'user' ? 'user' : 'assistant',
+      content: h.content || h.text || '',
+    }));
+
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      tools: CIRCLE_MEMBER_TOOLS,
+      messages: [...historyMessages, { role: 'user', content: message }],
+    });
+
+    // 5. Execute tools + assemble reply
+    let replyText = '';
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        replyText += block.text;
+      } else if (block.type === 'tool_use') {
+        if (block.name === 'web_search') continue;
+        const result = await executeCircleMemberTool(block.name, block.input, coupleId, permissions);
+        if (block.name === 'general_reply') {
+          replyText = result;
+        } else {
+          replyText += (replyText ? '\n\n' : '') + result;
+        }
+      }
+    }
+
+    if (!replyText.trim()) replyText = "I'm here to help with wedding questions.";
+
+    // 6. Deduct one token from bride's balance
+    await supabase
+      .from('users')
+      .update({ token_balance: Math.max(0, tokenBalance - 1) })
+      .eq('id', coupleId);
+
+    // 7. Persist both turns to circle_member_chat_messages
+    await supabase.from('circle_member_chat_messages').insert([
+      { co_planner_id: member.id, couple_id: String(coupleId), role: 'user',      content: message },
+      { co_planner_id: member.id, couple_id: String(coupleId), role: 'assistant', content: replyText },
+    ]);
+
+    // 8. Write activity event
+    await supabase.from('circle_activity_events').insert([{
+      couple_id: String(coupleId),
+      actor_user_id: String(memberUserId),
+      actor_role: 'circle_member',
+      event_type: 'circle_member_dreamai_used',
+      payload: { member_name: member.name, member_id: member.id, question_preview: message.slice(0, 80) },
+      entity_type: null,
+      entity_id: null,
+    }]);
+
+    console.log('[Circle Member DreamAi]', member.name, '→', replyText.slice(0, 80));
+
+    res.json({
+      success: true,
+      reply: replyText,
+      tokens_remaining: Math.max(0, tokenBalance - 1),
+    });
+
+  } catch (err) {
+    console.error('[Circle Member DreamAi] error:', err.message);
+    res.status(500).json({ success: false, error: err.message, reply: 'Something went wrong. Try again?' });
+  }
+});
+
+// GET /api/v2/frost/circle/members/:coPlannerIdParam/usage
+// Per-member token usage this month. Bride uses this to see how much each
+// Circle member has consumed from her quota.
+app.get('/api/v2/frost/circle/members/:coPlannerIdParam/usage', async (req, res) => {
+  try {
+    const { coPlannerIdParam } = req.params;
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
+
+    // Verify ownership
+    const { data: member } = await supabase
+      .from('co_planners')
+      .select('id, name, primary_user_id, dreamai_access_granted, dreamai_access_paused_at')
+      .eq('id', coPlannerIdParam)
+      .single();
+
+    if (!member || member.primary_user_id !== userId) {
+      return res.status(403).json({ success: false, error: 'Not authorised' });
+    }
+
+    // Count messages this calendar month
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1); startOfMonth.setHours(0,0,0,0);
+
+    const { data: msgs } = await supabase
+      .from('circle_member_chat_messages')
+      .select('id, role, created_at')
+      .eq('co_planner_id', coPlannerIdParam)
+      .eq('role', 'user')
+      .gte('created_at', startOfMonth.toISOString());
+
+    const tokensUsed = (msgs || []).length;
+    const paused = !!member.dreamai_access_paused_at;
+    const pausedAt = member.dreamai_access_paused_at || null;
+
+    res.json({
+      success: true,
+      data: {
+        co_planner_id: coPlannerIdParam,
+        name: member.name,
+        tokens_used_this_month: tokensUsed,
+        dreamai_access_granted: member.dreamai_access_granted,
+        paused,
+        paused_at: pausedAt,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v2/dreamai/circle-member-history/:memberUserId
+// Returns persisted chat history for a Circle member's DreamAi session.
+app.get('/api/v2/dreamai/circle-member-history/:memberUserId', async (req, res) => {
+  try {
+    const { memberUserId } = req.params;
+
+    const { data: member } = await supabase
+      .from('co_planners')
+      .select('id, dreamai_access_granted, dreamai_access_paused_at')
+      .eq('co_planner_user_id', memberUserId)
+      .eq('status', 'active')
+      .single();
+
+    if (!member) return res.status(403).json({ success: false, error: 'Not found' });
+    if (!member.dreamai_access_granted) return res.status(403).json({ success: false, error: 'Access not granted' });
+
+    const { data: msgs } = await supabase
+      .from('circle_member_chat_messages')
+      .select('id, role, content, created_at')
+      .eq('co_planner_id', member.id)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    res.json({ success: true, data: msgs || [] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
