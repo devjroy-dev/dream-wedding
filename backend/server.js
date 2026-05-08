@@ -13490,7 +13490,8 @@ async function fetchPinterestSuggestions(_query, _limit) {
 }
 
 // SOURCE 2: Anthropic web_search → Haiku extracts image URLs from results
-// Robust to: markdown fences, partial JSON, URLs in prose, missing captions.
+// ZIP 5c: 4-tier extraction (JSON → markdown ![](url) → URL regex → og:image
+// of page citations) plus diagnostic logging of raw Haiku output on failure.
 async function fetchWebSuggestions(query, limit) {
   try {
     const prompt =
@@ -13504,28 +13505,42 @@ async function fetchWebSuggestions(query, limit) {
 
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1200,
+      max_tokens: 1500,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{ role: 'user', content: prompt }],
     });
 
     let textOut = '';
+    const pageCitations = new Set(); // collect page URLs from web_search results
     for (const block of (msg.content || [])) {
-      if (block.type === 'text') textOut += block.text + '\n';
+      if (block.type === 'text') {
+        textOut += block.text + '\n';
+        // Extract citation URLs Anthropic embeds in text blocks
+        for (const cit of (block.citations || [])) {
+          if (cit.url) pageCitations.add(cit.url);
+        }
+      }
+      // web_search tool results have URLs in their content too
+      if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+        for (const item of block.content) {
+          if (item.url) pageCitations.add(item.url);
+        }
+      }
     }
+
     if (!textOut) {
       console.error('[surprise_me web] no text content in response');
       return [];
     }
 
-    // Cleanup: strip markdown fences, leading/trailing prose
+    // Cleanup
     let cleaned = textOut.replace(/```json|```/g, '').trim();
 
-    // Try strict parse first
+    // TIER 1 — strict JSON parse
     let parsed = null;
     try { parsed = JSON.parse(cleaned); } catch {}
 
-    // Fallback 1: extract first {...} block
+    // TIER 2 — extract first {...} block
     if (!parsed) {
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -13533,25 +13548,45 @@ async function fetchWebSuggestions(query, limit) {
       }
     }
 
-    // Fallback 2: regex-extract image URLs directly from text
-    if (!parsed || !Array.isArray(parsed.images)) {
-      const urlPattern = /https:\/\/[^\s"'\)]+\.(?:jpg|jpeg|png|webp)/gi;
-      const urls = (textOut.match(urlPattern) || []);
-      const seen = new Set();
-      const uniqueUrls = [];
-      for (const u of urls) {
-        const cleanU = u.replace(/[.,;:)]+$/, ''); // trim trailing punctuation
-        if (!seen.has(cleanU)) {
-          seen.add(cleanU);
-          uniqueUrls.push(cleanU);
-        }
-        if (uniqueUrls.length >= limit) break;
+    if (parsed && Array.isArray(parsed.images) && parsed.images.length > 0) {
+      const filtered = parsed.images
+        .filter(img => img && img.url && /^https:\/\/.+\.(?:jpg|jpeg|png|webp)(\?.*)?$/i.test(img.url))
+        .slice(0, limit);
+      if (filtered.length > 0) {
+        return filtered.map(img => ({
+          image_url: img.url,
+          source: 'web',
+          suggestion_id: suggestionIdFor(img.url),
+          caption: img.caption || null,
+          source_url: img.source_url || img.url,
+        }));
       }
-      if (uniqueUrls.length === 0) {
-        console.error('[surprise_me web] no images parsable from response');
-        return [];
-      }
-      return uniqueUrls.slice(0, limit).map(u => ({
+    }
+
+    // TIER 3 — pull image URLs from prose, including markdown ![alt](url)
+    const collectedUrls = [];
+    const seen = new Set();
+    const pushUrl = (raw) => {
+      if (!raw) return;
+      const u = raw.replace(/[.,;:)\]]+$/, '').trim();
+      if (!/^https:\/\/.+\.(?:jpg|jpeg|png|webp)(\?.*)?$/i.test(u)) return;
+      if (seen.has(u)) return;
+      seen.add(u);
+      collectedUrls.push(u);
+    };
+
+    // Markdown image syntax: ![alt](https://...jpg)
+    const mdRegex = /!\[[^\]]*\]\((https?:\/\/[^\s\)]+)\)/g;
+    let m;
+    while ((m = mdRegex.exec(textOut)) !== null) pushUrl(m[1]);
+
+    // Direct URL pattern in prose
+    const directRegex = /https:\/\/[^\s"'\)\]<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'\)\]<>]*)?/gi;
+    const direct = textOut.match(directRegex) || [];
+    for (const u of direct) pushUrl(u);
+
+    if (collectedUrls.length > 0) {
+      return collectedUrls.slice(0, limit).map(u => ({
         image_url: u,
         source: 'web',
         suggestion_id: suggestionIdFor(u),
@@ -13560,19 +13595,68 @@ async function fetchWebSuggestions(query, limit) {
       }));
     }
 
-    return parsed.images
-      .filter(img => img && img.url && /^https:\/\/.+\.(?:jpg|jpeg|png|webp)/i.test(img.url))
-      .slice(0, limit)
-      .map(img => ({
-        image_url: img.url,
-        source: 'web',
-        suggestion_id: suggestionIdFor(img.url),
-        caption: img.caption || null,
-        source_url: img.source_url || img.url,
-      }));
+    // TIER 4 — fall back to og:image of page citations
+    if (pageCitations.size > 0) {
+      const pages = Array.from(pageCitations).slice(0, 6);
+      const ogResults = await Promise.allSettled(pages.map(fetchOgImage));
+      const ogUrls = [];
+      for (let i = 0; i < ogResults.length; i++) {
+        const r = ogResults[i];
+        if (r.status === 'fulfilled' && r.value) {
+          if (!seen.has(r.value)) {
+            seen.add(r.value);
+            ogUrls.push({ image_url: r.value, source_url: pages[i] });
+          }
+        }
+        if (ogUrls.length >= limit) break;
+      }
+      if (ogUrls.length > 0) {
+        return ogUrls.slice(0, limit).map(o => ({
+          image_url: o.image_url,
+          source: 'web',
+          suggestion_id: suggestionIdFor(o.image_url),
+          caption: null,
+          source_url: o.source_url,
+        }));
+      }
+    }
+
+    // All tiers failed — log diagnostic
+    console.error('[surprise_me web] no images parsable from response. Raw text head:', textOut.slice(0, 600).replace(/\n/g, ' | '));
+    console.error('[surprise_me web] citations collected:', pageCitations.size);
+    return [];
   } catch (err) {
     console.error('[surprise_me web]', err.message);
     return [];
+  }
+}
+
+// Fetch og:image meta from a page URL. Returns image URL or null.
+async function fetchOgImage(pageUrl) {
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)',
+        'Accept': 'text/html',
+      },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const html = await res.text();
+    // og:image (any meta tag attribute order)
+    const og1 = html.match(/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i);
+    if (og1 && og1[1]) return og1[1];
+    const og2 = html.match(/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i);
+    if (og2 && og2[1]) return og2[1];
+    // twitter:image fallback
+    const tw1 = html.match(/<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i);
+    if (tw1 && tw1[1]) return tw1[1];
+    return null;
+  } catch {
+    return null;
   }
 }
 
