@@ -9378,8 +9378,9 @@ app.get('/api/couple/muse/:couple_id', async (req, res) => {
   try {
     const { couple_id } = req.params;
     if (!couple_id) return res.status(400).json({ success: false, error: 'couple_id required' });
+    // ZIP 4 fix: include both vendor-linked and pure-inspiration saves
     const { data: saves } = await supabase.from('moodboard_items')
-      .select('*').eq('user_id', couple_id).not('vendor_id', 'is', null)
+      .select('*').eq('user_id', couple_id)
       .order('created_at', { ascending: false });
     const vendorIds = [...new Set((saves || []).map(s => s.vendor_id).filter(Boolean))];
     let vendorMap = {};
@@ -9424,10 +9425,15 @@ app.post('/api/couple/muse/save', async (req, res) => {
     if (existing) return res.json({ success: true, already_saved: true });
     const { data: vendor } = await supabase.from('vendors').select('name, category, portfolio_images, featured_photos').eq('id', vendor_id).maybeSingle();
     const image = vendor?.featured_photos?.[0] || vendor?.portfolio_images?.[0] || null;
+    // ZIP 4 fix: real moodboard_items columns are
+    //   user_id, vendor_id, image_url, function_tag, note
+    // The function_tag here uses 'event' input (haldi/mehendi/reception/etc.)
+    // for backward compatibility with how the frontend passes it.
     const { data, error } = await supabase.from('moodboard_items').insert([{
-      user_id: couple_id, vendor_id, vendor_name: vendor?.name || null,
-      vendor_category: vendor?.category || null, vendor_image: image,
-      event: event || 'general', source: 'discovery',
+      user_id: couple_id,
+      vendor_id,
+      image_url: image,
+      function_tag: event || null,
     }]).select().single();
     if (error) throw error;
     // Part D: bump vendor analytics + activity log
@@ -12238,6 +12244,22 @@ const FROST_BRIDE_TOOLS = [
       required: ['image_url'],
     },
   },
+
+  // ── ZIP 4: save_to_muse (rebuilt for real schema) ──────────────────────────
+  {
+    name: 'save_to_muse',
+    description: "Save inspiration to the bride's Muse moodboard. Use when she pastes a Pinterest URL, Instagram URL, or image URL — or when she sends a screenshot of inspiration (a saree, a setup, a lehenga, an idea). NOT for receipts (use ocr_receipt) or vendor pages (use book_vendor or query_my_vendors). NOT for vendor screenshots — ask which she wants. The image_url should be a real https URL when possible.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        image_url: { type: 'string', description: "URL of the inspiration. Pinterest, Instagram, or any image URL she pasted. Required." },
+        function_tag: { type: 'string', description: "Optional ceremony tag — 'haldi', 'mehendi', 'reception', 'sangeet', 'wedding', 'general'. Use general if unsure." },
+        note: { type: 'string', description: "Optional bride's note about why she saved this." },
+        vendor_id: { type: 'string', description: "Optional vendor UUID if this saves is associated with a TDW vendor." },
+      },
+      required: ['image_url'],
+    },
+  },
 ];
 
 // ── Bride tool executor — composite + atomic ───────────────────────────────
@@ -12736,6 +12758,42 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         };
       }
 
+      // ── ZIP 4: save_to_muse (real schema) ──
+      case 'save_to_muse': {
+        const { image_url, function_tag = null, note = null, vendor_id = null } = toolInput || {};
+        if (!image_url) {
+          return { ok: false, kind: 'unknown', reply: "I'll need a link or image to save." };
+        }
+        const insertRow = {
+          user_id: coupleId,
+          image_url,
+        };
+        if (function_tag) insertRow.function_tag = function_tag;
+        if (note) insertRow.note = note;
+        if (vendor_id) insertRow.vendor_id = vendor_id;
+        const { error } = await supabase.from('moodboard_items').insert([insertRow]);
+        if (error) throw error;
+        const summaryLines = [
+          'Saved to your Muse',
+          function_tag ? `Tagged: ${function_tag}` : 'No ceremony tag yet',
+          note ? `Note: "${note}"` : null,
+        ].filter(Boolean);
+        const followups = !function_tag ? [{
+          id: 'muse_function_tag',
+          text: 'Want to tag this for a specific ceremony?',
+          yesLabel: 'Yes, tag it',
+          noLabel: 'Skip',
+        }] : [];
+        return {
+          ok: true,
+          kind: 'composite',
+          reply: '✓ Saved to Muse.',
+          confirmPreview: null,
+          summaryLines,
+          followupPrompts: followups,
+        };
+      }
+
       case 'general_reply':
         return { ok: true, kind: 'reply', reply: toolInput.reply };
 
@@ -12749,10 +12807,36 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
 }
 
 // ── Bride system prompt ────────────────────────────────────────────────────
-function buildBrideSystemPrompt(coupleId, context = {}) {
+function buildBrideSystemPrompt(coupleId, opts = {}) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
+  
+  // ZIP 4: build routing context from opts.routingHint
+  const routingHint = opts && opts.routingHint;
+  let routingContext = '';
+  if (routingHint) {
+    if (routingHint.kind === 'image_classified') {
+      const c = routingHint.classification;
+      const url = routingHint.image_url;
+      if (c === 'receipt') {
+        routingContext = `\n\nROUTING HINT: The bride sent an image at ${url}. A vision classifier determined it is a RECEIPT. Use the ocr_receipt tool with image_url=${url} unless the bride's text clearly contradicts.`;
+      } else if (c === 'inspiration') {
+        routingContext = `\n\nROUTING HINT: The bride sent an image at ${url}. A vision classifier determined it is INSPIRATION (saree, decor, lehenga, mood, etc). Use save_to_muse with image_url=${url} unless the bride's text clearly contradicts.`;
+      } else if (c === 'vendor_screenshot') {
+        routingContext = `\n\nROUTING HINT: The bride sent an image at ${url}. It looks like a screenshot of a VENDOR PROFILE. ASK her in your reply: "Is this someone you'd like to add to your vendor list, or save the look to your Muse?" Do not act yet.`;
+      } else {
+        routingContext = `\n\nROUTING HINT: The bride sent an image at ${url}. Classification was unclear. Ask her plainly what she'd like done with it.`;
+      }
+    } else if (routingHint.kind === 'image_unclassified') {
+      routingContext = `\n\nROUTING HINT: The bride sent an image at ${routingHint.image_url}. Classification failed. Ask her plainly what she'd like done with it.`;
+    } else if (routingHint.kind === 'pinterest_inspiration') {
+      routingContext = `\n\nROUTING HINT: The bride pasted a Pinterest link: ${routingHint.image_url}. This is almost certainly inspiration. Use save_to_muse with image_url=${routingHint.image_url} unless her text clearly contradicts.`;
+    } else if (routingHint.kind === 'instagram_link') {
+      routingContext = `\n\nROUTING HINT: The bride pasted an Instagram link: ${routingHint.image_url}. This is likely inspiration or a vendor reference. Use save_to_muse with image_url=${routingHint.image_url} unless she explicitly mentions a vendor name (then use book_vendor / query_my_vendors).`;
+    }
+  }
+
   return `You are DreamAi — the bride's AI inside Frost, the bride product within The Dream Wedding.
 
 Today is ${today}. Couple ID: ${coupleId}.
@@ -12779,6 +12863,16 @@ INTERACTION GRAMMAR (LOCKED):
   · "What date should I remind you on?"  ← too much typing
   · "What should the message say?"  ← too much typing
 
+ROUTING RULES (DreamAi-as-Router):
+- If she pastes a Pinterest URL → save_to_muse (inspiration)
+- If she pastes an Instagram URL → save_to_muse (likely inspiration; ask if vendor-related)
+- If she sends a receipt photo → ocr_receipt (with confirmPreview)
+- If she sends an inspiration photo (saree, decor, lehenga) → save_to_muse
+- If she sends a vendor profile screenshot → ASK: "Add to your vendor list, or save the look?"
+- If unclear → ask plainly. Never guess routing.
+- A ROUTING HINT in this prompt comes from the system's pre-classification — it is a strong suggestion but the bride's explicit text wins.
+
+
 HONEST UNKNOWNS RULE:
 - If you do not understand what she wants, say so plainly. Use general_reply with: "I'm not sure what you'd like me to do. Could you say it differently?"
 - NEVER guess. Never invent vendor names. Never assume which Swati if there are multiple.
@@ -12799,7 +12893,7 @@ WHEN TO USE WHICH TOOL:
 - web_search is available for genuinely outside-the-platform questions ("what is mehendi") — use sparingly.
 
 KEEP REPLIES SHORT.
-She is reading on a phone, often quickly. One or two sentences, max three. The product is meant to feel light.`;
+She is reading on a phone, often quickly. One or two sentences, max three. The product is meant to feel light.${routingContext}`;
 }
 
 // ── Bride context idle-line helper ─────────────────────────────────────────
@@ -12848,6 +12942,61 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
   try {
     const { userId, message, history = [] } = req.body || {};
 
+    // ── ZIP 4: DreamAi-as-Router preprocessing ─────────────────────────────
+    // Extract URLs from the message and (if an image URL) run a quick Vision
+    // classifier to suggest routing to Haiku via system-prompt context.
+    let routingHint = null;
+    try {
+      const urlPattern = /(https?:\/\/[\w.\-_/?=&%#:]+)/gi;
+      const urls = (message || '').match(urlPattern) || [];
+      const imageExtPattern = /\.(jpg|jpeg|png|webp|gif|heic)(\?|$)/i;
+      const pinterestPattern = /pinterest\.[a-z.]+|pin\.it/i;
+      const instagramPattern = /instagram\.com|instagr\.am/i;
+
+      const firstUrl = urls[0] || null;
+      let urlKind = null;
+
+      if (firstUrl) {
+        if (pinterestPattern.test(firstUrl)) urlKind = 'pinterest_inspiration';
+        else if (instagramPattern.test(firstUrl)) urlKind = 'instagram_link';
+        else if (imageExtPattern.test(firstUrl)) urlKind = 'direct_image';
+      }
+
+      // If we have a direct image URL, run Haiku Vision classifier
+      if (urlKind === 'direct_image') {
+        try {
+          const visionMsg = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 80,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'url', url: firstUrl } },
+                { type: 'text', text: 'Classify this image strictly as one of: receipt, inspiration, vendor_screenshot, document, other. Reply with one word only.' },
+              ],
+            }],
+          });
+          const classification = (visionMsg.content[0]?.text || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
+          if (['receipt', 'inspiration', 'vendor_screenshot', 'document', 'other'].includes(classification)) {
+            routingHint = { kind: 'image_classified', classification, image_url: firstUrl };
+          } else {
+            routingHint = { kind: 'image_unclassified', image_url: firstUrl };
+          }
+        } catch (e) {
+          console.error('[bride-chat vision classify]', e.message);
+          routingHint = { kind: 'image_unclassified', image_url: firstUrl };
+        }
+      } else if (urlKind === 'pinterest_inspiration') {
+        routingHint = { kind: 'pinterest_inspiration', image_url: firstUrl };
+      } else if (urlKind === 'instagram_link') {
+        routingHint = { kind: 'instagram_link', image_url: firstUrl };
+      }
+    } catch (e) {
+      console.error('[bride-chat routing preprocess]', e.message);
+    }
+
+
+
     if (!userId || !message) {
       return res.status(400).json({ success: false, error: 'userId and message are required' });
     }
@@ -12866,7 +13015,7 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
     );
     const tools = [...FROST_BRIDE_TOOLS, ...READ_ONLY_COUPLE_TOOLS, { type: 'web_search_20250305', name: 'web_search' }];
 
-    const systemPrompt = buildBrideSystemPrompt(userId);
+    const systemPrompt = buildBrideSystemPrompt(userId, { routingHint });
 
     const historyMessages = (history || []).slice(-10).map(h => ({
       role: h.role === 'user' ? 'user' : 'assistant',
@@ -13188,7 +13337,7 @@ app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
     { name: 'couple_vendors', columns: 'id, couple_id, name, category, status, quoted_total, events, balance_due_date' },
     { name: 'couple_expenses', columns: 'id, couple_id, event, category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date' },
     { name: 'couple_checklist', columns: 'id, couple_id, event, text, is_complete, priority, due_date, is_custom' },
-    { name: 'moodboard_items', columns: 'id, user_id, vendor_id, vendor_name, event' },
+    { name: 'moodboard_items', columns: 'id, user_id, vendor_id, image_url, function_tag' },
     { name: 'couple_events', columns: 'id, couple_id, event_type, event_name, event_date' },
     { name: 'vendors', columns: 'id, name, category, city, subscription_active' },
       { name: 'notifications', columns: 'id, user_id, type, read' },
