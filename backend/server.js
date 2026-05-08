@@ -4522,10 +4522,36 @@ app.post('/api/v2/invite/validate', async (req, res) => {
   }
 });
 
-// POST /api/v2/couple/auth/send-otp — alias
+// POST /api/v2/couple/auth/send-otp — direct implementation (no redirect)
 app.post('/api/v2/couple/auth/send-otp', async (req, res) => {
-  req.url = '/api/auth/send-otp';
-  return res.redirect(307, '/api/auth/send-otp');
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, error: 'Phone number required' });
+    const bare = ('' + phone).replace(/\D/g, '').slice(-10);
+    const fullPhone = '+91' + bare;
+    if (twilioClient && TWILIO_VERIFY_SID) {
+      try {
+        const verification = await twilioClient.verify.v2
+          .services(TWILIO_VERIFY_SID)
+          .verifications.create({ to: fullPhone, channel: 'sms' });
+        console.log('[OTP couple] Twilio sent:', verification.status, 'to', fullPhone);
+        return res.json({ success: true, sessionInfo: 'twilio_' + bare });
+      } catch (twilioErr) {
+        console.error('[OTP couple] Twilio error:', twilioErr.code, twilioErr.message);
+        const knownErrors = {
+          60200: 'Invalid phone number format.',
+          60203: 'Too many OTP attempts. Wait 10 minutes and try again.',
+          60212: 'Too many OTP attempts on this number. Try later.',
+        };
+        const userMsg = knownErrors[twilioErr.code] || 'Could not send code. Try again.';
+        return res.status(400).json({ success: false, error: userMsg });
+      }
+    }
+    return res.status(500).json({ success: false, error: 'OTP service unavailable.' });
+  } catch (err) {
+    console.error('[OTP couple] Unhandled error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // POST /api/v2/vendor/auth/send-otp — alias
