@@ -12260,6 +12260,29 @@ const FROST_BRIDE_TOOLS = [
       required: ['image_url'],
     },
   },
+
+  // ── ZIP 5: surprise_me ─────────────────────────────────────────────────────
+  {
+    name: 'surprise_me',
+    description: "Generate visual inspiration suggestions for the bride based on her existing Muse saves. Use when she says 'surprise me', 'show me ideas', 'give me reception inspiration', 'something like what I saved last week', or any open-ended request for visual ideas. Returns a curated mix of images from Pinterest, the web, and TDW's vendor portfolios — she can save any to her Muse with one tap. NOT for searching specific known vendors (use search_tdw_vendors) or saving a specific URL she pasted (use save_to_muse).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        function_tag: {
+          type: 'string',
+          description: "Optional ceremony focus — 'haldi', 'mehendi', 'reception', 'sangeet', 'wedding'. If she says 'reception ideas' use 'reception'. If unspecified, omit.",
+        },
+        style_hint: {
+          type: 'string',
+          description: "Optional free-text hint from her message — e.g. 'something traditional', 'red and gold', 'minimalist', 'with marigolds'. Pass her exact words.",
+        },
+        count: {
+          type: 'number',
+          description: "How many suggestions to return. Default 6, max 12.",
+        },
+      },
+    },
+  },
 ];
 
 // ── Bride tool executor — composite + atomic ───────────────────────────────
@@ -12794,6 +12817,39 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         };
       }
 
+      // ── ZIP 5: surprise_me ──
+      case 'surprise_me': {
+        const { function_tag = null, style_hint = null, count = 6 } = toolInput || {};
+        const cap = Math.min(Math.max(count, 1), 12);
+        try {
+          const result = await generateSurpriseSuggestions({
+            coupleId,
+            functionTag: function_tag,
+            styleHint: style_hint,
+            count: cap,
+          });
+          return {
+            ok: true,
+            kind: 'composite',
+            reply: result.suggestions.length > 0
+              ? `✨ Found ${result.suggestions.length} ideas for you.`
+              : "I couldn't find anything good this time. Want me to try a different angle?",
+            confirmPreview: null,
+            summaryLines: [
+              result.tasteSummary || 'Based on what you\'ve saved',
+              `${result.suggestions.length} suggestions`,
+              `Sources: ${result.sourceCounts.pinterest || 0} Pinterest, ${result.sourceCounts.web || 0} web, ${result.sourceCounts.vendor || 0} vendors`,
+            ],
+            followupPrompts: [],
+            suggestions: result.suggestions,
+            tasteSummary: result.tasteSummary,
+          };
+        } catch (err) {
+          console.error('[surprise_me]', err.message);
+          return { ok: false, kind: 'error', reply: 'Something went sideways finding ideas. Try again in a moment?' };
+        }
+      }
+
       case 'general_reply':
         return { ok: true, kind: 'reply', reply: toolInput.reply };
 
@@ -13314,6 +13370,333 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
 
     return res.status(404).json({ success: false, error: 'action not found or expired' });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ZIP 5: SURPRISE ME — taste profile + multi-source suggestion generator
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Deterministic hash for suggestion_id (so duplicate URLs collapse)
+function suggestionIdFor(imageUrl) {
+  let h = 0;
+  for (let i = 0; i < imageUrl.length; i++) {
+    h = ((h << 5) - h) + imageUrl.charCodeAt(i);
+    h |= 0;
+  }
+  return 'sg_' + Math.abs(h).toString(36);
+}
+
+// Build a taste profile from the bride's existing Muse saves.
+// Uses Haiku Vision over up to 5 of her image_url saves to extract
+// style descriptors. Falls back to function_tag defaults if she has <3 saves.
+async function buildTasteProfile(coupleId, functionTagFilter) {
+  const { data: saves } = await supabase.from('moodboard_items')
+    .select('image_url, function_tag, note')
+    .eq('user_id', coupleId)
+    .not('image_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(8);
+
+  const goodSaves = (saves || []).filter(s => {
+    if (!s.image_url) return false;
+    if (!/^https?:\/\//.test(s.image_url)) return false;
+    if (functionTagFilter && s.function_tag && s.function_tag !== functionTagFilter) {
+      return false;
+    }
+    return true;
+  }).slice(0, 5);
+
+  // Default fallback profile keyed by ceremony
+  const defaults = {
+    haldi:    { descriptors: ['marigold yellow', 'sunlit', 'open courtyard', 'florals'], colors: ['yellow', 'white', 'green'] },
+    mehendi:  { descriptors: ['intricate henna', 'green and pink', 'lounge seating'], colors: ['green', 'pink', 'gold'] },
+    sangeet:  { descriptors: ['bold colour', 'dance floor', 'fairy lights', 'glam'], colors: ['fuchsia', 'gold', 'navy'] },
+    reception:{ descriptors: ['champagne', 'modern elegant', 'tablescape', 'rose'], colors: ['rose', 'champagne', 'cream'] },
+    wedding:  { descriptors: ['traditional Indian wedding', 'sabyasachi', 'red and gold', 'mandap'], colors: ['red', 'gold', 'cream'] },
+    general:  { descriptors: ['Indian wedding inspiration', 'traditional', 'elegant'], colors: ['red', 'gold', 'cream'] },
+  };
+
+  if (goodSaves.length < 3) {
+    const fallback = defaults[functionTagFilter || 'general'] || defaults.general;
+    return {
+      descriptors: fallback.descriptors,
+      colors: fallback.colors,
+      ceremony: functionTagFilter || 'general',
+      summary: 'Starting from a few popular ideas for you',
+      sourceCount: goodSaves.length,
+    };
+  }
+
+  // Run Haiku Vision over up to 5 saves to extract style descriptors
+  try {
+    const visionContent = [];
+    for (const sv of goodSaves) {
+      visionContent.push({ type: 'image', source: { type: 'url', url: sv.image_url } });
+    }
+    visionContent.push({
+      type: 'text',
+      text: `These are a bride's saved inspiration images for her wedding${functionTagFilter ? ' (focus: ' + functionTagFilter + ')' : ''}. Extract her style. Return strictly JSON: {"descriptors":["3-5 short style words"],"colors":["3 dominant colours"],"ceremony":"haldi|mehendi|sangeet|reception|wedding|general","summary":"one sentence describing her taste"}. No markdown.`,
+    });
+    const visionMsg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 250,
+      messages: [{ role: 'user', content: visionContent }],
+    });
+    const raw = (visionMsg.content[0]?.text || '{}').replace(/\`\`\`json|\`\`\`/g, '').trim();
+    const parsed = JSON.parse(raw);
+    return {
+      descriptors: Array.isArray(parsed.descriptors) ? parsed.descriptors : [],
+      colors: Array.isArray(parsed.colors) ? parsed.colors : [],
+      ceremony: parsed.ceremony || functionTagFilter || 'general',
+      summary: parsed.summary || 'Based on what you\'ve saved',
+      sourceCount: goodSaves.length,
+    };
+  } catch (err) {
+    console.error('[buildTasteProfile vision]', err.message);
+    const fallback = defaults[functionTagFilter || 'general'] || defaults.general;
+    return {
+      descriptors: fallback.descriptors,
+      colors: fallback.colors,
+      ceremony: functionTagFilter || 'general',
+      summary: 'Based on what you\'ve saved',
+      sourceCount: goodSaves.length,
+    };
+  }
+}
+
+// Build a search query string from a taste profile + style hint
+function buildSearchQuery(profile, styleHint) {
+  const parts = [];
+  if (profile.ceremony && profile.ceremony !== 'general') parts.push(profile.ceremony);
+  parts.push('Indian wedding');
+  if (profile.descriptors && profile.descriptors.length > 0) {
+    parts.push(profile.descriptors.slice(0, 3).join(' '));
+  }
+  if (profile.colors && profile.colors.length > 0) {
+    parts.push(profile.colors.slice(0, 2).join(' '));
+  }
+  if (styleHint) parts.push(styleHint);
+  return parts.join(' ').slice(0, 200);
+}
+
+// SOURCE 1: Pinterest scrape — parse public search page HTML for og:image / inline JSON
+async function fetchPinterestSuggestions(query, limit) {
+  try {
+    const url = 'https://www.pinterest.com/search/pins/?q=' + encodeURIComponent(query);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    // Pinterest embeds image URLs in inline JSON. Most reliably appear as
+    // "image_signature":"...","images":{"orig":{"url":"https://i.pinimg.com/originals/..."} ...}
+    // Simpler & more robust: capture all i.pinimg.com URLs (the CDN), filter unique.
+    const pinPattern = /https:\/\/i\.pinimg\.com\/(?:originals|736x|564x)\/[a-zA-Z0-9\/_.\-]+\.(?:jpg|jpeg|png|webp)/g;
+    const matches = html.match(pinPattern) || [];
+    const seen = new Set();
+    const unique = [];
+    for (const u of matches) {
+      // Prefer larger sizes — replace 236x/474x with 736x where present
+      const promoted = u.replace(/\/(?:236x|474x)\//, '/736x/');
+      if (seen.has(promoted)) continue;
+      seen.add(promoted);
+      unique.push(promoted);
+      if (unique.length >= limit) break;
+    }
+    return unique.map(u => ({
+      image_url: u,
+      source: 'pinterest',
+      suggestion_id: suggestionIdFor(u),
+      source_url: 'https://www.pinterest.com/search/pins/?q=' + encodeURIComponent(query),
+      caption: null,
+    }));
+  } catch (err) {
+    console.error('[surprise_me pinterest]', err.message);
+    return [];
+  }
+}
+
+// SOURCE 2: Anthropic web_search → Haiku extracts image URLs from results
+async function fetchWebSuggestions(query, limit) {
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{
+        role: 'user',
+        content: 'Search the web for "' + query + '". From the results, extract up to ' + limit + ' direct image URLs (jpg/png/webp) that show ' + query + '. Return strictly JSON: {"images":[{"url":"...","caption":"short label"}]}. No markdown, no commentary.',
+      }],
+    });
+
+    // Haiku may return text after using web_search tool. Get the final text content.
+    let textOut = '';
+    for (const block of (msg.content || [])) {
+      if (block.type === 'text') textOut += block.text;
+    }
+    if (!textOut) return [];
+    const cleaned = textOut.replace(/\`\`\`json|\`\`\`/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(cleaned); } catch { return []; }
+    if (!parsed.images || !Array.isArray(parsed.images)) return [];
+
+    return parsed.images
+      .filter(img => img && img.url && /^https:\/\/.+\.(?:jpg|jpeg|png|webp)/i.test(img.url))
+      .slice(0, limit)
+      .map(img => ({
+        image_url: img.url,
+        source: 'web',
+        suggestion_id: suggestionIdFor(img.url),
+        caption: img.caption || null,
+        source_url: img.url,
+      }));
+  } catch (err) {
+    console.error('[surprise_me web]', err.message);
+    return [];
+  }
+}
+
+// SOURCE 3: TDW vendors table — match by function_tag (in their package list) and vibe_tags
+async function fetchVendorSuggestions(profile, limit) {
+  try {
+    let query = supabase.from('vendors')
+      .select('id, name, category, city, featured_photos, portfolio_images, vibe_tags')
+      .eq('subscription_active', true)
+      .eq('discover_listed', true);
+
+    // If profile has a ceremony, prioritize vendors whose vibe_tags include matches
+    const profileTokens = [
+      ...(profile.descriptors || []),
+      ...(profile.colors || []),
+      profile.ceremony,
+    ].filter(Boolean).map(t => t.toLowerCase());
+
+    const { data: vendors } = await query.limit(50);
+    if (!vendors || vendors.length === 0) return [];
+
+    // Score each vendor by vibe_tags overlap
+    const scored = vendors.map(v => {
+      const vtags = (v.vibe_tags || []).map(t => String(t).toLowerCase());
+      let score = 0;
+      for (const t of profileTokens) {
+        if (vtags.some(vt => vt.includes(t) || t.includes(vt))) score += 1;
+      }
+      return { vendor: v, score };
+    }).filter(s => s.score > 0 || profileTokens.length === 0);
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const out = [];
+    for (const { vendor: v } of scored) {
+      const imgs = [...(v.featured_photos || []), ...(v.portfolio_images || [])].filter(Boolean);
+      if (imgs.length === 0) continue;
+      // Take up to 1 image per vendor to keep variety
+      const url = imgs[0];
+      out.push({
+        image_url: url,
+        source: 'vendor',
+        suggestion_id: suggestionIdFor(url),
+        vendor_id: v.id,
+        caption: v.name + (v.category ? ' · ' + v.category : ''),
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch (err) {
+    console.error('[surprise_me vendors]', err.message);
+    return [];
+  }
+}
+
+// SOURCE 4: COMMERCE — reserved slot. Returns [] today.
+// Future ZIPs will add: Pinterest official API (after dev account setup),
+// Instagram hashtag search (after Meta Business approval), and commerce site
+// integrations (Aza, Pernia's, Ogaan, etc. via partnerships).
+async function fetchCommerceSuggestions(_profile, _limit) {
+  return [];
+}
+
+// MAIN: blend the four sources into a single suggestions list
+async function generateSurpriseSuggestions({ coupleId, functionTag, styleHint, count = 6 }) {
+  const profile = await buildTasteProfile(coupleId, functionTag);
+  const query = buildSearchQuery(profile, styleHint);
+
+  // Fetch in parallel. Each source has its own quota.
+  // Mix is roughly 50% Pinterest, 25% web, 25% vendor — Pinterest fills the
+  // grid most reliably for visual density.
+  const pinterestQuota = Math.max(2, Math.ceil(count * 0.5));
+  const webQuota       = Math.max(1, Math.ceil(count * 0.25));
+  const vendorQuota    = Math.max(1, Math.ceil(count * 0.25));
+
+  const [pinterest, web, vendor, commerce] = await Promise.all([
+    fetchPinterestSuggestions(query, pinterestQuota + 2),
+    fetchWebSuggestions(query, webQuota + 2),
+    fetchVendorSuggestions(profile, vendorQuota + 1),
+    fetchCommerceSuggestions(profile, 0),
+  ]);
+
+  // Dedupe by suggestion_id, then merge in interleaved order so the bride
+  // sees a variety of sources rather than all-Pinterest then all-web.
+  const seen = new Set();
+  const merged = [];
+  const buckets = [pinterest, web, vendor, commerce];
+  let idx = 0;
+  while (merged.length < count && buckets.some(b => b.length > 0)) {
+    const bucket = buckets[idx % buckets.length];
+    if (bucket.length > 0) {
+      const next = bucket.shift();
+      if (!seen.has(next.suggestion_id)) {
+        seen.add(next.suggestion_id);
+        merged.push(next);
+      }
+    }
+    idx += 1;
+    if (idx > count * 8) break; // safety
+  }
+
+  return {
+    suggestions: merged.slice(0, count),
+    tasteSummary: profile.summary,
+    profile,
+    query,
+    sourceCounts: {
+      pinterest: merged.filter(m => m.source === 'pinterest').length,
+      web: merged.filter(m => m.source === 'web').length,
+      vendor: merged.filter(m => m.source === 'vendor').length,
+      commerce: merged.filter(m => m.source === 'commerce').length,
+    },
+  };
+}
+
+// POST /api/v2/frost/surprise-me
+// Same engine the surprise_me tool uses. Triggered by the Surprise Me button
+// on the Frost Muse canvas (ZIP 6 frontend).
+app.post('/api/v2/frost/surprise-me', async (req, res) => {
+  try {
+    const { userId, function_tag, style_hint, count = 6 } = req.body || {};
+    if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
+    const cap = Math.min(Math.max(count, 1), 12);
+    const result = await generateSurpriseSuggestions({
+      coupleId: userId,
+      functionTag: function_tag,
+      styleHint: style_hint,
+      count: cap,
+    });
+    res.json({
+      success: true,
+      suggestions: result.suggestions,
+      tasteSummary: result.tasteSummary,
+      sourceCounts: result.sourceCounts,
+      query: result.query,
+    });
+  } catch (error) {
+    console.error('[POST /api/v2/frost/surprise-me]', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
