@@ -15550,6 +15550,141 @@ app.delete('/api/v2/admin/exploring-photos/:id', async (req, res) => {
 });
 
 // ── GET /api/v2/exploring-photos — public, used by native app Just Exploring
+
+// ─── Discover Heroes ─────────────────────────────────────────────────────────
+// Admin-managed carousel (up to 5 active slots) for the Frost Discover canvas.
+// Schema: discover_heroes (id, image_url, caption, category_tag, cta_url,
+//          sort_order, visible_from, visible_to, is_active, created_at)
+
+// GET /api/v2/discover-heroes — public, unauthenticated (read by Frost native)
+app.get('/api/v2/discover-heroes', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('discover_heroes')
+      .select('id, image_url, caption, category_tag, cta_url, sort_order')
+      .eq('is_active', true)
+      .or(`visible_from.is.null,visible_from.lte.${now}`)
+      .or(`visible_to.is.null,visible_to.gte.${now}`)
+      .order('sort_order', { ascending: true })
+      .limit(5);
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('[discover-heroes GET]', err.message);
+    res.status(500).json({ success: false, data: [], error: err.message });
+  }
+});
+
+// GET /api/v2/admin/discover-heroes — admin read (all rows, includes inactive)
+app.get('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('discover_heroes')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('[admin/discover-heroes GET]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/admin/discover-heroes — create hero
+app.post('/api/v2/admin/discover-heroes', requireAdmin, async (req, res) => {
+  try {
+    const { image_url, caption, category_tag, cta_url,
+            sort_order, visible_from, visible_to, is_active } = req.body;
+    if (!image_url) return res.status(400).json({ success: false, error: 'image_url required' });
+    const { data, error } = await supabase
+      .from('discover_heroes')
+      .insert({
+        image_url,
+        caption:      caption      || null,
+        category_tag: category_tag || null,
+        cta_url:      cta_url      || null,
+        sort_order:   sort_order   || 1,
+        visible_from: visible_from || null,
+        visible_to:   visible_to   || null,
+        is_active:    is_active !== false,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[admin/discover-heroes POST]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/v2/admin/discover-heroes/:id — update (caption, sort_order, active, url, etc.)
+app.put('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowed = ['image_url', 'caption', 'category_tag', 'cta_url',
+                     'sort_order', 'visible_from', 'visible_to', 'is_active'];
+    const updates = {};
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) updates[k] = req.body[k];
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid fields to update' });
+    }
+    const { data, error } = await supabase
+      .from('discover_heroes')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[admin/discover-heroes PUT]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v2/admin/discover-heroes/:id
+app.delete('/api/v2/admin/discover-heroes/:id', requireAdmin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('discover_heroes')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[admin/discover-heroes DELETE]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v2/admin/discover-heroes/upload — multipart upload → cover-photos bucket
+// Uses the same multer + Supabase Storage pattern as cover-photos upload.
+// File goes to cover-photos/heroes/ subfolder (no new bucket needed).
+app.post('/api/v2/admin/discover-heroes/upload', requireAdmin, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file received' });
+    const ext = (req.file.originalname || 'photo.jpg').split('.').pop() || 'jpg';
+    const fileName = `heroes/hero_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from('cover-photos')
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype || 'image/jpeg',
+        cacheControl: '31536000',
+        upsert: false,
+      });
+    if (uploadError) throw uploadError;
+    const { data: pub } = supabase.storage.from('cover-photos').getPublicUrl(fileName);
+    res.json({ success: true, url: pub.publicUrl });
+  } catch (err) {
+    console.error('[admin/discover-heroes upload]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/v2/exploring-photos', async (req, res) => {
   try {
     const { data, error } = await supabase.from('exploring_photos')
