@@ -15664,7 +15664,7 @@ app.delete('/api/v2/admin/discover-heroes/:id', checkAdminAuth, async (req, res)
 // POST /api/v2/admin/discover-heroes/upload — multipart upload → cover-photos bucket
 // Uses the same multer + Supabase Storage pattern as cover-photos upload.
 // File goes to cover-photos/heroes/ subfolder (no new bucket needed).
-app.post('/api/v2/admin/discover-heroes/upload', checkAdminAuth, upload.single('file'), async (req, res) => {
+app.post('/api/v2/admin/discover-heroes/upload', checkAdminAuth, uploadMemory.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No file received' });
     const ext = (req.file.originalname || 'photo.jpg').split('.').pop() || 'jpg';
