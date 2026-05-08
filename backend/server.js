@@ -10471,7 +10471,7 @@ app.get('/api/v2/couple/today/:userId', async (req, res) => {
     let muse_saves = [];
     if (userId && userId !== 'demo') {
       const { data: saves } = await supabase
-        .from('couple_muse')
+        .from('moodboard_items')
         .select('id, image_url, source_url, function_tag, created_at')
         .eq('couple_id', userId)
         .order('created_at', { ascending: false })
@@ -11935,7 +11935,7 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
 
       case 'save_to_muse': {
         const { source_url, title = null, function_tag = null } = toolInput;
-        const { error } = await supabase.from('couple_muse').insert([{
+        const { error } = await supabase.from('moodboard_items').insert([{
           couple_id: coupleId, source_url, title, function_tag,
           created_at: new Date().toISOString(),
         }]);
@@ -11959,7 +11959,7 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
 
       case 'get_muse_saves': {
         const limit = toolInput.limit || 10;
-        const { data, error } = await supabase.from('couple_muse')
+        const { data, error } = await supabase.from('moodboard_items')
           .select('id, image_url, source_url, vendor_id, function_tag, created_at')
           .eq('couple_id', coupleId)
           .order('created_at', { ascending: false })
@@ -12160,6 +12160,84 @@ const FROST_BRIDE_TOOLS = [
       required: ['reply'],
     },
   },
+
+  // ── ZIP 3 additions ──────────────────────────────────────────────────────
+  {
+    name: 'query_my_vendors',
+    description: "Answers questions about the bride's own vendors (booked, in-talks, considering, paid). Use when she asks 'who have I booked', 'what's my vendor list', 'is X confirmed'. NOT for searching public TDW catalog — use search_tdw_vendors for that.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        status_filter: { type: 'string', enum: ['booked', 'in-talks', 'considering', 'paid', 'rejected', 'all'], description: "Default 'all'." },
+        category_filter: { type: 'string', description: "'mua', 'photography', 'decor' etc. Optional." },
+      },
+    },
+  },
+
+  {
+    name: 'query_my_expenses',
+    description: "Answers questions about the bride's spending. Use when she asks 'how much have I paid X', 'total spent so far', 'balance with X'.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string', description: "Filter by vendor (ilike). Optional." },
+        payment_status: { type: 'string', enum: ['paid', 'pending', 'all'], description: "Default 'all'." },
+      },
+    },
+  },
+
+  {
+    name: 'log_payment',
+    description: "Log a partial or additional payment. 'Paid Swati 50k more', 'Sent another 25k to the photographer'. NOT for booking advance (book_vendor) or final balance (settle_balance).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string' },
+        amount: { type: 'number', description: "INR." },
+        note: { type: 'string', description: "Optional context." },
+      },
+      required: ['vendor_name', 'amount'],
+    },
+  },
+
+  {
+    name: 'settle_balance',
+    description: "Mark a vendor's balance fully paid. 'Paid the rest to House of Blooms', 'Cleared Swati's balance'. Closes pending balance, marks vendor paid, removes auto-balance reminder.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string' },
+        amount_override: { type: 'number', description: "Optional. Use only if she paid a different amount than the recorded balance." },
+      },
+      required: ['vendor_name'],
+    },
+  },
+
+  {
+    name: 'broadcast_to_circle',
+    description: "Send an update to the bride's Circle. 'Tell my family X', 'Let everyone know Y'. ALWAYS returns confirmPreview — bride must confirm (irreversible).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: "Under 240 chars." },
+        topic: { type: 'string', description: "Optional short tag like 'Vendor booked'." },
+      },
+      required: ['message'],
+    },
+  },
+
+  {
+    name: 'ocr_receipt',
+    description: "Process a receipt image. Returns extracted vendor + amount + date — bride confirms before expense row is created. Only when she sends an image and says 'log this' or 'file this receipt'. Always returns confirmPreview.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        image_url: { type: 'string', description: "Cloudinary URL." },
+        suggested_vendor: { type: 'string', description: "If she mentioned a vendor in her message, pass as hint." },
+      },
+      required: ['image_url'],
+    },
+  },
 ];
 
 // ── Bride tool executor — composite + atomic ───────────────────────────────
@@ -12238,7 +12316,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
 
         // 3. Update vendor: status=booked, quoted_total, balance_due_date
-        const updateData = { status: 'booked', quoted_total: total_price };
+        const updateData = { status: 'booked', quoted_total: total_price, source: 'dreamai', last_dreamai_action: new Date().toISOString() };
         if (balanceDueDate) updateData.balance_due_date = balanceDueDate;
         const { error: updateErr } = await supabase
           .from('couple_vendors')
@@ -12389,6 +12467,272 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           kind: 'atomic',
           reply: `A few you could look at:\n${names}`,
           searchResults: list,
+        };
+      }
+
+      // ── ZIP 3: query_my_vendors ──
+      case 'query_my_vendors': {
+        const { status_filter = 'all', category_filter } = toolInput || {};
+        let q = supabase.from('couple_vendors')
+          .select('id, name, category, status, quoted_total, balance_due_date, events')
+          .eq('couple_id', coupleId);
+        if (status_filter === 'in-talks') q = q.in('status', ['considering', 'in_discussion', 'shortlisted']);
+        else if (status_filter !== 'all') q = q.eq('status', status_filter);
+        if (category_filter) q = q.ilike('category', category_filter);
+        const { data, error } = await q.order('updated_at', { ascending: false });
+        if (error) throw error;
+        const list = (data || []).map(v => ({
+          name: v.name, category: v.category, status: v.status,
+          quoted_total: v.quoted_total, balance_due_date: v.balance_due_date,
+        }));
+        return {
+          ok: true,
+          kind: 'reply',
+          reply: list.length === 0 ? "You haven't added anyone yet." : `${list.length} vendor${list.length === 1 ? '' : 's'} match.`,
+          vendors: list,
+        };
+      }
+
+      // ── ZIP 3: query_my_expenses ──
+      case 'query_my_expenses': {
+        const { vendor_name, payment_status = 'all' } = toolInput || {};
+        let q = supabase.from('couple_expenses')
+          .select('id, vendor_name, description, planned_amount, actual_amount, payment_status, due_date, category')
+          .eq('couple_id', coupleId);
+        if (vendor_name) q = q.ilike('vendor_name', `%${vendor_name}%`);
+        if (payment_status !== 'all') q = q.eq('payment_status', payment_status);
+        const { data, error } = await q.order('created_at', { ascending: false });
+        if (error) throw error;
+        const rows = data || [];
+        const totalPaid = rows.filter(r => r.payment_status === 'paid')
+          .reduce((sum, r) => sum + (r.actual_amount || 0), 0);
+        const totalPending = rows.filter(r => r.payment_status === 'pending')
+          .reduce((sum, r) => sum + (r.planned_amount || 0), 0);
+        return {
+          ok: true,
+          kind: 'reply',
+          reply: vendor_name
+            ? `${formatINR(totalPaid)} paid to ${vendor_name}, ${formatINR(totalPending)} pending.`
+            : `${formatINR(totalPaid)} paid so far. ${formatINR(totalPending)} still pending.`,
+          total_paid: totalPaid,
+          total_pending: totalPending,
+          total_committed: totalPaid + totalPending,
+          expenses: rows.map(r => ({
+            vendor_name: r.vendor_name,
+            description: r.description,
+            amount: r.payment_status === 'paid' ? r.actual_amount : r.planned_amount,
+            status: r.payment_status,
+            due_date: r.due_date,
+          })),
+        };
+      }
+
+      // ── ZIP 3: log_payment ──
+      case 'log_payment': {
+        const { vendor_name, amount, note } = toolInput || {};
+        if (!vendor_name || !amount) {
+          return { ok: false, kind: 'unknown', reply: "I'll need a vendor name and an amount." };
+        }
+        const { data: matches } = await supabase.from('couple_expenses')
+          .select('id, vendor_name, description, planned_amount, actual_amount, payment_status, notes')
+          .eq('couple_id', coupleId)
+          .ilike('vendor_name', `%${vendor_name}%`)
+          .eq('payment_status', 'pending');
+        if (!matches || matches.length === 0) {
+          return {
+            ok: false,
+            kind: 'unknown',
+            reply: `I couldn't find a pending balance for ${vendor_name}. Want me to log this as a new expense?`,
+          };
+        }
+        const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
+        if (distinctNames.length > 1) {
+          return {
+            ok: false,
+            kind: 'clarify',
+            reply: `I see a few different vendors matching "${vendor_name}". Which one did you pay?`,
+            candidates: distinctNames,
+          };
+        }
+        const target = matches[0];
+        const newActual = (target.actual_amount || 0) + amount;
+        const newStatus = newActual >= (target.planned_amount || 0) ? 'paid' : 'pending';
+        const mergedNotes = note
+          ? (target.notes ? target.notes + ' | ' + note : note)
+          : target.notes;
+        const { error: updateErr } = await supabase.from('couple_expenses').update({
+          actual_amount: newActual,
+          payment_status: newStatus,
+          notes: mergedNotes,
+          updated_at: new Date().toISOString(),
+        }).eq('id', target.id);
+        if (updateErr) throw updateErr;
+        const remaining = Math.max(0, (target.planned_amount || 0) - newActual);
+        const summaryLines = [
+          `Payment of ${formatINR(amount)} recorded`,
+          `Total paid: ${formatINR(newActual)} of ${formatINR(target.planned_amount || 0)}`,
+          remaining > 0 ? `Balance remaining: ${formatINR(remaining)}` : 'Fully settled',
+        ];
+        const followups = remaining > 0 ? [{
+          id: 'log_payment_remind_me',
+          text: `Want me to remind you when the next payment is due?`,
+          yesLabel: 'Yes, set reminder',
+          noLabel: 'Not now',
+        }] : [];
+        return {
+          ok: true,
+          kind: 'composite',
+          reply: `✓ ${formatINR(amount)} logged for ${target.vendor_name}.`,
+          confirmPreview: null,
+          summaryLines,
+          followupPrompts: followups,
+        };
+      }
+
+      // ── ZIP 3: settle_balance ──
+      case 'settle_balance': {
+        const { vendor_name, amount_override } = toolInput || {};
+        if (!vendor_name) {
+          return { ok: false, kind: 'unknown', reply: "Which vendor did you settle?" };
+        }
+        const { data: matches } = await supabase.from('couple_expenses')
+          .select('id, vendor_name, description, planned_amount, actual_amount, payment_status')
+          .eq('couple_id', coupleId)
+          .ilike('vendor_name', `%${vendor_name}%`)
+          .eq('payment_status', 'pending')
+          .order('created_at', { ascending: false });
+        if (!matches || matches.length === 0) {
+          return {
+            ok: false,
+            kind: 'unknown',
+            reply: `I couldn't find a pending balance for ${vendor_name}. Maybe it's already settled?`,
+          };
+        }
+        const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
+        if (distinctNames.length > 1) {
+          return { ok: false, kind: 'clarify', reply: `Which one did you settle?`, candidates: distinctNames };
+        }
+        const target = matches[0];
+        const settleAmount = amount_override != null ? amount_override : (target.planned_amount || 0);
+        const { error: expErr } = await supabase.from('couple_expenses').update({
+          actual_amount: settleAmount,
+          payment_status: 'paid',
+          updated_at: new Date().toISOString(),
+        }).eq('id', target.id);
+        if (expErr) throw expErr;
+        await supabase.from('couple_vendors').update({
+          status: 'paid',
+          source: 'dreamai',
+          last_dreamai_action: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('couple_id', coupleId).ilike('name', `%${vendor_name}%`);
+        await supabase.from('couple_checklist').delete()
+          .eq('couple_id', coupleId)
+          .eq('is_custom', true)
+          .ilike('text', `%balance%${vendor_name}%`);
+        return {
+          ok: true,
+          kind: 'composite',
+          reply: `✓ ${target.vendor_name} fully settled.`,
+          confirmPreview: null,
+          summaryLines: [
+            `Final payment of ${formatINR(settleAmount)} recorded`,
+            `Vendor marked as paid`,
+            `Balance reminder cleared`,
+          ],
+          followupPrompts: [{
+            id: 'settle_thank_you',
+            text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
+            yesLabel: 'Yes, draft it',
+            noLabel: 'Not now',
+          }],
+        };
+      }
+
+      // ── ZIP 3: broadcast_to_circle (confirm-required) ──
+      case 'broadcast_to_circle': {
+        const { message, topic } = toolInput || {};
+        if (!message) {
+          return { ok: false, kind: 'unknown', reply: "What would you like to tell them?" };
+        }
+        const { data: members } = await supabase.from('co_planners')
+          .select('id, name, co_planner_user_id, status')
+          .eq('primary_user_id', coupleId)
+          .eq('status', 'active');
+        const activeWithUsers = (members || []).filter(m => m.co_planner_user_id);
+        if (activeWithUsers.length === 0) {
+          return {
+            ok: false,
+            kind: 'unknown',
+            reply: `You don't have anyone in your Circle yet. Want me to help you invite someone?`,
+          };
+        }
+        const action_id = 'broadcast_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        pendingBroadcasts.set(action_id, { coupleId, message, topic, members: activeWithUsers });
+        setTimeout(() => pendingBroadcasts.delete(action_id), 10 * 60 * 1000);
+        return {
+          ok: true,
+          kind: 'confirm-required',
+          reply: 'Want me to send this to your Circle?',
+          confirmPreview: {
+            summaryTitle: 'Send to your Circle?',
+            summaryLines: [
+              `Message: "${message}"`,
+              `${activeWithUsers.length} ${activeWithUsers.length === 1 ? 'person' : 'people'} will see this`,
+              topic ? `Topic: ${topic}` : 'Topic: General',
+            ],
+            confirmLabel: 'Send',
+            cancelLabel: 'Not yet',
+            action_id,
+          },
+        };
+      }
+
+      // ── ZIP 3: ocr_receipt (confirm-required) ──
+      case 'ocr_receipt': {
+        const { image_url, suggested_vendor } = toolInput || {};
+        if (!image_url) {
+          return { ok: false, kind: 'unknown', reply: "I'll need an image to read." };
+        }
+        let ocrResult = {};
+        try {
+          const visionMsg = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 400,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'url', url: image_url } },
+                { type: 'text', text: 'Extract from this receipt. Return strictly JSON: {"vendor_name":"...","amount":0,"date":"YYYY-MM-DD"}. If a field is unclear, use null.' },
+              ],
+            }],
+          });
+          const visionText = visionMsg.content[0]?.text || '{}';
+          const cleanJson = visionText.replace(/```json|```/g, '').trim();
+          ocrResult = JSON.parse(cleanJson);
+        } catch (err) {
+          return { ok: false, kind: 'error', reply: 'I had trouble reading that receipt. Could you try a clearer photo?' };
+        }
+        const extractedVendor = suggested_vendor || ocrResult.vendor_name || 'Unknown';
+        const action_id = 'ocr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        pendingReceipts.set(action_id, { coupleId, image_url, ocr: ocrResult, suggested_vendor });
+        setTimeout(() => pendingReceipts.delete(action_id), 10 * 60 * 1000);
+        return {
+          ok: true,
+          kind: 'confirm-required',
+          reply: 'File this receipt?',
+          confirmPreview: {
+            summaryTitle: 'File this receipt?',
+            summaryLines: [
+              `Vendor: ${extractedVendor}`,
+              `Amount: ${ocrResult.amount ? formatINR(ocrResult.amount) : 'unclear'}`,
+              ocrResult.date ? `Date: ${ocrResult.date}` : 'Date: today',
+              `Will be filed under ${extractedVendor}`,
+            ],
+            confirmLabel: 'File it',
+            cancelLabel: 'Cancel',
+            action_id,
+          },
         };
       }
 
@@ -12730,6 +13074,101 @@ One line should reference her actual context. The other can be more poetic/obser
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ZIP 3: HELPERS + bride-confirm endpoint
+// ─────────────────────────────────────────────────────────────────────────────
+
+const pendingBroadcasts = new Map();
+const pendingReceipts = new Map();
+
+function formatINR(amount) {
+  if (amount == null || isNaN(amount)) return '₹0';
+  const n = Math.round(Number(amount));
+  const abs = Math.abs(n);
+  const str = String(abs);
+  let out;
+  if (str.length <= 3) {
+    out = str;
+  } else {
+    const last3 = str.slice(-3);
+    const rest = str.slice(0, -3);
+    out = rest.replace(/(\d)(?=(\d{2})+$)/g, '$1,') + ',' + last3;
+  }
+  return '₹' + (n < 0 ? '-' : '') + out;
+}
+
+// POST /api/v2/dreamai/bride-confirm
+// Executes a previously-previewed action (broadcast_to_circle or ocr_receipt)
+// after the bride taps Confirm in the FrostConfirmCard.
+app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
+  try {
+    const { userId, action_id, vendor_name } = req.body || {};
+    if (!userId || !action_id) {
+      return res.status(400).json({ success: false, error: 'userId and action_id required' });
+    }
+
+    if (pendingBroadcasts.has(action_id)) {
+      const action = pendingBroadcasts.get(action_id);
+      if (action.coupleId !== userId) {
+        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+      }
+      pendingBroadcasts.delete(action_id);
+      const { message, topic, members } = action;
+      const notifs = members
+        .filter(m => m.co_planner_user_id)
+        .map(m => ({
+          user_id: m.co_planner_user_id,
+          title: topic || 'A note from the bride',
+          message,
+          type: 'circle_broadcast',
+          read: false,
+        }));
+      if (notifs.length > 0) {
+        const { error } = await supabase.from('notifications').insert(notifs);
+        if (error) return res.status(500).json({ success: false, error: error.message });
+      }
+      return res.json({
+        success: true,
+        reply: `✓ Sent to ${notifs.length} ${notifs.length === 1 ? 'person' : 'people'} in your Circle.`,
+        delivered_count: notifs.length,
+      });
+    }
+
+    if (pendingReceipts.has(action_id)) {
+      const action = pendingReceipts.get(action_id);
+      if (action.coupleId !== userId) {
+        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+      }
+      pendingReceipts.delete(action_id);
+      const { image_url, ocr, suggested_vendor } = action;
+      const finalVendor = vendor_name || suggested_vendor || ocr.vendor_name || 'Unknown';
+      const finalAmount = Number(ocr.amount) || 0;
+      const finalDate = ocr.date || new Date().toISOString().slice(0, 10);
+      const { error } = await supabase.from('couple_expenses').insert([{
+        couple_id: userId,
+        event: 'general',
+        category: null,
+        description: 'Receipt logged',
+        vendor_name: finalVendor,
+        planned_amount: finalAmount,
+        actual_amount: finalAmount,
+        payment_status: 'paid',
+        receipt_url: image_url,
+        notes: 'Logged via DreamAi OCR on ' + finalDate,
+      }]);
+      if (error) return res.status(500).json({ success: false, error: error.message });
+      return res.json({
+        success: true,
+        reply: `✓ Filed ${formatINR(finalAmount)} under ${finalVendor}.`,
+      });
+    }
+
+    return res.status(404).json({ success: false, error: 'action not found or expired' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/v2/dreamai/bride-schema-check/:userId
 // Smoke-test endpoint. Pings each table the bride engine touches with a
 // minimal SELECT. Returns which tables are accessible and which fail.
@@ -12749,9 +13188,11 @@ app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
     { name: 'couple_vendors', columns: 'id, couple_id, name, category, status, quoted_total, events, balance_due_date' },
     { name: 'couple_expenses', columns: 'id, couple_id, event, category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date' },
     { name: 'couple_checklist', columns: 'id, couple_id, event, text, is_complete, priority, due_date, is_custom' },
-    { name: 'couple_muse', columns: 'id, couple_id, source_url, title, function_tag' },
+    { name: 'moodboard_items', columns: 'id, user_id, vendor_id, vendor_name, event' },
     { name: 'couple_events', columns: 'id, couple_id, event_type, event_name, event_date' },
     { name: 'vendors', columns: 'id, name, category, city, subscription_active' },
+      { name: 'notifications', columns: 'id, user_id, type, read' },
+      { name: 'co_planners', columns: 'id, primary_user_id, status' },
   ];
 
   for (const t of tables) {
@@ -13014,7 +13455,7 @@ app.delete('/api/v2/admin/couples/:id', async (req, res) => {
   if (!checkAdminAuth(req, res)) return;
   try {
     const { id } = req.params;
-    for (const table of ['couple_tasks','couple_expenses','couple_guests','couple_vendors','couple_muse','couple_events','couple_budget','couple_budget_categories']) {
+    for (const table of ['couple_tasks','couple_expenses','couple_guests','couple_vendors','moodboard_items','couple_events','couple_budget','couple_budget_categories']) {
       await supabase.from(table).delete().eq('couple_id', id);
     }
     const { error } = await supabase.from('users').delete().eq('id', id);
@@ -13414,8 +13855,8 @@ app.get('/api/v3/admin/command-centre', async (req, res) => {
       supabase.from('vendors').select('*', { count: 'exact', head: true }).gte('created_at', yesterday).lt('created_at', today),
       supabase.from('vendor_enquiries').select('*', { count: 'exact', head: true }).gte('created_at', today),
       supabase.from('vendor_enquiries').select('*', { count: 'exact', head: true }).gte('created_at', yesterday).lt('created_at', today),
-      supabase.from('couple_muse').select('*', { count: 'exact', head: true }).gte('created_at', today),
-      supabase.from('couple_muse').select('*', { count: 'exact', head: true }).gte('created_at', yesterday).lt('created_at', today),
+      supabase.from('moodboard_items').select('*', { count: 'exact', head: true }).gte('created_at', today),
+      supabase.from('moodboard_items').select('*', { count: 'exact', head: true }).gte('created_at', yesterday).lt('created_at', today),
       supabase.from('users').select('id, name, created_at').order('created_at', { ascending: false }).limit(5),
       supabase.from('vendors').select('id, name, created_at, category').order('created_at', { ascending: false }).limit(5),
     ]);
