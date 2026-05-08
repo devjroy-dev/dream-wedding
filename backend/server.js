@@ -12125,13 +12125,14 @@ const FROST_BRIDE_TOOLS = [
   },
   {
     name: 'create_reminder',
-    description: 'Create a personal reminder for the bride. Use when she asks you to remember something for her, or after another action when a follow-up reminder is appropriate. Stored in couple_tasks.',
+    description: 'Create a personal reminder for the bride. Use when she asks you to remember something for her, or after another action when a follow-up reminder is appropriate.',
     input_schema: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: 'What to remember (will become the reminder title).' },
+        text: { type: 'string', description: 'What to remember (will be stored verbatim).' },
         due_date: { type: 'string', description: 'YYYY-MM-DD date for the reminder (optional). Use natural reasoning to pick a date if she says "two weeks before the wedding".' },
         priority: { type: 'string', description: 'low | normal | high (optional).' },
+        event: { type: 'string', description: 'Which wedding event this reminder belongs to (optional, defaults to "general"). Use the event short-name like haldi, mehendi, sangeet, wedding, reception.' },
       },
       required: ['text'],
     },
@@ -12169,19 +12170,20 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
       case 'book_vendor': {
         const { vendor_name, total_price, advance = 0, category = null } = toolInput;
 
-        // 1. Find or create the vendor row
+        // 1. Find or create the vendor row in couple_vendors
+        // Real schema: id, couple_id, name, category, status, quoted_total, events (jsonb), balance_due_date, ...
         let { data: existingVendors } = await supabase
           .from('couple_vendors')
-          .select('id, name, category, status')
+          .select('id, name, category, status, events')
           .eq('couple_id', coupleId)
           .ilike('name', '%' + vendor_name + '%');
 
-        // Multiple matches — clarify
+        // Multiple matches → ask the bride which one
         if (existingVendors && existingVendors.length > 1) {
           return {
             ok: false,
             kind: 'clarify',
-            reply: `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name + ' (' + v.category + ')').join(', ')}. Which one?`,
+            reply: `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name + ' (' + (v.category || 'unknown') + ')').join(', ')}. Which one?`,
           };
         }
 
@@ -12189,7 +12191,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         if (existingVendors && existingVendors.length === 1) {
           vendorRow = existingVendors[0];
         } else {
-          // Create — needs category
+          // Need a category to create a new vendor
           if (!category) {
             return {
               ok: false,
@@ -12200,85 +12202,123 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           const { data: newVendor, error: insertErr } = await supabase
             .from('couple_vendors')
             .insert([{
-              couple_id: coupleId, name: vendor_name, category,
-              status: 'shortlisted', created_at: new Date().toISOString(),
+              couple_id: coupleId,
+              name: vendor_name,
+              category,
+              status: 'enquired',
+              events: ['general'],
+              source: 'dreamai',
             }])
-            .select('id, name, category')
+            .select('id, name, category, events')
             .single();
           if (insertErr) throw insertErr;
           vendorRow = newVendor;
         }
 
-        // 2. Update vendor status + price
-        const updateData = { status: 'booked', quoted_price: total_price };
-        if (advance > 0) updateData.advance_paid = advance;
+        // 2. Look up wedding date from users.wedding_date (text column on users)
+        // — used both for balance_due_date and for the reminder
+        let weddingDateStr = null;
+        try {
+          const { data: userRow } = await supabase
+            .from('users')
+            .select('wedding_date')
+            .eq('id', coupleId)
+            .maybeSingle();
+          if (userRow && userRow.wedding_date) weddingDateStr = userRow.wedding_date;
+        } catch (e) { /* fall through */ }
+
+        let balanceDueDate = null;
+        if (weddingDateStr && total_price > advance) {
+          // wedding_date is text — try parsing as Date
+          const wd = new Date(weddingDateStr);
+          if (!isNaN(wd.getTime())) {
+            wd.setDate(wd.getDate() - 14);
+            balanceDueDate = wd.toISOString().slice(0, 10);
+          }
+        }
+
+        // 3. Update vendor: status=booked, quoted_total, balance_due_date
+        const updateData = { status: 'booked', quoted_total: total_price };
+        if (balanceDueDate) updateData.balance_due_date = balanceDueDate;
         const { error: updateErr } = await supabase
           .from('couple_vendors')
           .update(updateData)
           .eq('id', vendorRow.id);
         if (updateErr) throw updateErr;
 
-        // 3. Log the advance as a paid expense (if any)
+        // 4. Log advance as a paid expense (if any)
+        // Real schema: event (NOT NULL), category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date, notes
+        const eventTag = (vendorRow.events && Array.isArray(vendorRow.events) && vendorRow.events.length > 0)
+          ? vendorRow.events[0]
+          : 'general';
+
         if (advance > 0) {
           const { error: expErr } = await supabase.from('couple_expenses').insert([{
             couple_id: coupleId,
-            name: vendor_name + ' — Advance',
-            amount: advance,
-            amount_paid: advance,
+            event: eventTag,
             category: vendorRow.category || category || 'other',
-            status: 'paid',
-            notes: 'Advance paid on booking',
-            created_at: new Date().toISOString(),
+            vendor_name: vendor_name,
+            description: 'Advance payment',
+            planned_amount: advance,
+            actual_amount: advance,
+            payment_status: 'paid',
+            notes: 'Logged via DreamAi on booking',
           }]);
           if (expErr) console.error('[bride book_vendor expense]', expErr.message);
         }
 
-        // 4. Auto-create the balance reminder (Dev's locked decision)
+        // 5. Also log a planned-but-unpaid expense for the balance, so the budget reflects total commitment
         const balance = total_price - advance;
+        if (balance > 0) {
+          const { error: balExpErr } = await supabase.from('couple_expenses').insert([{
+            couple_id: coupleId,
+            event: eventTag,
+            category: vendorRow.category || category || 'other',
+            vendor_name: vendor_name,
+            description: 'Balance due',
+            planned_amount: balance,
+            actual_amount: 0,
+            payment_status: 'pending',
+            due_date: balanceDueDate,
+            notes: 'Logged via DreamAi on booking',
+          }]);
+          if (balExpErr) console.error('[bride book_vendor balance expense]', balExpErr.message);
+        }
+
+        // 6. Auto-create balance reminder in couple_checklist
+        // Real schema: id, couple_id, event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, ...
         let reminderCreated = false;
         if (balance > 0) {
-          // Try to read wedding date from couple_profile if it exists; else +60 days from today
-          let dueDate = null;
-          try {
-            const { data: profile } = await supabase
-              .from('couple_profiles')
-              .select('wedding_date')
-              .eq('couple_id', coupleId)
-              .maybeSingle();
-            if (profile && profile.wedding_date) {
-              const wd = new Date(profile.wedding_date);
-              wd.setDate(wd.getDate() - 14);
-              dueDate = wd.toISOString().slice(0, 10);
-            }
-          } catch (e) {
-            // couple_profiles may not exist — fall back
-          }
+          let dueDate = balanceDueDate;
           if (!dueDate) {
             const fallback = new Date();
             fallback.setDate(fallback.getDate() + 60);
             dueDate = fallback.toISOString().slice(0, 10);
           }
-
-          const { error: remErr } = await supabase.from('couple_tasks').insert([{
+          const { error: remErr } = await supabase.from('couple_checklist').insert([{
             couple_id: coupleId,
-            title: 'Pay balance to ' + vendor_name + ' — ₹' + balance.toLocaleString('en-IN'),
+            event: eventTag,
+            text: 'Pay balance to ' + vendor_name + ' — ₹' + balance.toLocaleString('en-IN'),
             due_date: dueDate,
-            status: 'pending',
             priority: 'high',
+            is_custom: true,
           }]);
           if (!remErr) reminderCreated = true;
           else console.error('[bride book_vendor reminder]', remErr.message);
         }
 
-        // Build the structured response — confirmPreview style for Frost UI
+        // 7. Build the structured response for Frost UI
         const summaryLines = [
           `${vendor_name} — locked in as ${vendorRow.category || category}`,
           `₹${total_price.toLocaleString('en-IN')} total`,
         ];
         if (advance > 0) summaryLines.push(`₹${advance.toLocaleString('en-IN')} advance paid today`);
-        if (reminderCreated) summaryLines.push(`Balance reminder set for two weeks before the wedding`);
+        if (reminderCreated && balanceDueDate) {
+          summaryLines.push(`Balance reminder set for ${balanceDueDate} (two weeks before the wedding)`);
+        } else if (reminderCreated) {
+          summaryLines.push(`Balance reminder set`);
+        }
 
-        // Yes/No follow-ups (max 3 per locked rule)
         const followups = [
           {
             id: 'thank_you_note',
@@ -12298,27 +12338,28 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           ok: true,
           kind: 'composite',
           reply: `✓ Done. ${vendor_name} is locked in.`,
-          confirmPreview: null,  // already executed — this is post-confirm done state
+          confirmPreview: null,
           summaryLines,
           followupPrompts: followups,
         };
       }
-
       case 'create_reminder': {
-        const { text, due_date = null, priority = 'normal' } = toolInput;
+        // Real schema: couple_checklist with event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, is_custom
+        const { text: reminderText, due_date = null, priority = 'normal', event = 'general' } = toolInput;
         const insertData = {
           couple_id: coupleId,
-          title: text,
-          status: 'pending',
+          event,
+          text: reminderText,
           priority,
+          is_custom: true,
         };
         if (due_date) insertData.due_date = due_date;
-        const { error } = await supabase.from('couple_tasks').insert([insertData]);
+        const { error } = await supabase.from('couple_checklist').insert([insertData]);
         if (error) throw error;
         return {
           ok: true,
           kind: 'atomic',
-          reply: `✦ I'll remember: ${text}${due_date ? ' · ' + due_date : ''}`,
+          reply: `✦ I'll remember: ${reminderText}${due_date ? ' · ' + due_date : ''}`,
         };
       }
 
@@ -12473,8 +12514,11 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
     // Combine bride-specific tools with existing query tools (read-only) so the
     // bride DreamAi can also answer "how much have I spent" without needing
     // separate executor logic.
+    // NOTE: 'query_tasks' is intentionally excluded — it points at couple_tasks which does not exist
+    // in the live schema. Bride DreamAi exposes reminders via couple_checklist directly through its
+    // own future read tool. For now, query_vendors and query_budget cover the active read needs.
     const READ_ONLY_COUPLE_TOOLS = TDW_COUPLE_TOOLS.filter(t =>
-      ['query_budget', 'query_tasks', 'query_vendors', 'get_muse_saves'].includes(t.name)
+      ['query_budget', 'query_vendors', 'get_muse_saves'].includes(t.name)
     );
     const tools = [...FROST_BRIDE_TOOLS, ...READ_ONLY_COUPLE_TOOLS, { type: 'web_search_20250305', name: 'web_search' }];
 
@@ -12682,6 +12726,58 @@ One line should reference her actual context. The other can be more poetic/obser
       ],
     });
   }
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v2/dreamai/bride-schema-check/:userId
+// Smoke-test endpoint. Pings each table the bride engine touches with a
+// minimal SELECT. Returns which tables are accessible and which fail.
+// Use this after ANY Supabase migration to immediately see what drifted.
+//
+// Example:
+//   curl https://...railway.app/api/v2/dreamai/bride-schema-check/97f3f358-...
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
+  const { userId } = req.params;
+  if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
+
+  const checks = {};
+  const tables = [
+    { name: 'users', columns: 'id, name, wedding_date, partner_name, couple_tier' },
+    { name: 'couple_profiles', columns: 'user_id, total_budget' },
+    { name: 'couple_vendors', columns: 'id, couple_id, name, category, status, quoted_total, events, balance_due_date' },
+    { name: 'couple_expenses', columns: 'id, couple_id, event, category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date' },
+    { name: 'couple_checklist', columns: 'id, couple_id, event, text, is_complete, priority, due_date, is_custom' },
+    { name: 'couple_muse', columns: 'id, couple_id, source_url, title, function_tag' },
+    { name: 'couple_events', columns: 'id, couple_id, event_type, event_name, event_date' },
+    { name: 'vendors', columns: 'id, name, category, city, subscription_active' },
+  ];
+
+  for (const t of tables) {
+    try {
+      const { data, error } = await supabase.from(t.name).select(t.columns).limit(1);
+      if (error) {
+        checks[t.name] = { ok: false, error: error.message };
+      } else {
+        checks[t.name] = { ok: true, sample_count: (data || []).length };
+      }
+    } catch (err) {
+      checks[t.name] = { ok: false, error: err.message };
+    }
+  }
+
+  // Also verify the demo bride exists
+  try {
+    const { data: brideRow } = await supabase
+      .from('users').select('id, name, wedding_date').eq('id', userId).maybeSingle();
+    checks.bride_record = { ok: !!brideRow, data: brideRow };
+  } catch (err) {
+    checks.bride_record = { ok: false, error: err.message };
+  }
+
+  const allOk = Object.values(checks).every(c => c.ok);
+  res.json({ success: true, allOk, checks });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
