@@ -12691,6 +12691,9 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
       }
 
       // ── ZIP 3: query_my_vendors ──
+      // BUG A FIX: build bulleted reply with vendor names, status, amounts so
+      // the bride sees who's on her team without a second exchange. Mirrors
+      // query_my_reminders pattern (bullet lines into `reply`).
       case 'query_my_vendors': {
         const { status_filter = 'all', category_filter } = toolInput || {};
         let q = supabase.from('couple_vendors')
@@ -12701,19 +12704,53 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         if (category_filter) q = q.ilike('category', category_filter);
         const { data, error } = await q.order('updated_at', { ascending: false });
         if (error) throw error;
-        const list = (data || []).map(v => ({
+        const list = data || [];
+        if (list.length === 0) {
+          return {
+            ok: true,
+            kind: 'reply',
+            reply: status_filter === 'booked'
+              ? "Nothing booked yet."
+              : "You haven't added anyone yet.",
+            vendors: [],
+            tool_anchor: { tool: 'vendors', entity_type: 'list' },
+          };
+        }
+        const statusLabel = (s) => {
+          if (s === 'booked') return 'booked';
+          if (s === 'shortlisted') return 'shortlisted';
+          if (s === 'considering') return 'in talks';
+          if (s === 'in_discussion') return 'in talks';
+          if (s === 'declined') return 'passed on';
+          return s || 'tracked';
+        };
+        const lines = list.slice(0, 10).map(v => {
+          const cat = v.category ? ` — ${v.category}` : '';
+          const st = ` · ${statusLabel(v.status)}`;
+          const amt = v.quoted_total ? ` · ${formatINR(v.quoted_total)}` : '';
+          return `• ${v.name}${cat}${st}${amt}`;
+        });
+        const more = list.length > 10 ? `\n\n…and ${list.length - 10} more.` : '';
+        const header = list.length === 1
+          ? "Here's who's on your team:"
+          : `Here are your ${list.length} vendors:`;
+        const slim = list.map(v => ({
           name: v.name, category: v.category, status: v.status,
           quoted_total: v.quoted_total, balance_due_date: v.balance_due_date,
         }));
         return {
           ok: true,
           kind: 'reply',
-          reply: list.length === 0 ? "You haven't added anyone yet." : `${list.length} vendor${list.length === 1 ? '' : 's'} match.`,
-          vendors: list,
+          reply: `${header}\n\n${lines.join('\n')}${more}`,
+          vendors: slim,
+          tool_anchor: { tool: 'vendors', entity_type: 'list' },
         };
       }
 
       // ── ZIP 3: query_my_expenses ──
+      // BUG A FIX: header line with totals + bulleted expense lines so the
+      // bride sees what she paid for and what's still pending without a
+      // second exchange. Matches query_my_reminders pattern.
       case 'query_my_expenses': {
         const { vendor_name, payment_status = 'all' } = toolInput || {};
         let q = supabase.from('couple_expenses')
@@ -12728,12 +12765,39 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           .reduce((sum, r) => sum + (r.actual_amount || 0), 0);
         const totalPending = rows.filter(r => r.payment_status === 'pending')
           .reduce((sum, r) => sum + (r.planned_amount || 0), 0);
+        if (rows.length === 0) {
+          return {
+            ok: true,
+            kind: 'reply',
+            reply: vendor_name
+              ? `Nothing logged for ${vendor_name} yet.`
+              : "Nothing logged yet.",
+            total_paid: 0,
+            total_pending: 0,
+            total_committed: 0,
+            expenses: [],
+            tool_anchor: { tool: 'money', entity_type: 'list' },
+          };
+        }
+        const header = vendor_name
+          ? `${formatINR(totalPaid)} paid to ${vendor_name} · ${formatINR(totalPending)} pending`
+          : `${formatINR(totalPaid)} paid so far · ${formatINR(totalPending)} still pending`;
+        const lines = rows.slice(0, 10).map(r => {
+          const who = r.vendor_name || r.description || 'Untitled';
+          const amt = r.payment_status === 'paid'
+            ? (r.actual_amount || 0)
+            : (r.planned_amount || 0);
+          const stLabel = r.payment_status === 'paid'
+            ? 'paid'
+            : (r.payment_status === 'pending' ? 'pending' : (r.payment_status || 'tracked'));
+          const due = r.due_date && r.payment_status !== 'paid' ? ` · due ${r.due_date}` : '';
+          return `• ${who} — ${formatINR(amt)} · ${stLabel}${due}`;
+        });
+        const more = rows.length > 10 ? `\n\n…and ${rows.length - 10} more.` : '';
         return {
           ok: true,
           kind: 'reply',
-          reply: vendor_name
-            ? `${formatINR(totalPaid)} paid to ${vendor_name}, ${formatINR(totalPending)} pending.`
-            : `${formatINR(totalPaid)} paid so far. ${formatINR(totalPending)} still pending.`,
+          reply: `${header}\n\n${lines.join('\n')}${more}`,
           total_paid: totalPaid,
           total_pending: totalPending,
           total_committed: totalPaid + totalPending,
@@ -12744,6 +12808,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
             status: r.payment_status,
             due_date: r.due_date,
           })),
+          tool_anchor: { tool: 'money', entity_type: 'list' },
         };
       }
 
@@ -13350,6 +13415,11 @@ She is reading on a phone, often quickly. One or two sentences, max three. The p
 
 // ── Bride context idle-line helper ─────────────────────────────────────────
 async function getBrideContextSummary(coupleId) {
+  // BUG B FIX: schema-correct reads.
+  //   couple_expenses uses actual_amount/planned_amount/payment_status (NOT amount/status).
+  //   wedding_date lives on users (NOT couple_profiles).
+  // Old code silently zeroed every field for every bride. Bride-idle and any
+  // future prompt context that reads this summary returned junk.
   const summary = { vendors_booked: 0, vendors_shortlisted: 0, expenses_paid: 0, total_spent: 0, days_until_wedding: null };
   try {
     const { data: vendors } = await supabase
@@ -13362,17 +13432,23 @@ async function getBrideContextSummary(coupleId) {
     }
     const { data: expenses } = await supabase
       .from('couple_expenses')
-      .select('amount, status')
+      .select('actual_amount, planned_amount, payment_status')
       .eq('couple_id', coupleId);
     if (expenses) {
-      summary.expenses_paid = expenses.filter(e => e.status === 'paid').length;
-      summary.total_spent = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+      summary.expenses_paid = expenses.filter(e => e.payment_status === 'paid').length;
+      summary.total_spent = expenses.reduce((s, e) => {
+        // For paid rows use actual_amount; for pending rows fall back to planned_amount.
+        const amt = e.payment_status === 'paid'
+          ? (e.actual_amount || e.planned_amount || 0)
+          : (e.planned_amount || 0);
+        return s + amt;
+      }, 0);
     }
     try {
       const { data: profile } = await supabase
-        .from('couple_profiles')
+        .from('users')
         .select('wedding_date')
-        .eq('couple_id', coupleId)
+        .eq('id', coupleId)
         .maybeSingle();
       if (profile && profile.wedding_date) {
         const today = new Date(); today.setHours(0,0,0,0);
@@ -13736,13 +13812,15 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
   try {
     const { userId, action_id, vendor_name } = req.body || {};
     if (!userId || !action_id) {
-      return res.status(400).json({ success: false, error: 'userId and action_id required' });
+      // BUG C FIX: include `reply` so the frontend can render the failure.
+      return res.status(400).json({ success: false, error: 'userId and action_id required', reply: 'Something went sideways. Try once more?' });
     }
 
     if (pendingBroadcasts.has(action_id)) {
       const action = pendingBroadcasts.get(action_id);
       if (action.coupleId !== userId) {
-        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+        // BUG C FIX: include `reply` so the frontend can render the failure.
+        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
       }
       pendingBroadcasts.delete(action_id);
       const { message, topic, mode } = action;
@@ -13761,7 +13839,7 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
           content: message,
           group_id,
         }]);
-        if (msgErr) return res.status(500).json({ success: false, error: msgErr.message });
+        if (msgErr) return res.status(500).json({ success: false, error: msgErr.message, reply: 'Something went sideways while sending. Try once more?' });
 
         await supabase.from('circle_activity_events').insert([{
           couple_id: userId,
@@ -13794,7 +13872,7 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
         }));
         if (msgs.length > 0) {
           const { error: msgErr } = await supabase.from('circle_messages').insert(msgs);
-          if (msgErr) return res.status(500).json({ success: false, error: msgErr.message });
+          if (msgErr) return res.status(500).json({ success: false, error: msgErr.message, reply: 'Something went sideways while sending. Try once more?' });
         }
 
         const recipientNames = activeWithUsers.map(m => m.name || 'Someone').join(', ');
@@ -13819,7 +13897,8 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
     if (pendingReceipts.has(action_id)) {
       const action = pendingReceipts.get(action_id);
       if (action.coupleId !== userId) {
-        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+        // BUG C FIX: include `reply` so the frontend can render the failure.
+        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
       }
       pendingReceipts.delete(action_id);
       const { image_url, ocr, suggested_vendor } = action;
@@ -13838,7 +13917,7 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
         receipt_url: image_url,
         notes: 'Logged via DreamAi OCR on ' + finalDate,
       }]);
-      if (error) return res.status(500).json({ success: false, error: error.message });
+      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways while filing the receipt. Try once more?' });
       return res.json({
         success: true,
         reply: `✓ Filed ${formatINR(finalAmount)} under ${finalVendor}.`,
@@ -13850,7 +13929,8 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
     // with confirmed=true via executeBrideToolCall so the same write logic runs.
     if (pendingBookings.has(action_id)) {
       const args = pendingBookings.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+      // BUG C FIX: include `reply` so the frontend can render the failure.
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
       pendingBookings.delete(action_id);
       const result = await executeBrideToolCall('book_vendor', { ...args, confirmed: true }, userId);
       return res.json({
@@ -13863,7 +13943,8 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
     }
     if (pendingPayments.has(action_id)) {
       const args = pendingPayments.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+      // BUG C FIX: include `reply` so the frontend can render the failure.
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
       pendingPayments.delete(action_id);
       const result = await executeBrideToolCall('log_payment', { ...args, confirmed: true }, userId);
       return res.json({
@@ -13876,7 +13957,8 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
     }
     if (pendingSettles.has(action_id)) {
       const args = pendingSettles.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user' });
+      // BUG C FIX: include `reply` so the frontend can render the failure.
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
       pendingSettles.delete(action_id);
       const result = await executeBrideToolCall('settle_balance', { ...args, confirmed: true }, userId);
       return res.json({
@@ -13888,9 +13970,13 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
       });
     }
 
-    return res.status(404).json({ success: false, error: 'action not found or expired' });
+    // BUG C FIX: include `reply` so the frontend can render the failure.
+    // This is the MOST COMMON bride-confirm failure: the 10-minute setTimeout
+    // cleanup expired the action before she tapped. Voice should be gentle.
+    return res.status(404).json({ success: false, error: 'action not found or expired', reply: 'That moment passed. Tell me again?' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    // BUG C FIX: include `reply` so the frontend can render the failure.
+    res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways. Try once more?' });
   }
 });
 
