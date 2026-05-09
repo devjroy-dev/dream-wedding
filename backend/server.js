@@ -12392,6 +12392,110 @@ const FROST_BRIDE_TOOLS = [
       },
     },
   },
+
+  // ─── PHASE 1.6 — UPDATE / DELETE / CONTACT TOOLS ─────────────────────────
+  // These complete the bride's CRUD vocabulary. Adding/reading was already
+  // possible via book_vendor/add_expense/create_reminder + query_my_*.
+  // Now: editing existing rows, deleting them, and reaching out to vendors.
+  {
+    name: 'update_vendor',
+    description: "Edit fields on an existing vendor in the bride's couple_vendors. Use when she says 'change Swati's number to X', 'her quote is now 80k not 60k', 'move the photographer to mehendi instead of sangeet', 'Swati's category should be MUA not photographer'. The vendor must already exist on her list — if not found, returns clarify. Confirm-not-required (small edits don't need a Yes/No card).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string', description: "The vendor's name as the bride refers to her — looked up via ilike against couple_vendors.name. Required." },
+        new_name: { type: 'string', description: "New name if she's renaming." },
+        phone: { type: 'string', description: "Vendor's phone number, with or without country code. Will be normalised to E.164 with +91 default." },
+        category: { type: 'string', description: "Vendor category (MUA, photographer, decorator, caterer, etc)." },
+        quoted_total: { type: 'number', description: "Updated total quote in INR." },
+        balance_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) when the balance is due." },
+        events: { type: 'array', items: { type: 'string' }, description: "Which events the vendor covers (haldi, mehendi, sangeet, wedding, reception). Replaces the existing array." },
+        status: { type: 'string', description: "Vendor pipeline status (enquired, considering, in_discussion, shortlisted, booked, declined)." },
+        notes: { type: 'string', description: "Free-text notes the bride wants attached." },
+      },
+      required: ['vendor_name'],
+    },
+  },
+  {
+    name: 'update_expense',
+    description: "Edit fields on an existing expense row. Use when she says 'the lehenga was actually 75k not 65k', 'mark Swati's advance as paid', 'change the due date to next Monday', 'the florist deposit is committed not pending'. Looked up by description or vendor_name + most-recent. Confirm-not-required.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        match_vendor_name: { type: 'string', description: "Find the most-recent expense whose vendor_name ilikes this. Use this OR match_description." },
+        match_description: { type: 'string', description: "Find the most-recent expense whose description ilikes this. Use this OR match_vendor_name." },
+        new_planned_amount: { type: 'number', description: "Updated planned amount in INR." },
+        new_actual_amount: { type: 'number', description: "Updated actual paid amount in INR." },
+        new_payment_status: { type: 'string', description: "New payment status: pending | committed | paid." },
+        new_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) for new due date." },
+        new_notes: { type: 'string', description: "New free-text notes." },
+      },
+    },
+  },
+  {
+    name: 'update_reminder',
+    description: "Edit fields on an existing reminder/task. Use when she says 'move my lehenga pickup to Tuesday', 'change priority to high', 'tag this to mehendi'. Looked up by text ilike. Confirm-not-required.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        match_text: { type: 'string', description: "Find the most-recent reminder whose text ilikes this. Required." },
+        new_text: { type: 'string', description: "Updated reminder text." },
+        new_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) for new due date." },
+        new_event: { type: 'string', description: "Tag the reminder to a specific event (haldi, mehendi, sangeet, wedding, reception)." },
+        new_priority: { type: 'string', description: "Priority: low | medium | high." },
+      },
+      required: ['match_text'],
+    },
+  },
+  {
+    name: 'delete_vendor',
+    description: "Remove a vendor from the bride's list. Confirm-required — destructive. Use when she says 'remove Swati from my vendors', 'I'm not going with Arjun anymore', 'drop the third decorator'. Returns a confirmPreview the bride must tap Yes on.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string', description: "Vendor's name; looked up via ilike. Required." },
+        confirmed: { type: 'boolean', description: "Internal — set automatically by the bride-confirm replay. Never set this from the model." },
+      },
+      required: ['vendor_name'],
+    },
+  },
+  {
+    name: 'delete_expense',
+    description: "Remove an expense row. Confirm-required — destructive. Use when she says 'undo that expense', 'remove the catering charge', 'I shouldn't have logged the lehenga twice — delete one'. Returns a confirmPreview.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        match_vendor_name: { type: 'string', description: "Match by vendor_name ilike. Use this OR match_description." },
+        match_description: { type: 'string', description: "Match by description ilike. Use this OR match_vendor_name." },
+        confirmed: { type: 'boolean', description: "Internal." },
+      },
+    },
+  },
+  {
+    name: 'delete_reminder',
+    description: "Remove a reminder. Confirm-required — destructive. Use when she says 'forget that reminder', 'I don't need the call-the-florist task', 'remove the 4pm thing'. Returns a confirmPreview.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        match_text: { type: 'string', description: "Match by text ilike. Required." },
+        confirmed: { type: 'boolean', description: "Internal." },
+      },
+      required: ['match_text'],
+    },
+  },
+  {
+    name: 'contact_vendor',
+    description: "Call or message a vendor. Use when the bride says 'call Swati', 'message Arjun about the timeline', 'WhatsApp the decorator to confirm'. Looks up the vendor's phone in couple_vendors. Returns a contact_action card the bride taps to dial or open WhatsApp. Does NOT actually place the call or send the message — opens the native app with content pre-filled. The bride is always the one who hits Send. If mode='whatsapp' AND the bride has indicated what she wants to say, draft the message in HER voice (first-person, warm, brief, Indian-bride-natural). If she didn't say what to message about, draft a soft generic opener like 'Hi <name>! Quick question for you.'. Confirm-not-required.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor_name: { type: 'string', description: "Vendor's name; looked up via ilike. Required." },
+        mode: { type: 'string', enum: ['call', 'whatsapp'], description: "'call' opens the native dialer. 'whatsapp' opens WhatsApp with pre-filled message. Required." },
+        message: { type: 'string', description: "Drafted message text. Used only when mode='whatsapp'. Write in the BRIDE'S voice, not yours — first-person, warm, short, Indian-bride-natural. Examples: 'Hi Swati! Between the red and gold lehenga, which would you suggest for the wedding day?', 'Hey Arjun, just confirming — Sangeet shoot starts at 6pm right?'" },
+      },
+      required: ['vendor_name', 'mode'],
+    },
+  },
 ];
 
 // ── Bride tool executor — composite + atomic ───────────────────────────────
@@ -13273,6 +13377,365 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
       }
 
+      // ─── PHASE 1.6 — UPDATE / DELETE / CONTACT EXECUTOR CASES ───────────
+
+      case 'update_vendor': {
+        const {
+          vendor_name, new_name, phone, category, quoted_total,
+          balance_due_date, events, status, notes,
+        } = toolInput || {};
+        if (!vendor_name) {
+          return { ok: false, kind: 'unsure', reply: "Which vendor?" };
+        }
+        const { data: matches } = await supabase
+          .from('couple_vendors')
+          .select('id, name')
+          .eq('couple_id', coupleId)
+          .ilike('name', '%' + vendor_name + '%');
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list. Want to add them?` };
+        }
+        if (matches.length > 1) {
+          return {
+            ok: false, kind: 'clarify',
+            reply: `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+          };
+        }
+        const updates = {};
+        if (new_name) updates.name = new_name;
+        if (phone) {
+          // Normalise to E.164 with +91 default if no country code
+          let p = String(phone).replace(/[^0-9+]/g, '');
+          if (!p.startsWith('+')) {
+            if (p.length === 10) p = '+91' + p;
+            else if (p.startsWith('91') && p.length === 12) p = '+' + p;
+          }
+          updates.phone = p;
+        }
+        if (category) updates.category = category;
+        if (quoted_total != null) updates.quoted_total = quoted_total;
+        if (balance_due_date) updates.balance_due_date = balance_due_date;
+        if (Array.isArray(events) && events.length > 0) updates.events = events;
+        if (status) updates.status = status;
+        if (notes) updates.notes = notes;
+        if (Object.keys(updates).length === 0) {
+          return { ok: false, kind: 'unsure', reply: "Tell me what to change for them." };
+        }
+        updates.updated_at = new Date().toISOString();
+        const { error } = await supabase
+          .from('couple_vendors')
+          .update(updates)
+          .eq('id', matches[0].id);
+        if (error) throw error;
+        const fields = Object.keys(updates).filter(k => k !== 'updated_at');
+        const fieldsLabel = fields.join(', ');
+        return {
+          ok: true, kind: 'reply',
+          reply: `Updated ${matches[0].name} — ${fieldsLabel}.`,
+          vendor_id: matches[0].id,
+          tool_anchor: { tool: 'vendors', entity_type: 'vendor', entity_id: String(matches[0].id) },
+        };
+      }
+
+      case 'update_expense': {
+        const {
+          match_vendor_name, match_description,
+          new_planned_amount, new_actual_amount, new_payment_status,
+          new_due_date, new_notes,
+        } = toolInput || {};
+        if (!match_vendor_name && !match_description) {
+          return { ok: false, kind: 'unsure', reply: "Which expense?" };
+        }
+        let q = supabase.from('couple_expenses')
+          .select('id, vendor_name, description, planned_amount, actual_amount, payment_status')
+          .eq('couple_id', coupleId);
+        if (match_vendor_name) q = q.ilike('vendor_name', '%' + match_vendor_name + '%');
+        if (match_description) q = q.ilike('description', '%' + match_description + '%');
+        const { data: matches } = await q.order('created_at', { ascending: false }).limit(5);
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: "I couldn't find that expense." };
+        }
+        if (matches.length > 1) {
+          const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
+          return {
+            ok: false, kind: 'clarify',
+            reply: "A few match — which one?\n\n" + lines.join('\n'),
+          };
+        }
+        const updates = {};
+        if (new_planned_amount != null) updates.planned_amount = new_planned_amount;
+        if (new_actual_amount != null) updates.actual_amount = new_actual_amount;
+        if (new_payment_status) updates.payment_status = new_payment_status;
+        if (new_due_date) updates.due_date = new_due_date;
+        if (new_notes) updates.notes = new_notes;
+        if (Object.keys(updates).length === 0) {
+          return { ok: false, kind: 'unsure', reply: "Tell me what to change about it." };
+        }
+        updates.updated_at = new Date().toISOString();
+        const { error } = await supabase
+          .from('couple_expenses')
+          .update(updates)
+          .eq('id', matches[0].id);
+        if (error) throw error;
+        const label = matches[0].vendor_name || matches[0].description || 'expense';
+        return {
+          ok: true, kind: 'reply',
+          reply: `Updated ${label}.`,
+          expense_id: matches[0].id,
+          tool_anchor: { tool: 'money', entity_type: 'expense', entity_id: String(matches[0].id) },
+        };
+      }
+
+      case 'update_reminder': {
+        const { match_text, new_text, new_due_date, new_event, new_priority } = toolInput || {};
+        if (!match_text) {
+          return { ok: false, kind: 'unsure', reply: "Which reminder?" };
+        }
+        const { data: matches } = await supabase
+          .from('couple_checklist')
+          .select('id, text, is_complete')
+          .eq('couple_id', coupleId)
+          .ilike('text', '%' + match_text + '%')
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: "I couldn't find that reminder." };
+        }
+        if (matches.length > 1) {
+          const lines = matches.map(m => '• ' + m.text);
+          return {
+            ok: false, kind: 'clarify',
+            reply: "A few match — which one?\n\n" + lines.join('\n'),
+          };
+        }
+        const updates = {};
+        if (new_text) updates.text = new_text;
+        if (new_due_date) updates.due_date = new_due_date;
+        if (new_event) updates.event = new_event;
+        if (new_priority) updates.priority = new_priority;
+        if (Object.keys(updates).length === 0) {
+          return { ok: false, kind: 'unsure', reply: "Tell me what to change." };
+        }
+        const { error } = await supabase
+          .from('couple_checklist')
+          .update(updates)
+          .eq('id', matches[0].id);
+        if (error) throw error;
+        return {
+          ok: true, kind: 'reply',
+          reply: `Updated.`,
+          task_id: matches[0].id,
+          tool_anchor: { tool: 'tasks', entity_type: 'task', entity_id: String(matches[0].id) },
+        };
+      }
+
+      case 'delete_vendor': {
+        const { vendor_name, confirmed = false } = toolInput || {};
+        if (!vendor_name) {
+          return { ok: false, kind: 'unsure', reply: "Which vendor?" };
+        }
+        const { data: matches } = await supabase
+          .from('couple_vendors')
+          .select('id, name, category')
+          .eq('couple_id', coupleId)
+          .ilike('name', '%' + vendor_name + '%');
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list.` };
+        }
+        if (matches.length > 1) {
+          return {
+            ok: false, kind: 'clarify',
+            reply: `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+          };
+        }
+        if (!confirmed) {
+          const action_id = 'vendor_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          pendingVendorDeletes.set(action_id, { coupleId, vendor_id: matches[0].id, vendor_name: matches[0].name });
+          setTimeout(() => pendingVendorDeletes.delete(action_id), 10 * 60 * 1000);
+          return {
+            ok: true, kind: 'confirm-required',
+            reply: `Remove ${matches[0].name} from your vendors?`,
+            confirmPreview: {
+              summaryTitle: `Remove ${matches[0].name}?`,
+              summaryLines: [
+                matches[0].category ? `Category: ${matches[0].category}` : 'Category: not set',
+                'They\'ll be gone from your team.',
+                'You can always add them back.',
+              ],
+              confirmLabel: 'Remove',
+              cancelLabel: 'Keep',
+              action_id,
+            },
+          };
+        }
+        // Confirmed — actually delete
+        const { error } = await supabase
+          .from('couple_vendors')
+          .delete()
+          .eq('id', matches[0].id);
+        if (error) throw error;
+        return {
+          ok: true, kind: 'reply',
+          reply: `Removed ${matches[0].name}.`,
+        };
+      }
+
+      case 'delete_expense': {
+        const { match_vendor_name, match_description, confirmed = false } = toolInput || {};
+        if (!match_vendor_name && !match_description) {
+          return { ok: false, kind: 'unsure', reply: "Which expense?" };
+        }
+        let q = supabase.from('couple_expenses')
+          .select('id, vendor_name, description, planned_amount, actual_amount')
+          .eq('couple_id', coupleId);
+        if (match_vendor_name) q = q.ilike('vendor_name', '%' + match_vendor_name + '%');
+        if (match_description) q = q.ilike('description', '%' + match_description + '%');
+        const { data: matches } = await q.order('created_at', { ascending: false }).limit(5);
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: "I couldn't find that expense." };
+        }
+        if (matches.length > 1) {
+          const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
+          return {
+            ok: false, kind: 'clarify',
+            reply: "A few match — which one?\n\n" + lines.join('\n'),
+          };
+        }
+        const target = matches[0];
+        const targetLabel = target.vendor_name || target.description || 'expense';
+        const targetAmount = target.actual_amount || target.planned_amount || 0;
+        if (!confirmed) {
+          const action_id = 'expense_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          pendingExpenseDeletes.set(action_id, { coupleId, expense_id: target.id, label: targetLabel });
+          setTimeout(() => pendingExpenseDeletes.delete(action_id), 10 * 60 * 1000);
+          return {
+            ok: true, kind: 'confirm-required',
+            reply: `Remove the ${targetLabel} expense?`,
+            confirmPreview: {
+              summaryTitle: `Remove ${targetLabel}?`,
+              summaryLines: [
+                targetAmount > 0 ? `${formatINR(targetAmount)}` : 'No amount on file',
+                'It\'ll be gone from your money page.',
+              ],
+              confirmLabel: 'Remove',
+              cancelLabel: 'Keep',
+              action_id,
+            },
+          };
+        }
+        const { error } = await supabase
+          .from('couple_expenses')
+          .delete()
+          .eq('id', target.id);
+        if (error) throw error;
+        return {
+          ok: true, kind: 'reply',
+          reply: `Removed ${targetLabel}.`,
+        };
+      }
+
+      case 'delete_reminder': {
+        const { match_text, confirmed = false } = toolInput || {};
+        if (!match_text) {
+          return { ok: false, kind: 'unsure', reply: "Which reminder?" };
+        }
+        const { data: matches } = await supabase
+          .from('couple_checklist')
+          .select('id, text')
+          .eq('couple_id', coupleId)
+          .ilike('text', '%' + match_text + '%')
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: "I couldn't find that reminder." };
+        }
+        if (matches.length > 1) {
+          const lines = matches.map(m => '• ' + m.text);
+          return {
+            ok: false, kind: 'clarify',
+            reply: "A few match — which one?\n\n" + lines.join('\n'),
+          };
+        }
+        const target = matches[0];
+        if (!confirmed) {
+          const action_id = 'reminder_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          pendingReminderDeletes.set(action_id, { coupleId, reminder_id: target.id, text: target.text });
+          setTimeout(() => pendingReminderDeletes.delete(action_id), 10 * 60 * 1000);
+          return {
+            ok: true, kind: 'confirm-required',
+            reply: `Forget the reminder "${target.text}"?`,
+            confirmPreview: {
+              summaryTitle: `Forget this reminder?`,
+              summaryLines: [
+                target.text,
+                'It\'ll be gone from your list.',
+              ],
+              confirmLabel: 'Forget it',
+              cancelLabel: 'Keep',
+              action_id,
+            },
+          };
+        }
+        const { error } = await supabase
+          .from('couple_checklist')
+          .delete()
+          .eq('id', target.id);
+        if (error) throw error;
+        return {
+          ok: true, kind: 'reply',
+          reply: `Forgotten.`,
+        };
+      }
+
+      case 'contact_vendor': {
+        const { vendor_name, mode, message } = toolInput || {};
+        if (!vendor_name) {
+          return { ok: false, kind: 'unsure', reply: "Who do you want to reach?" };
+        }
+        if (mode !== 'call' && mode !== 'whatsapp') {
+          return { ok: false, kind: 'unsure', reply: "Call or WhatsApp?" };
+        }
+        const { data: matches } = await supabase
+          .from('couple_vendors')
+          .select('id, name, phone, category')
+          .eq('couple_id', coupleId)
+          .ilike('name', '%' + vendor_name + '%');
+        if (!matches || matches.length === 0) {
+          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} saved. What's their number?` };
+        }
+        if (matches.length > 1) {
+          return {
+            ok: false, kind: 'clarify',
+            reply: `A few names match — ${matches.map(m => m.name + (m.category ? ' (' + m.category + ')' : '')).join(', ')}. Which one?`,
+          };
+        }
+        const v = matches[0];
+        if (!v.phone) {
+          return {
+            ok: false, kind: 'unsure',
+            reply: `I don't have a number for ${v.name}. Tell me her phone and I'll save it.`,
+          };
+        }
+        // Normalise phone for outbound URLs (digits only, with country code)
+        let cleanPhone = String(v.phone).replace(/[^0-9]/g, '');
+        if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+        const replyText = mode === 'call'
+          ? `Tap to call ${v.name}.`
+          : `Tap to message ${v.name}.`;
+        return {
+          ok: true, kind: 'reply',
+          reply: replyText,
+          contact_action: {
+            kind: mode,
+            name: v.name,
+            phone: '+' + cleanPhone,
+            label: v.category || null,
+            message: mode === 'whatsapp' ? (message || `Hi ${v.name}! Quick question for you.`) : null,
+          },
+          tool_anchor: { tool: 'vendors', entity_type: 'vendor', entity_id: String(v.id) },
+        };
+      }
+
       case 'general_reply':
         return { ok: true, kind: 'reply', reply: toolInput.reply };
 
@@ -13406,8 +13869,35 @@ WHEN TO USE WHICH TOOL:
 - "Show me ideas" / "surprise me" / "give me reception inspo" → surprise_me
 - "Tell my family" / "Send to circle" → broadcast_to_circle
 - "I just spent 5k on flowers" → add_expense
+- "Change Swati's number to X", "Her quote is now 80k" → update_vendor
+- "Move my lehenga pickup to Tuesday", "Make this high priority" → update_reminder
+- "The lehenga was 75k not 65k", "Mark Swati's advance as paid" → update_expense
+- "Remove Swati from my vendors", "I'm not going with Arjun anymore" → delete_vendor
+- "Forget that reminder", "Undo that expense" → delete_reminder / delete_expense
+- "Call Swati", "Phone the decorator" → contact_vendor (mode='call')
+- "Message Arjun about timeline", "WhatsApp Swati to confirm the lehenga" → contact_vendor (mode='whatsapp', draft message in BRIDE'S voice)
 - Conversation, observation, question, advice, idle thought → general_reply
 - web_search is available for genuinely outside-the-platform questions ("what is mehendi") — use sparingly.
+
+CONTACT_VENDOR DRAFTING (CRITICAL):
+When the bride asks you to message someone, draft the message in HER voice, never yours. The drafted message goes inside contact_vendor's 'message' parameter and will appear pre-filled in WhatsApp. The bride taps Send.
+- First-person, brief, warm, Indian-bride-natural register.
+- Include enough context that the recipient understands without follow-up.
+- Examples (study these, write in this register):
+  · "Hi Swati! Between the red and gold lehenga, which would you suggest for the wedding day? Want to lock it in."
+  · "Hey Arjun, just confirming — Sangeet shoot starts at 6pm right? Mehendi is 10am the day before."
+  · "Hi Priya! Quick one — is the 50k advance for the decor due before Diwali or after?"
+- If the bride hasn't said what to message about, use a soft generic: "Hi <name>! Quick question for you."
+- Never write the message in your own poetic voice. The bride sends from her own number; the message must sound like her, not like an AI assistant.
+
+DELETE BEHAVIOR:
+- Deletes are confirm-required. The model returns a confirmPreview; the bride taps Yes/No on the FrostConfirmCard. The system handles the actual write on confirm.
+- For deletes that match multiple rows, ask which one. Never delete the most-recent without asking.
+
+UPDATE BEHAVIOR:
+- Updates are NOT confirm-required (small edits don't need ceremony).
+- If the bride's match phrase narrows to multiple rows, ask which one before updating.
+- After a successful update, narrate briefly: "Updated Swati — phone."
 
 KEEP REPLIES SHORT.
 She is reading on a phone, often quickly. One or two sentences, max three. The product is meant to feel light.${routingContext}`;
@@ -13564,6 +14054,7 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
     let confirmPreview = null;
     let followupPrompts = [];
     let summaryLines = [];
+    let contactAction = null; // PHASE 1.6.1 — contact_vendor tool result
     const toolsUsed = [];
     const toolAnchors = []; // ZIP 8: long-press routing metadata, Option B (response-only, no DB)
 
@@ -13604,6 +14095,12 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
         if (toolResult && toolResult.confirmPreview) {
           confirmPreview = toolResult.confirmPreview;
         }
+        // PHASE 1.6.1: propagate contact_vendor tool's contact_action card to
+        // the frontend, so FrostContactCard can render with the bride's choice
+        // of channel (phone call vs WhatsApp call vs WhatsApp msg vs SMS).
+        if (toolResult && toolResult.contact_action) {
+          contactAction = toolResult.contact_action;
+        }
         // ZIP 8: derive anchor metadata centrally from tool result
         // Each tool can return tool_anchor: { tool, entity_type, entity_id }
         // This powers long-press routing in the Dream canvas (Option B — response-only)
@@ -13635,6 +14132,7 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
       summaryLines,
       followupPrompts,
       confirmPreview,
+      contactAction,
       toolsUsed,
       toolAnchors,
     });
@@ -13788,6 +14286,10 @@ const pendingReceipts = new Map();
 const pendingBookings = new Map();
 const pendingPayments = new Map();
 const pendingSettles  = new Map();
+// Phase 1.6: destructive delete dry-run gates.
+const pendingVendorDeletes   = new Map();
+const pendingExpenseDeletes  = new Map();
+const pendingReminderDeletes = new Map();
 
 function formatINR(amount) {
   if (amount == null || isNaN(amount)) return '₹0';
@@ -13968,6 +14470,41 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
         followupPrompts: result?.followupPrompts || [],
         expense_id: result?.expense_id,
       });
+    }
+
+    // ─── PHASE 1.6 — DELETE REPLAYS ────────────────────────────────────
+    if (pendingVendorDeletes.has(action_id)) {
+      const args = pendingVendorDeletes.get(action_id);
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+      pendingVendorDeletes.delete(action_id);
+      const result = await executeBrideToolCall('delete_vendor', { vendor_name: args.vendor_name, confirmed: true }, userId);
+      return res.json({
+        success: !!result?.ok,
+        reply: result?.reply || `Removed ${args.vendor_name}.`,
+      });
+    }
+    if (pendingExpenseDeletes.has(action_id)) {
+      const args = pendingExpenseDeletes.get(action_id);
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+      pendingExpenseDeletes.delete(action_id);
+      // Direct delete by id since match has already been narrowed
+      const { error } = await supabase
+        .from('couple_expenses')
+        .delete()
+        .eq('id', args.expense_id);
+      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways while removing it. Try once more?' });
+      return res.json({ success: true, reply: `Removed ${args.label}.` });
+    }
+    if (pendingReminderDeletes.has(action_id)) {
+      const args = pendingReminderDeletes.get(action_id);
+      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+      pendingReminderDeletes.delete(action_id);
+      const { error } = await supabase
+        .from('couple_checklist')
+        .delete()
+        .eq('id', args.reminder_id);
+      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways. Try once more?' });
+      return res.json({ success: true, reply: `Forgotten.` });
     }
 
     // BUG C FIX: include `reply` so the frontend can render the failure.
@@ -16538,3 +17075,7 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
+
+// ─── PHASE 1.6 LOADED ─── //
+
+// ─── PHASE 1.6.1 LOADED ─── //
