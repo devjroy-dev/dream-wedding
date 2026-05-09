@@ -12542,10 +12542,18 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
 
         // Multiple matches → ask the bride which one
         if (existingVendors && existingVendors.length > 1) {
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = existingVendors.slice(0, 4).map(v => ({
+            label: v.name + (v.category ? ' (' + v.category + ')' : ''),
+            send_text: v.name,
+          }));
           return {
             ok: false,
             kind: 'clarify',
-            reply: `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name + ' (' + (v.category || 'unknown') + ')').join(', ')}. Which one?`,
+            reply: existingVendors.length <= 4
+              ? `Which ${vendor_name}?`
+              : `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name).join(', ')}. Which one?`,
+            clarify_options: existingVendors.length <= 4 ? opts : null,
           };
         }
 
@@ -12958,11 +12966,19 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
         if (distinctNames.length > 1) {
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = distinctNames.slice(0, 4).map(n => ({
+            label: n,
+            send_text: n,
+          }));
           return {
             ok: false,
             kind: 'clarify',
-            reply: `I see a few different vendors matching "${vendor_name}". Which one did you pay?`,
+            reply: distinctNames.length <= 4
+              ? `Which one did you pay?`
+              : `I see a few different vendors matching "${vendor_name}" — ${distinctNames.join(', ')}. Which one?`,
             candidates: distinctNames,
+            clarify_options: distinctNames.length <= 4 ? opts : null,
           };
         }
         const target = matches[0];
@@ -13047,7 +13063,15 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
         if (distinctNames.length > 1) {
-          return { ok: false, kind: 'clarify', reply: `Which one did you settle?`, candidates: distinctNames };
+          {
+            const opts = distinctNames.slice(0, 4).map(n => ({ label: n, send_text: n }));
+            return {
+              ok: false, kind: 'clarify',
+              reply: `Which one did you settle?`,
+              candidates: distinctNames,
+              clarify_options: distinctNames.length <= 4 ? opts : null,
+            };
+          }
         }
         const target = matches[0];
         const settleAmount = amount_override != null ? amount_override : (target.planned_amount || 0);
@@ -13396,9 +13420,14 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list. Want to add them?` };
         }
         if (matches.length > 1) {
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({ label: m.name, send_text: m.name }));
           return {
             ok: false, kind: 'clarify',
-            reply: `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+            reply: matches.length <= 4
+              ? `Which one?`
+              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const updates = {};
@@ -13457,9 +13486,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         if (matches.length > 1) {
           const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: (m.vendor_name || m.description || 'Untitled') + ' · ' + formatINR(m.actual_amount || m.planned_amount || 0),
+            send_text: m.vendor_name || m.description || '',
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: "A few match — which one?\n\n" + lines.join('\n'),
+            reply: matches.length <= 4
+              ? `Which one?`
+              : "A few match — which one?\n\n" + lines.join('\n'),
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const updates = {};
@@ -13503,9 +13540,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         if (matches.length > 1) {
           const lines = matches.map(m => '• ' + m.text);
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: m.text.length > 50 ? m.text.slice(0, 47) + '…' : m.text,
+            send_text: m.text,
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: "A few match — which one?\n\n" + lines.join('\n'),
+            reply: matches.length <= 4
+              ? `Which one?`
+              : "A few match — which one?\n\n" + lines.join('\n'),
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const updates = {};
@@ -13543,9 +13588,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list.` };
         }
         if (matches.length > 1) {
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: m.name + (m.category ? ' (' + m.category + ')' : ''),
+            send_text: m.name,
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+            reply: matches.length <= 4
+              ? `Which one?`
+              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         if (!confirmed) {
@@ -13596,9 +13649,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         if (matches.length > 1) {
           const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: (m.vendor_name || m.description || 'Untitled') + ' · ' + formatINR(m.actual_amount || m.planned_amount || 0),
+            send_text: m.vendor_name || m.description || '',
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: "A few match — which one?\n\n" + lines.join('\n'),
+            reply: matches.length <= 4
+              ? `Which one?`
+              : "A few match — which one?\n\n" + lines.join('\n'),
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const target = matches[0];
@@ -13651,9 +13712,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         if (matches.length > 1) {
           const lines = matches.map(m => '• ' + m.text);
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: m.text.length > 50 ? m.text.slice(0, 47) + '…' : m.text,
+            send_text: m.text,
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: "A few match — which one?\n\n" + lines.join('\n'),
+            reply: matches.length <= 4
+              ? `Which one?`
+              : "A few match — which one?\n\n" + lines.join('\n'),
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const target = matches[0];
@@ -13704,9 +13773,17 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} saved. What's their number?` };
         }
         if (matches.length > 1) {
+          // Phase 1.7: clarify_options for tappable pill disambiguation
+          const opts = matches.slice(0, 4).map(m => ({
+            label: m.name + (m.category ? ' (' + m.category + ')' : ''),
+            send_text: m.name,
+          }));
           return {
             ok: false, kind: 'clarify',
-            reply: `A few names match — ${matches.map(m => m.name + (m.category ? ' (' + m.category + ')' : '')).join(', ')}. Which one?`,
+            reply: matches.length <= 4
+              ? `Which one?`
+              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
+            clarify_options: matches.length <= 4 ? opts : null,
           };
         }
         const v = matches[0];
@@ -14055,6 +14132,7 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
     let followupPrompts = [];
     let summaryLines = [];
     let contactAction = null; // PHASE 1.6.1 — contact_vendor tool result
+    let clarifyOptions = null; // PHASE 1.7 — disambiguation pills from clarify branches
     const toolsUsed = [];
     const toolAnchors = []; // ZIP 8: long-press routing metadata, Option B (response-only, no DB)
 
@@ -14101,6 +14179,13 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
         if (toolResult && toolResult.contact_action) {
           contactAction = toolResult.contact_action;
         }
+        // PHASE 1.7: propagate clarify_options for tappable pill disambiguation.
+        // Multi-match clarify branches return options the frontend renders as
+        // a FrostClarifyCard. Bride taps → frontend resends send_text as a
+        // user message, model re-runs the original tool with the disambiguator.
+        if (toolResult && toolResult.clarify_options) {
+          clarifyOptions = toolResult.clarify_options;
+        }
         // ZIP 8: derive anchor metadata centrally from tool result
         // Each tool can return tool_anchor: { tool, entity_type, entity_id }
         // This powers long-press routing in the Dream canvas (Option B — response-only)
@@ -14133,6 +14218,7 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
       followupPrompts,
       confirmPreview,
       contactAction,
+      clarifyOptions,
       toolsUsed,
       toolAnchors,
     });
@@ -17079,3 +17165,5 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PHASE 1.6 LOADED ─── //
 
 // ─── PHASE 1.6.1 LOADED ─── //
+
+// ─── PHASE 1.7 LOADED ─── //
