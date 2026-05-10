@@ -11075,7 +11075,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       supabase.from('couple_guests').select('id, name, rsvp_status, household, side, events').eq('couple_id', userId),
       supabase.from('couple_events').select('id, event_name, event_type, event_date, event_city, budget_total, is_active').eq('couple_id', userId).order('event_date'),
       supabase.from('couple_budget').select('total_budget, event_envelopes').eq('couple_id', userId).maybeSingle(),
-      supabase.from('couple_expenses').select('id, category, description, amount, is_paid, due_date, vendor_name').eq('couple_id', userId).order('due_date', { ascending: true }).limit(50),
+      supabase.from('couple_expenses').select('id, category, description, planned_amount, actual_amount, payment_status, due_date, vendor_name').eq('couple_id', userId).order('due_date', { ascending: true }).limit(50),
       supabase.from('users').select('token_balance').eq('id', userId).single(),
     ]);
     const user = userR.status === 'fulfilled' ? userR.value.data : null;
@@ -11089,9 +11089,11 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
     const pendingTasks = tasks.filter(t => !t.is_complete);
     const bookedVendors = vendors.filter(v => v.status === 'booked' || v.status === 'confirmed');
     const confirmedGuests = guests.filter(g => g.rsvp_status === 'confirmed');
-    const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-    const paidExpenses = expenses.filter(e => e.is_paid).reduce((s, e) => s + (e.amount || 0), 0);
-    const upcomingPayments = expenses.filter(e => !e.is_paid && e.due_date).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).slice(0, 5);
+    // PATCH B-6a: column-name fix. Was using e.amount/e.is_paid which don't
+    // exist; real columns are planned_amount, actual_amount, payment_status.
+    const totalExpenses = expenses.reduce((s, e) => s + (Number(e.planned_amount) || 0), 0);
+    const paidExpenses = expenses.filter(e => e.payment_status === 'paid').reduce((s, e) => s + (Number(e.actual_amount) || 0), 0);
+    const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).slice(0, 5);
     let daysUntilWedding = null;
     if (user?.wedding_date) {
       const now = new Date(); now.setHours(0,0,0,0);
@@ -11105,7 +11107,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       guests: { total: guests.length, confirmed: confirmedGuests.length, pending: guests.filter(g=>!g.rsvp_status||g.rsvp_status==='pending').length, declined: guests.filter(g=>g.rsvp_status==='declined').length },
       events: events.map(e => ({ id:e.id, name:e.event_name||e.event_type, date:e.event_date, city:e.event_city, budget_total:e.budget_total, is_active:e.is_active })),
       budget: { total: budget?.total_budget||0, committed: totalExpenses, paid: paidExpenses, remaining: (budget?.total_budget||0) - totalExpenses, event_envelopes: budget?.event_envelopes||{} },
-      upcoming_payments: upcomingPayments.map(e => ({ id:e.id, vendor_name:e.vendor_name, category:e.category, amount:e.amount, due_date:e.due_date, description:e.description })),
+      upcoming_payments: upcomingPayments.map(e => ({ id:e.id, vendor_name:e.vendor_name, category:e.category, amount: Number(e.planned_amount) || 0, due_date:e.due_date, description:e.description })),
     });
   } catch (error) {
     console.error('[GET /api/v2/dreamai/couple-context] error:', error.message);
@@ -11975,21 +11977,27 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
       }
 
       case 'query_budget': {
+        // PATCH B-6a: fixed column names. Was reading name/amount/status which
+        // don't exist on couple_expenses; real columns are vendor_name,
+        // planned_amount, actual_amount, payment_status.
         const { category = null } = toolInput;
-        let q = supabase.from('couple_expenses').select('name, amount, category, status').eq('couple_id', coupleId);
+        let q = supabase.from('couple_expenses').select('vendor_name, planned_amount, actual_amount, category, payment_status').eq('couple_id', coupleId);
         if (category) q = q.eq('category', category);
         const { data } = await q;
         const expenses = data || [];
-        const total = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-        const paid = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + (e.amount || 0), 0);
-        const pending = total - paid;
-        const { data: budgetData } = await supabase.from('couple_budget').select('total_budget').eq('couple_id', coupleId).single();
-        const totalBudget = budgetData?.total_budget || 0;
-        const remaining = totalBudget - total;
+        // Logged = sum of planned commitments (the deal value, paid + pending).
+        // Paid = sum of actual_amount on rows marked paid.
+        const logged = expenses.reduce((s, e) => s + (Number(e.planned_amount) || 0), 0);
+        const paid = expenses.filter(e => e.payment_status === 'paid').reduce((s, e) => s + (Number(e.actual_amount) || 0), 0);
+        const pending = Math.max(0, logged - paid);
+        const { data: budgetData } = await supabase.from('couple_budget').select('total_budget').eq('couple_id', coupleId).maybeSingle();
+        const totalBudget = Number(budgetData?.total_budget) || 0;
+        const remaining = totalBudget - logged;
         let reply = `💰 Budget summary${category ? ' (' + category + ')' : ''}:\n`;
         if (totalBudget > 0) reply += `Total budget: ₹${totalBudget.toLocaleString('en-IN')}\n`;
-        reply += `Logged: ₹${total.toLocaleString('en-IN')}\nPaid: ₹${paid.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}`;
+        reply += `Logged: ₹${logged.toLocaleString('en-IN')}\nPaid: ₹${paid.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}`;
         if (totalBudget > 0) reply += `\n${remaining >= 0 ? 'Remaining: ₹' + remaining.toLocaleString('en-IN') : 'Over budget by: ₹' + Math.abs(remaining).toLocaleString('en-IN')}`;
+        else reply += `\n(no total budget set yet — say "my budget is X lac" to set one)`;
         return reply;
       }
 
@@ -12222,6 +12230,17 @@ const FROST_BRIDE_TOOLS = [
         category: { type: 'string', description: 'Vendor category if not already in her saved list (mua, photographer, decorator, designer, jeweller, venue, caterer, choreographer, event, other).' },
       },
       required: ['vendor_name'],
+    },
+  },
+  {
+    name: 'set_total_budget',
+    description: 'Set or update the bride\'s overall wedding budget. Use whenever she says her budget is X / her budget should be X / make her budget X. Examples: "my budget is 40 lac", "set my budget to 35 lakhs", "update my budget to 50 lac". The tool surfaces a confirm card so the bride sees the number before it commits — never write silently.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'Total wedding budget in rupees. Convert lakhs/lac to rupees first (1 lac = 100,000). E.g. "40 lac" → 4000000.' },
+      },
+      required: ['amount'],
     },
   },
   {
@@ -12785,6 +12804,92 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           vendor_id: vendorRow.id,
         };
       }
+      case 'set_total_budget': {
+        // PATCH B-6a: confirm-required write to couple_budget.total_budget.
+        const { amount, confirmed = false } = toolInput || {};
+        if (amount == null || isNaN(amount) || amount <= 0) {
+          return { ok: false, kind: 'unsure', reply: "How much would you like to set your budget to?" };
+        }
+        // Dry-run: read current value to shape the confirm card (Set vs Update).
+        if (!confirmed) {
+          let currentBudget = 0;
+          try {
+            const { data: existing } = await supabase
+              .from('couple_budget')
+              .select('total_budget')
+              .eq('couple_id', coupleId)
+              .maybeSingle();
+            currentBudget = Number(existing?.total_budget) || 0;
+          } catch (e) { /* if read fails, treat as initial set */ }
+          const isUpdate = currentBudget > 0;
+          const action_id = 'budget_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          pendingBudgetSets.set(action_id, { coupleId, amount, isUpdate, previousBudget: currentBudget });
+          setTimeout(() => pendingBudgetSets.delete(action_id), 10 * 60 * 1000);
+          if (isUpdate) {
+            return {
+              ok: true,
+              kind: 'confirm-required',
+              reply: `Want me to update your budget?`,
+              confirmPreview: {
+                summaryTitle: `Update your wedding budget?`,
+                summaryLines: [
+                  `From: ${formatINR(currentBudget)}`,
+                  `To: ${formatINR(amount)}`,
+                ],
+                confirmLabel: 'Update',
+                cancelLabel: 'Not yet',
+                action_id,
+              },
+            };
+          }
+          return {
+            ok: true,
+            kind: 'confirm-required',
+            reply: `Want me to set your budget?`,
+            confirmPreview: {
+              summaryTitle: `Set your wedding budget?`,
+              summaryLines: [
+                `Total: ${formatINR(amount)}`,
+                `This is what I'll pace your spending against.`,
+              ],
+              confirmLabel: 'Lock in',
+              cancelLabel: 'Not yet',
+              action_id,
+            },
+          };
+        }
+        // Confirmed path (replayed by bride-confirm) — but bride-confirm
+        // handles set_total_budget directly, so this branch should rarely
+        // execute. Kept for parity with other confirm-required tools.
+        try {
+          const { data: existing } = await supabase
+            .from('couple_budget')
+            .select('id')
+            .eq('couple_id', coupleId)
+            .maybeSingle();
+          if (existing) {
+            await supabase
+              .from('couple_budget')
+              .update({ total_budget: amount, updated_at: new Date().toISOString() })
+              .eq('couple_id', coupleId);
+          } else {
+            await supabase
+              .from('couple_budget')
+              .insert([{ couple_id: coupleId, total_budget: amount, event_envelopes: {} }]);
+          }
+        } catch (err) {
+          return { ok: false, kind: 'unknown', reply: "Something went sideways saving your budget. Try once more?" };
+        }
+        return {
+          ok: true,
+          kind: 'composite',
+          reply: `✓ Budget set to ${formatINR(amount)}.`,
+          confirmPreview: null,
+          summaryLines: [`Total budget: ${formatINR(amount)}`],
+          followupPrompts: [],
+        };
+      }
+
       case 'create_reminder': {
         // Real schema: couple_checklist with event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, is_custom
         const { text: reminderText, due_date = null, priority = 'normal', event = 'general' } = toolInput;
@@ -14170,6 +14275,7 @@ WHEN TO USE WHICH TOOL:
 - "Show me ideas" / "surprise me" / "give me reception inspo" → surprise_me
 - "Tell my family" / "Send to circle" → broadcast_to_circle
 - "I just spent 5k on flowers" → add_expense
+- "My budget is 40 lac", "Set my budget to 35 lakhs", "Make my budget 50 lac" → set_total_budget (convert lakhs → rupees: 1 lac = 100,000)
 - "Change Swati's number to X", "Her quote is now 80k" → update_vendor
 - "Move my lehenga pickup to Tuesday", "Make this high priority" → update_reminder
 - "The lehenga was 75k not 65k", "Mark Swati's advance as paid" → update_expense
@@ -14576,6 +14682,46 @@ app.get('/api/v2/dreamai/bride-idle/:userId', async (req, res) => {
 
     const ctx = await getBrideContextSummary(userId);
 
+    // PATCH B-6a: budget cold-open prompt — once-only, gated by activity.
+    // Fires if (a) budget_prompt_shown_at is null AND (b) the bride has
+    // booked at least one vendor OR has at least one expense logged.
+    // Once shown, write the timestamp so it never fires again.
+    let budgetPromptLine = null;
+    try {
+      const { data: budgetRow } = await supabase
+        .from('couple_budget')
+        .select('total_budget, budget_prompt_shown_at')
+        .eq('couple_id', userId)
+        .maybeSingle();
+      const totalBudget = Number(budgetRow?.total_budget) || 0;
+      const alreadyShown = !!budgetRow?.budget_prompt_shown_at;
+      const hasActivity = (ctx.vendors_booked > 0) || (ctx.expenses_paid > 0);
+      if (totalBudget === 0 && !alreadyShown && hasActivity) {
+        budgetPromptLine = "Want to set a total budget so I can pace you?";
+        // Write the timestamp first — if the response fails downstream we
+        // still don't want to re-prompt later. Idempotent: ensures the row
+        // exists (couple_budget GET endpoint creates default if missing,
+        // but the bride may not have visited it yet).
+        try {
+          if (budgetRow) {
+            await supabase
+              .from('couple_budget')
+              .update({ budget_prompt_shown_at: new Date().toISOString() })
+              .eq('couple_id', userId);
+          } else {
+            await supabase
+              .from('couple_budget')
+              .insert([{
+                couple_id: userId,
+                total_budget: 0,
+                event_envelopes: {},
+                budget_prompt_shown_at: new Date().toISOString(),
+              }]);
+          }
+        } catch (e) { /* timestamp write failure is non-fatal — we'll re-fire next idle */ }
+      }
+    } catch (e) { /* budget read failure: skip the prompt, fall through to normal idle */ }
+
     const promptText = `You are DreamAi — the bride's poetic AI inside Frost.
 
 Generate exactly TWO short observations (1 sentence each, under 18 words each) for the bride to see on her landing page right now. The voice is Cormorant-italic — warm, attentive, sometimes practical, sometimes poetic. Like a friend at the next table.
@@ -14610,6 +14756,11 @@ One line should reference her actual context. The other can be more poetic/obser
     const lines = text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2);
     if (lines.length < 2) {
       lines.push('Pick a colour for the morning. I will think about it with you.');
+    }
+    // PATCH B-6a: replace the second line with the budget cold-open if gated.
+    // Keeps the LLM's context-aware first line, surfaces the budget nudge below.
+    if (budgetPromptLine) {
+      lines[1] = budgetPromptLine;
     }
 
     BRIDE_IDLE_CACHE.set(userId, { hourBucket, lines });
@@ -14647,6 +14798,8 @@ const pendingSettles  = new Map();
 const pendingVendorDeletes   = new Map();
 const pendingExpenseDeletes  = new Map();
 const pendingReminderDeletes = new Map();
+// PATCH B-6a: budget set/update dry-run gate.
+const pendingBudgetSets = new Map();
 // PATCH B-4: drift resolves — the bride taps Yes on a "want me to add a
 // balance row?" / "want me to bump Swati's quote?" followup pill, the
 // followup handler reads the proposed fix from this Map and writes it.
@@ -14795,6 +14948,46 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
           delivered_count: msgs.length,
         });
       }
+    }
+
+    if (pendingBudgetSets.has(action_id)) {
+      // PATCH B-6a: bride tapped Lock in / Update on the budget confirm card.
+      const action = pendingBudgetSets.get(action_id);
+      if (action.coupleId !== userId) {
+        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+      }
+      pendingBudgetSets.delete(action_id);
+      try {
+        // Upsert pattern: GET endpoint already creates a default row, but
+        // the bride may have never visited that endpoint. Handle both cases.
+        const { data: existing } = await supabase
+          .from('couple_budget')
+          .select('id')
+          .eq('couple_id', userId)
+          .maybeSingle();
+        if (existing) {
+          const { error: updErr } = await supabase
+            .from('couple_budget')
+            .update({ total_budget: action.amount, updated_at: new Date().toISOString() })
+            .eq('couple_id', userId);
+          if (updErr) throw updErr;
+        } else {
+          const { error: insErr } = await supabase
+            .from('couple_budget')
+            .insert([{ couple_id: userId, total_budget: action.amount, event_envelopes: {} }]);
+          if (insErr) throw insErr;
+        }
+      } catch (err) {
+        return res.status(500).json({ success: false, error: err.message, reply: 'Something went sideways saving your budget. Try once more?' });
+      }
+      const verb = action.isUpdate ? 'updated' : 'set';
+      return res.json({
+        success: true,
+        reply: `✓ Budget ${verb} to ${formatINR(action.amount)}.`,
+        summaryLines: action.isUpdate
+          ? [`From ${formatINR(action.previousBudget)} to ${formatINR(action.amount)}`]
+          : [`Total budget: ${formatINR(action.amount)}`],
+      });
     }
 
     if (pendingReceipts.has(action_id)) {
@@ -17492,3 +17685,5 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PATCH B-4 LOADED ─── //
 
 // ─── PATCH B-5 LOADED ─── //
+
+// ─── PATCH B-6a LOADED ─── //
