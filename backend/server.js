@@ -16874,12 +16874,18 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
 
 const ADMIN_PASSWORD = 'Mira@2551354';
 
-function checkAdminAuth(req, res) {
+function checkAdminAuth(req, res, next) {
+  // Dual-purpose: works as Express middleware OR as in-handler gate.
+  //   Middleware: app.post(path, checkAdminAuth, handler)         → calls next() on pass, 401s on fail
+  //   Gate:       if (!checkAdminAuth(req, res)) return;          → returns true/false (next is undefined, conditional skipped)
+  // Fixed May 10 evening — previously broke all admin routes that wired this as middleware
+  // (cover-photos/upload, exploring-photos/upload, discover-heroes/* — they hung silently on success).
   const pwd = req.headers['x-admin-password'];
   if (pwd !== ADMIN_PASSWORD) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return false;
   }
+  if (typeof next === 'function') next();
   return true;
 }
 
