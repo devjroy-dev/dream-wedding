@@ -7935,7 +7935,38 @@ app.get('/api/couple/vendors/:coupleId', async (req, res) => {
       .eq('couple_id', coupleId)
       .order('created_at', { ascending: false });
     if (error) throw error;
-    res.json({ success: true, data: data || [] });
+
+    // PATCH B-5: attach paid_total to each vendor row.
+    // Fetch all paid expenses for the couple in one query, build a
+    // case-insensitive name → sum map, then walk vendors and attach.
+    // Vendor names are matched by exact lowercase comparison; substring
+    // matching would over-attribute (e.g. "Swati R" rolling up under
+    // "Swati Tomar"). The bride's actual flow logs payments against the
+    // vendor's saved name, so exact match is the correct discriminator.
+    const vendors = data || [];
+    let paidByName = new Map();
+    try {
+      const { data: paidExpenses } = await supabase
+        .from('couple_expenses')
+        .select('vendor_name, actual_amount')
+        .eq('couple_id', coupleId)
+        .eq('payment_status', 'paid');
+      for (const e of paidExpenses || []) {
+        if (!e.vendor_name) continue;
+        const key = e.vendor_name.toLowerCase().trim();
+        const prev = paidByName.get(key) || 0;
+        paidByName.set(key, prev + (Number(e.actual_amount) || 0));
+      }
+    } catch (e) {
+      // Expense fetch failure should not block the vendors list.
+      console.error('vendors list paid_total fetch error:', e.message);
+    }
+    const enriched = vendors.map(v => ({
+      ...v,
+      paid_total: paidByName.get((v.name || '').toLowerCase().trim()) || 0,
+    }));
+
+    res.json({ success: true, data: enriched });
   } catch (error) {
     console.error('vendors list error:', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -17459,3 +17490,5 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PATCH B-3a LOADED ─── //
 
 // ─── PATCH B-4 LOADED ─── //
+
+// ─── PATCH B-5 LOADED ─── //
