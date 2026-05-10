@@ -12765,12 +12765,14 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           is_custom: true,
         };
         if (due_date) insertData.due_date = due_date;
-        const { error } = await supabase.from('couple_checklist').insert([insertData]);
+        // PATCH B-3a: capture row.id so bride-chat can derive a tool_anchor for the View pill.
+        const { data: row, error } = await supabase.from('couple_checklist').insert([insertData]).select('id').single();
         if (error) throw error;
         return {
           ok: true,
           kind: 'atomic',
           reply: `✦ I'll remember: ${reminderText}${due_date ? ' · ' + due_date : ''}`,
+          task_id: row?.id,
         };
       }
 
@@ -17250,3 +17252,5 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PATCH B-1 LOADED ─── //
 
 // ─── PATCH B-2 LOADED ─── //
+
+// ─── PATCH B-3a LOADED ─── //
