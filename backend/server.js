@@ -17693,3 +17693,263 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PATCH B-5 LOADED ─── //
 
 // ─── PATCH B-6a LOADED ─── //
+
+// ═════════════════════════════════════════════════════════════════════════
+// SANCTUARY MODE — Pages endpoints (Session 29 evening)
+// ═════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/pages/summary?couple_id=…
+// Returns the three sub-line strings for the Sanctuary block labels:
+// muse (Haiku Vision when she has saves, fallback static), moments (locked copy),
+// pages (count-based template).
+// Cached for 1 hour per user via in-memory Map. No new infra.
+const _summaryCache = new Map(); // key: user_id, value: { ts, payload }
+const SUMMARY_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+app.get('/api/v2/pages/summary', async (req, res) => {
+  try {
+    const userId = req.query.couple_id || req.query.user_id;
+    if (!userId) return res.status(400).json({ success: false, error: 'couple_id required' });
+
+    // Check cache
+    const cached = _summaryCache.get(userId);
+    if (cached && (Date.now() - cached.ts) < SUMMARY_CACHE_MS) {
+      return res.json({ success: true, data: cached.payload, cached: true });
+    }
+
+    // Fetch counts in parallel
+    const [musesRes, vendorsRes, expensesRes] = await Promise.all([
+      supabase.from('moodboard_items').select('id, image_url, function_tag').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
+      supabase.from('couple_vendors').select('id', { count: 'exact', head: true }).eq('couple_id', userId),
+      supabase.from('couple_expenses').select('id', { count: 'exact', head: true }).eq('couple_id', userId),
+    ]);
+
+    const muses = musesRes.data || [];
+    const totalMusesRes = await supabase.from('moodboard_items').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+    const totalMusesCount = totalMusesRes.count || 0;
+    const vendorCount = vendorsRes.count || 0;
+    const expenseCount = expensesRes.count || 0;
+
+    // ── MUSE sub-line — Haiku Vision over last 5 saves
+    let museLine = 'Nothing yet.';
+    if (totalMusesCount > 0 && muses.length > 0) {
+      try {
+        const sampleImages = muses.filter(m => m.image_url).slice(0, 5).map(m => m.image_url);
+        const numWord = numberToWord(totalMusesCount);
+        if (sampleImages.length === 0) {
+          museLine = `${numWord} saved.`;
+        } else {
+          // Call Haiku for taste read — returns 1 short phrase
+          const tasteRead = await haikuTasteRead(sampleImages);
+          if (tasteRead && tasteRead.length > 0) {
+            museLine = `${numWord} saved. ${tasteRead}`;
+          } else {
+            museLine = `${numWord} saved.`;
+          }
+        }
+      } catch (err) {
+        console.error('[pages/summary muse]', err.message);
+        museLine = `${numberToWord(totalMusesCount)} saved.`;
+      }
+    }
+
+    // ── MOMENTS sub-line — locked copy
+    const momentsLine = 'These moments will always remind you of your journey.';
+
+    // ── PAGES sub-line — template with counts
+    let pagesLine;
+    if (vendorCount === 0 && expenseCount === 0) {
+      pagesLine = 'Quiet for now.';
+    } else if (vendorCount === 0) {
+      pagesLine = `${numberToWord(expenseCount)} ${expenseCount === 1 ? 'receipt' : 'receipts'} kept.`;
+    } else if (expenseCount === 0) {
+      pagesLine = `${numberToWord(vendorCount)} ${vendorCount === 1 ? 'vendor' : 'vendors'} held.`;
+    } else {
+      pagesLine = `${numberToWord(vendorCount)} ${vendorCount === 1 ? 'vendor' : 'vendors'}. ${numberToWord(expenseCount)} ${expenseCount === 1 ? 'receipt' : 'receipts'}.`;
+    }
+
+    const payload = { muse: museLine, moments: momentsLine, pages: pagesLine };
+    _summaryCache.set(userId, { ts: Date.now(), payload });
+    return res.json({ success: true, data: payload, cached: false });
+  } catch (err) {
+    console.error('[pages/summary]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Convert count to word for the small numbers (1-99). Above 99, use digits.
+function numberToWord(n) {
+  if (n < 0) return String(n);
+  if (n > 99) return String(n);
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  let word;
+  if (n === 0) word = 'zero';
+  else if (n < 10) word = ones[n];
+  else if (n < 20) word = teens[n - 10];
+  else {
+    const t = Math.floor(n / 10), o = n % 10;
+    word = o === 0 ? tens[t] : `${tens[t]}-${ones[o]}`;
+  }
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+// Haiku taste read — returns a short, italic-ready phrase about her saves.
+// Reuses the existing Anthropic client (assumed available in scope as `anthropic`).
+async function haikuTasteRead(imageUrls) {
+  if (!imageUrls || imageUrls.length === 0) return null;
+  if (!anthropic) return null;
+  try {
+    const blocks = imageUrls.slice(0, 5).map(url => ({
+      type: 'image',
+      source: { type: 'url', url },
+    }));
+    blocks.push({
+      type: 'text',
+      text: 'These are images a bride has saved to her wedding moodboard. In ONE short phrase (max 8 words), name the dominant aesthetic — colours, mood, or motif. Examples: "Mostly emerald and blush." / "Soft mandap light." / "Old-money quiet." No punctuation at the start. Single sentence ending with a period.',
+    });
+    const reply = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 60,
+      messages: [{ role: 'user', content: blocks }],
+    });
+    const text = reply?.content?.[0]?.text?.trim() || '';
+    if (!text) return null;
+    // Truncate at first newline or period+space
+    const clean = text.split('\n')[0].trim();
+    return clean.length > 64 ? null : clean;
+  } catch (err) {
+    console.error('[haikuTasteRead]', err.message);
+    return null;
+  }
+}
+
+// GET /api/v2/pages/:slice?couple_id=…
+// Returns structured payload for one Pages slice. Slices: vendors, money, dates.
+app.get('/api/v2/pages/:slice', async (req, res) => {
+  try {
+    const userId = req.query.couple_id || req.query.user_id;
+    if (!userId) return res.status(400).json({ success: false, error: 'couple_id required' });
+    const slice = String(req.params.slice || '').toLowerCase();
+
+    if (slice === 'vendors') {
+      const { data, error } = await supabase.from('couple_vendors')
+        .select('id, name, category, status, quoted_total, balance_due_date, events, phone, contract_url')
+        .eq('couple_id', userId)
+        .order('category', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) throw error;
+      // Group by category
+      const grouped = {};
+      for (const v of (data || [])) {
+        const cat = v.category || 'Other';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(v);
+      }
+      return res.json({ success: true, slice: 'vendors', data: grouped, total: (data || []).length });
+    }
+
+    if (slice === 'money') {
+      const groupBy = String(req.query.group_by || 'vendor').toLowerCase(); // 'vendor' | 'category'
+      const { data, error } = await supabase.from('couple_expenses')
+        .select('id, event, category, description, vendor_name, planned_amount, actual_amount, payment_status, due_date, created_at, receipt_url')
+        .eq('couple_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const rows = data || [];
+      // Aggregate
+      let totalPlanned = 0, totalActual = 0, totalOutstanding = 0;
+      for (const r of rows) {
+        totalPlanned += Number(r.planned_amount || 0);
+        totalActual += Number(r.actual_amount || 0);
+        if (r.payment_status !== 'paid') {
+          totalOutstanding += Number(r.actual_amount || r.planned_amount || 0);
+        }
+      }
+      // Group
+      const grouped = {};
+      for (const r of rows) {
+        const key = groupBy === 'category' ? (r.category || 'Other') : (r.vendor_name || 'Other');
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(r);
+      }
+      return res.json({
+        success: true, slice: 'money', group_by: groupBy, data: grouped,
+        totals: { planned: totalPlanned, actual: totalActual, outstanding: totalOutstanding },
+        total_rows: rows.length,
+      });
+    }
+
+    if (slice === 'dates') {
+      // UNION across events, expenses (created_at), vendors (created_at), checklist (completed_at)
+      const [eventsR, expensesR, vendorsR, checklistR] = await Promise.all([
+        supabase.from('couple_events').select('id, event_name, event_type, event_date, event_city, venue').eq('couple_id', userId).eq('is_active', true),
+        supabase.from('couple_expenses').select('id, description, vendor_name, actual_amount, planned_amount, payment_status, created_at').eq('couple_id', userId).order('created_at', { ascending: false }).limit(100),
+        supabase.from('couple_vendors').select('id, name, category, status, created_at').eq('couple_id', userId).order('created_at', { ascending: false }).limit(100),
+        supabase.from('couple_checklist').select('id, text, event, completed_at, priority').eq('couple_id', userId).eq('is_complete', true).not('completed_at', 'is', null).order('completed_at', { ascending: false }).limit(100),
+      ]);
+
+      const items = [];
+
+      for (const e of (eventsR.data || [])) {
+        if (!e.event_date) continue;
+        items.push({
+          id: 'event:' + e.id,
+          type: 'event',
+          date: e.event_date,
+          label: e.event_name || e.event_type || 'Event',
+          sub: e.event_city || e.venue || null,
+          ref_id: e.id,
+        });
+      }
+      for (const x of (expensesR.data || [])) {
+        items.push({
+          id: 'expense:' + x.id,
+          type: 'expense',
+          date: x.created_at,
+          label: x.description || 'Expense',
+          sub: x.vendor_name ? (x.payment_status === 'paid' ? `Paid to ${x.vendor_name}` : `Owed to ${x.vendor_name}`) : null,
+          amount: x.actual_amount || x.planned_amount,
+          ref_id: x.id,
+        });
+      }
+      for (const v of (vendorsR.data || [])) {
+        items.push({
+          id: 'vendor:' + v.id,
+          type: 'vendor',
+          date: v.created_at,
+          label: `${v.name}` + (v.status ? ` · ${v.status}` : ''),
+          sub: v.category || null,
+          ref_id: v.id,
+        });
+      }
+      for (const c of (checklistR.data || [])) {
+        items.push({
+          id: 'task:' + c.id,
+          type: 'task',
+          date: c.completed_at,
+          label: `Done — ${c.text || 'task'}`,
+          sub: c.event || null,
+          ref_id: c.id,
+        });
+      }
+
+      // Sort newest-first
+      items.sort((a, b) => {
+        const da = new Date(a.date).getTime();
+        const db = new Date(b.date).getTime();
+        return db - da;
+      });
+
+      return res.json({ success: true, slice: 'dates', data: items, total: items.length });
+    }
+
+    return res.status(400).json({ success: false, error: 'Unknown slice. Use: vendors | money | dates' });
+  } catch (err) {
+    console.error('[pages/:slice]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── PATCH SANCTUARY-PAGES LOADED ─── //
