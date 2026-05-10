@@ -12181,16 +12181,16 @@ RULES:
 const FROST_BRIDE_TOOLS = [
   {
     name: 'book_vendor',
-    description: 'Composite tool. Use when the bride says she has booked or finalized a vendor with a total price and (optionally) an advance amount. Example: "Booked Swati for 1 lakh, paid 30k advance". This will: (1) update vendor status to booked, (2) log the advance as a paid expense, (3) auto-create a balance reminder. After this, ASK YES/NO follow-ups for: thank-you note draft, share with circle.',
+    description: 'Composite tool. Use whenever the bride wants to add or book a vendor — with OR WITHOUT a total price. If she has booked with a price ("Booked Swati for 1 lakh, paid 30k advance"), it will: (1) update vendor status to booked, (2) log the advance as a paid expense, (3) auto-create a balance reminder. If she has only added them without a quote ("add Swati R as a jeweller, no quote yet"), it will simply add them with status=enquired — no expense, no reminder. After a booking with price, ASK YES/NO follow-ups for: thank-you note draft, share with circle.',
     input_schema: {
       type: 'object',
       properties: {
         vendor_name: { type: 'string', description: 'Vendor name as the bride said it (will be matched against her saved vendors).' },
-        total_price: { type: 'number', description: 'Total agreed price in rupees.' },
+        total_price: { type: 'number', description: 'Total agreed price in rupees. Optional — omit if the bride has not given a quote yet.' },
         advance: { type: 'number', description: 'Advance paid in rupees (optional).' },
         category: { type: 'string', description: 'Vendor category if not already in her saved list (mua, photographer, decorator, designer, jeweller, venue, caterer, choreographer, event, other).' },
       },
-      required: ['vendor_name', 'total_price'],
+      required: ['vendor_name'],
     },
   },
   {
@@ -12504,14 +12504,34 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
     switch (toolName) {
 
       case 'book_vendor': {
-        const { vendor_name, total_price, advance = 0, category = null, confirmed = false } = toolInput;
+        const { vendor_name, total_price = null, advance = 0, category = null, confirmed = false } = toolInput;
+        const hasQuote = total_price != null && total_price > 0;
 
         // FIX-4: dry-run gate — first call (LLM) returns preview; bride-confirm
         // replays with confirmed=true to actually write.
+        // PATCH B-1: when no quote, the confirm card describes a no-quote add.
         if (!confirmed) {
           const action_id = 'booking_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
           pendingBookings.set(action_id, { coupleId, vendor_name, total_price, advance, category });
           setTimeout(() => pendingBookings.delete(action_id), 10 * 60 * 1000);
+          if (!hasQuote) {
+            return {
+              ok: true,
+              kind: 'confirm-required',
+              reply: `Want me to add ${vendor_name}?`,
+              confirmPreview: {
+                summaryTitle: `Add ${vendor_name}?`,
+                summaryLines: [
+                  category ? `Category: ${category}` : 'Category: existing on file',
+                  'No quote yet — you can update later',
+                  'Status: enquired',
+                ],
+                confirmLabel: 'Add',
+                cancelLabel: 'Not yet',
+                action_id,
+              },
+            };
+          }
           const balance = total_price - advance;
           return {
             ok: true,
@@ -12607,22 +12627,24 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           }
         }
 
-        // 3. Update vendor: status=booked, quoted_total, balance_due_date
-        const updateData = { status: 'booked', quoted_total: total_price, source: 'dreamai', last_dreamai_action: new Date().toISOString() };
-        if (balanceDueDate) updateData.balance_due_date = balanceDueDate;
+        // 3. Update vendor: status=booked (with quote) OR enquired (no quote), quoted_total, balance_due_date
+        // PATCH B-1: when no quote, only mark status='enquired' and set source/last_dreamai_action.
+        const eventTag = (vendorRow.events && Array.isArray(vendorRow.events) && vendorRow.events.length > 0)
+          ? vendorRow.events[0]
+          : 'general';
+        const updateData = hasQuote
+          ? { status: 'booked', quoted_total: total_price, source: 'dreamai', last_dreamai_action: new Date().toISOString() }
+          : { status: 'enquired', source: 'dreamai', last_dreamai_action: new Date().toISOString() };
+        if (hasQuote && balanceDueDate) updateData.balance_due_date = balanceDueDate;
         const { error: updateErr } = await supabase
           .from('couple_vendors')
           .update(updateData)
           .eq('id', vendorRow.id);
         if (updateErr) throw updateErr;
 
-        // 4. Log advance as a paid expense (if any)
+        // 4. Log advance as a paid expense (if any) — only when there's a quote
         // Real schema: event (NOT NULL), category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date, notes
-        const eventTag = (vendorRow.events && Array.isArray(vendorRow.events) && vendorRow.events.length > 0)
-          ? vendorRow.events[0]
-          : 'general';
-
-        if (advance > 0) {
+        if (hasQuote && advance > 0) {
           const { error: expErr } = await supabase.from('couple_expenses').insert([{
             couple_id: coupleId,
             event: eventTag,
@@ -12638,8 +12660,8 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
 
         // 5. Also log a planned-but-unpaid expense for the balance, so the budget reflects total commitment
-        const balance = total_price - advance;
-        if (balance > 0) {
+        const balance = hasQuote ? (total_price - advance) : 0;
+        if (hasQuote && balance > 0) {
           const { error: balExpErr } = await supabase.from('couple_expenses').insert([{
             couple_id: coupleId,
             event: eventTag,
@@ -12655,10 +12677,10 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           if (balExpErr) console.error('[bride book_vendor balance expense]', balExpErr.message);
         }
 
-        // 6. Auto-create balance reminder in couple_checklist
+        // 6. Auto-create balance reminder in couple_checklist — only when there's a quote AND a balance
         // Real schema: id, couple_id, event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, ...
         let reminderCreated = false;
-        if (balance > 0) {
+        if (hasQuote && balance > 0) {
           let dueDate = balanceDueDate;
           if (!dueDate) {
             const fallback = new Date();
@@ -12678,6 +12700,23 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
 
         // 7. Build the structured response for Frost UI
+        // PATCH B-1: when no quote, summary + reply describe an enquired add, not a lock-in.
+        if (!hasQuote) {
+          const summaryLines = [
+            `${vendor_name} added as ${vendorRow.category || category || 'vendor'}`,
+            'Status: enquired',
+            'No quote yet — you can update her quote whenever you\'re ready',
+          ];
+          return {
+            ok: true,
+            kind: 'composite',
+            reply: `✓ Added ${vendor_name} to your list. You can update the quote whenever you're ready.`,
+            confirmPreview: null,
+            summaryLines,
+            followupPrompts: [],
+            vendor_id: vendorRow.id,
+          };
+        }
         const summaryLines = [
           `${vendor_name} — locked in as ${vendorRow.category || category}`,
           `₹${total_price.toLocaleString('en-IN')} total`,
@@ -12983,7 +13022,8 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         const target = matches[0];
         const newActual = (target.actual_amount || 0) + amount;
-        const newStatus = newActual >= (target.planned_amount || 0) ? 'paid' : 'pending';
+        const planned = target.planned_amount || 0;
+        const newStatus = newActual >= planned ? 'paid' : 'pending';
         const mergedNotes = note
           ? (target.notes ? target.notes + ' | ' + note : note)
           : target.notes;
@@ -12994,22 +13034,35 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           updated_at: new Date().toISOString(),
         }).eq('id', target.id);
         if (updateErr) throw updateErr;
-        const remaining = Math.max(0, (target.planned_amount || 0) - newActual);
+        // PATCH B-2: detect overpayment and surface it instead of "Fully settled".
+        const overpaid = newActual > planned && planned > 0 ? newActual - planned : 0;
+        const remaining = Math.max(0, planned - newActual);
         const summaryLines = [
           `Payment of ${formatINR(amount)} recorded`,
-          `Total paid: ${formatINR(newActual)} of ${formatINR(target.planned_amount || 0)}`,
-          remaining > 0 ? `Balance remaining: ${formatINR(remaining)}` : 'Fully settled',
+          `Total paid: ${formatINR(newActual)} of ${formatINR(planned)}`,
+          overpaid > 0
+            ? `Overpaid by ${formatINR(overpaid)} — the planned amount may be out of date`
+            : (remaining > 0 ? `Balance remaining: ${formatINR(remaining)}` : 'Fully settled'),
         ];
-        const followups = remaining > 0 ? [{
-          id: 'log_payment_remind_me',
-          text: `Want me to remind you when the next payment is due?`,
-          yesLabel: 'Yes, set reminder',
-          noLabel: 'Not now',
-        }] : [];
+        const followups = overpaid > 0
+          ? [{
+              id: 'log_payment_update_planned',
+              text: `Total paid is more than planned. Want me to update the planned amount to ${formatINR(newActual)}?`,
+              yesLabel: 'Yes, update',
+              noLabel: 'Leave as is',
+            }]
+          : (remaining > 0 ? [{
+              id: 'log_payment_remind_me',
+              text: `Want me to remind you when the next payment is due?`,
+              yesLabel: 'Yes, set reminder',
+              noLabel: 'Not now',
+            }] : []);
         return {
           ok: true,
           kind: 'composite',
-          reply: `✓ ${formatINR(amount)} logged for ${target.vendor_name}.`,
+          reply: overpaid > 0
+            ? `✓ ${formatINR(amount)} logged for ${target.vendor_name}. Note: paid is now ${formatINR(overpaid)} over the planned amount.`
+            : `✓ ${formatINR(amount)} logged for ${target.vendor_name}.`,
           confirmPreview: null,
           summaryLines,
           followupPrompts: followups,
@@ -13075,6 +13128,10 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         const target = matches[0];
         const settleAmount = amount_override != null ? amount_override : (target.planned_amount || 0);
+        const planned = target.planned_amount || 0;
+        // PATCH B-2: detect overpayment on settle (only meaningful when bride
+        // passed amount_override > planned — naked settle uses planned itself).
+        const overpaid = settleAmount > planned && planned > 0 ? settleAmount - planned : 0;
         const { error: expErr } = await supabase.from('couple_expenses').update({
           actual_amount: settleAmount,
           payment_status: 'paid',
@@ -13091,22 +13148,41 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           .eq('couple_id', coupleId)
           .eq('is_custom', true)
           .ilike('text', `%balance%${vendor_name}%`);
+        const settleSummary = [
+          `Final payment of ${formatINR(settleAmount)} recorded`,
+          `Vendor marked as paid`,
+          `Balance reminder cleared`,
+        ];
+        if (overpaid > 0) {
+          settleSummary.push(`Overpaid by ${formatINR(overpaid)} — the planned amount may be out of date`);
+        }
+        const settleFollowups = overpaid > 0
+          ? [{
+              id: 'settle_update_planned',
+              text: `Total paid is more than planned. Want me to update the planned amount to ${formatINR(settleAmount)}?`,
+              yesLabel: 'Yes, update',
+              noLabel: 'Leave as is',
+            }, {
+              id: 'settle_thank_you',
+              text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
+              yesLabel: 'Yes, draft it',
+              noLabel: 'Not now',
+            }]
+          : [{
+              id: 'settle_thank_you',
+              text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
+              yesLabel: 'Yes, draft it',
+              noLabel: 'Not now',
+            }];
         return {
           ok: true,
           kind: 'composite',
-          reply: `✓ ${target.vendor_name} fully settled.`,
+          reply: overpaid > 0
+            ? `✓ ${target.vendor_name} settled. Note: total paid is ${formatINR(overpaid)} over the planned amount.`
+            : `✓ ${target.vendor_name} fully settled.`,
           confirmPreview: null,
-          summaryLines: [
-            `Final payment of ${formatINR(settleAmount)} recorded`,
-            `Vendor marked as paid`,
-            `Balance reminder cleared`,
-          ],
-          followupPrompts: [{
-            id: 'settle_thank_you',
-            text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
-            yesLabel: 'Yes, draft it',
-            noLabel: 'Not now',
-          }],
+          summaryLines: settleSummary,
+          followupPrompts: settleFollowups,
           // FIX-3: return expense_id for anchor routing — long-press jumps to expense
           expense_id: target.id,
         };
@@ -13975,6 +14051,9 @@ UPDATE BEHAVIOR:
 - Updates are NOT confirm-required (small edits don't need ceremony).
 - If the bride's match phrase narrows to multiple rows, ask which one before updating.
 - After a successful update, narrate briefly: "Updated Swati — phone."
+
+TRUTHFUL CONFIRMATIONS (CRITICAL):
+NEVER narrate a successful action with words like 'Done', 'Saved', 'Logged', 'Added' unless you have actually called the corresponding tool and received a result with ok: true. If you cannot call any tool that fits the bride's intent, say so plainly: "I can't quite do that yet — would you like me to do X instead?" Never invent vendor names, expense IDs, dates, or other data to appear helpful. When tools return kind: 'clarify' or kind: 'unsure', surface those results exactly — do not paraphrase or fabricate. If you find yourself wanting to list multiple options to the bride, that is a clarify situation — call the corresponding tool with proper input, never make up the list yourself.
 
 KEEP REPLIES SHORT.
 She is reading on a phone, often quickly. One or two sentences, max three. The product is meant to feel light.${routingContext}`;
@@ -17167,3 +17246,7 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
 // ─── PHASE 1.6.1 LOADED ─── //
 
 // ─── PHASE 1.7 LOADED ─── //
+
+// ─── PATCH B-1 LOADED ─── //
+
+// ─── PATCH B-2 LOADED ─── //
