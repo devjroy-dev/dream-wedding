@@ -2549,7 +2549,8 @@ app.post('/api/vendor/onboard', async (req, res) => {
   }
 });
 
-// Vendor login — phone + password
+// DEPRECATED: legacy password-based login. Now reads vendors.pin_hash directly.
+// Kept for PWA backward compatibility. New code → /api/v2/auth/verify-pin.
 app.post('/api/vendor/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
@@ -2562,25 +2563,16 @@ app.post('/api/vendor/login', async (req, res) => {
     }
     const fullPhone = '+91' + cleanPhone;
 
-    // Look up credentials by phone (this is where passwords live for ALL vendors,
-    // both signup-flow vendors and admin-created ones)
-    const { data: cred } = await supabase
-      .from('vendor_credentials').select('*').eq('phone_number', fullPhone).maybeSingle();
+    // Look up vendor by phone in the vendors table directly; pin_hash is canonical.
+    // Note: vendors.phone is stored as a 10-digit string (cleanPhone), not the +91 form.
+    const { data: vendor } = await supabase
+      .from('vendors').select('*').eq('phone', cleanPhone).maybeSingle();
 
-    if (!cred || !cred.password_hash) {
+    if (!vendor || !vendor.pin_hash) {
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
-    const match = await bcrypt.compare(password, cred.password_hash);
+    const match = await bcrypt.compare(password, vendor.pin_hash);
     if (!match) return res.status(401).json({ success: false, error: 'Invalid phone or password' });
-
-    // Now load the vendor row
-    const { data: vendor } = await supabase
-      .from('vendors').select('*').eq('id', cred.vendor_id).maybeSingle();
-    if (!vendor) {
-      // Orphan credentials — auto-clean and reject
-      try { await supabase.from('vendor_credentials').delete().eq('id', cred.id); } catch {}
-      return res.status(401).json({ success: false, error: 'Account no longer exists' });
-    }
 
     // Get tier
     let tier = 'essential';
@@ -4534,6 +4526,52 @@ app.post('/api/v2/invite/validate', async (req, res) => {
   }
 });
 
+// POST /api/v2/invite/consume
+// Marks an invite code as used after successful PIN setup.
+// Idempotent: same user can re-consume the same code without error.
+// Different user re-consuming → 400 error (code already used).
+app.post('/api/v2/invite/consume', async (req, res) => {
+  try {
+    const { code, user_id } = req.body || {};
+    if (!code || !user_id) return res.status(400).json({ success: false, error: 'code and user_id required' });
+
+    const codeStr = String(code).toUpperCase().trim();
+
+    const { data: row, error: readErr } = await supabase
+      .from('access_codes')
+      .select('id, used, used_count, used_by_user_id, expires_at, type')
+      .eq('code', codeStr)
+      .maybeSingle();
+    if (readErr || !row) return res.status(404).json({ success: false, error: 'Invalid code' });
+    if (row.expires_at && new Date(row.expires_at) < new Date()) {
+      return res.status(400).json({ success: false, error: 'Code expired' });
+    }
+
+    // Already used by THIS user → idempotent success
+    if (row.used && row.used_by_user_id === user_id) {
+      return res.json({ success: true, idempotent: true });
+    }
+    if (row.used && row.used_count >= 1) {
+      return res.status(400).json({ success: false, error: 'Code already used' });
+    }
+
+    const { error: updErr } = await supabase
+      .from('access_codes')
+      .update({
+        used: true,
+        used_count: 1,
+        used_by_user_id: user_id,
+        used_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+    if (updErr) return res.status(500).json({ success: false, error: updErr.message });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/v2/couple/auth/send-otp — direct implementation (no redirect)
 app.post('/api/v2/couple/auth/send-otp', async (req, res) => {
   try {
@@ -4594,13 +4632,27 @@ app.post('/api/v2/couple/auth/verify-otp', async (req, res) => {
       if (otpCode !== '123456') return res.status(400).json({ success: false, error: 'OTP service unavailable.' });
     }
 
+    // Optional invite code → derive tier for newly-created user (admin still has final tier authority).
+    // Code is NOT consumed here — consumption happens after PIN is set via /api/v2/invite/consume.
+    let tierFromCode = null;
+    if (req.body.invite_code) {
+      const { data: codeRow } = await supabase
+        .from('access_codes')
+        .select('tier, type, expires_at, used, used_count')
+        .eq('code', String(req.body.invite_code).toUpperCase().trim())
+        .maybeSingle();
+      if (codeRow && !codeRow.used && (!codeRow.expires_at || new Date(codeRow.expires_at) > new Date())) {
+        tierFromCode = codeRow.tier;
+      }
+    }
+
     // Find or create user
     // PIN authentication uses pin_hash exclusively (post-cleanup May 2026).
     // password_hash is reserved for vendor passwords on the vendors table only.
     // Legacy couple users were cleaned manually; no migration script needed.
     let { data: user } = await supabase.from('users').select('id, name, pin_hash, couple_tier, dreamer_type').eq('phone', fullPhone).maybeSingle();
     if (!user) {
-      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: 'lite' }]).select('id, name, pin_hash, couple_tier, dreamer_type').single();
+      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: tierFromCode || 'lite' }]).select('id, name, pin_hash, couple_tier, dreamer_type').single();
       user = created;
     }
     const pinSet = !!user.pin_hash;
@@ -7152,7 +7204,8 @@ app.post('/api/couple/waitlist', async (req, res) => {
 // COUPLE V2 — Auth + Access Waitlist (Session 10 Turn 8A)
 // ══════════════════════════════════════════════════════════════
 
-// Password login — phone + password
+// DEPRECATED: legacy password-based login. Now reads pin_hash for PIN-as-password.
+// Kept for PWA backward compatibility. New code → /api/v2/auth/verify-pin.
 app.post('/api/couple/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
@@ -7168,12 +7221,12 @@ app.post('/api/couple/login', async (req, res) => {
     const { data: user } = await supabase
       .from('users').select('*').eq('phone', fullPhone).maybeSingle();
 
-    if (!user || !user.password_hash) {
+    if (!user || !user.pin_hash) {
       // Don't reveal whether the account exists — just say invalid
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
 
-    const match = await bcrypt.compare(password, user.password_hash);
+    const match = await bcrypt.compare(password, user.pin_hash);
     if (!match) {
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
