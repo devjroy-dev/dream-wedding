@@ -9,6 +9,18 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { createClient } = require('@supabase/supabase-js');
+const rateLimit = require('express-rate-limit');
+
+// Backend rate-limit for PIN verification. Frontend has a 5-attempt lockout
+// in couple-pin-login.tsx but a direct caller can bypass it. 5 attempts /
+// 15 min per IP applies to /api/v2/auth/verify-pin (both couple and vendor).
+const pinAttemptLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many PIN attempts. Try again in 15 minutes.' },
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -11654,7 +11666,7 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
 });
 
 // V9 restore: verify-pin and set-pin endpoints
-app.post('/api/v2/auth/verify-pin', async (req, res) => {
+app.post('/api/v2/auth/verify-pin', pinAttemptLimiter, async (req, res) => {
   try {
     let { phone, pin, role, userId } = req.body;
     if (!pin) return res.status(400).json({ success: false, error: 'PIN required' });
