@@ -15527,6 +15527,42 @@ async function fetchWebSuggestions(query, limit) {
   }
 }
 
+// Re-host an external image URL to Cloudinary so it never expires.
+// Cloudinary 'url' upload param: we pass the source URL and Cloudinary
+// fetches + stores it under our account. Returns permanent secure_url.
+// Falls back to sourceUrl on any error so the save always succeeds.
+async function rehostToCloudinary(sourceUrl) {
+  const CLOUD = 'dccso5ljv';
+  const PRESET = 'dream_wedding_uploads';
+  try {
+    const body = new URLSearchParams();
+    body.append('file', sourceUrl);
+    body.append('upload_preset', PRESET);
+    body.append('tags', 'muse_save');
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 12000);
+    const r = await fetch(
+      'https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload',
+      { method: 'POST', body, signal: ctrl.signal }
+    );
+    clearTimeout(timeout);
+    if (!r.ok) {
+      console.error('[rehostToCloudinary] status:', r.status);
+      return sourceUrl;
+    }
+    const j = await r.json();
+    if (j.error) {
+      console.error('[rehostToCloudinary] error:', j.error.message);
+      return sourceUrl;
+    }
+    // Add transforms: auto quality/format, 800px wide, face-aware crop
+    return j.secure_url.replace('/upload/', '/upload/q_auto,f_auto,w_800,c_fill,g_auto/');
+  } catch (e) {
+    console.error('[rehostToCloudinary]', e.message);
+    return sourceUrl;
+  }
+}
+
 // Resolve a page URL (Pinterest, Instagram, or generic) to a renderable image URL.
 // Returns direct CDN image URL or null.
 //
@@ -15555,8 +15591,9 @@ async function fetchOgImage(pageUrl) {
       if (r.ok) {
         const j = await r.json();
         if (j && j.thumbnail_url) {
-          // Upgrade from thumbnail (236x) to larger size (736x) for better tile quality
-          return j.thumbnail_url.replace(/\/\d+x\//, '/736x/');
+          // Upgrade size then rehost to Cloudinary for permanence
+          const pinUrl = j.thumbnail_url.replace(/\/\d+x\//, '/736x/');
+          return await rehostToCloudinary(pinUrl);
         }
       }
     } catch (e) {
@@ -15581,7 +15618,7 @@ async function fetchOgImage(pageUrl) {
       clearTimeout(timeout);
       if (r.ok) {
         const j = await r.json();
-        if (j && j.thumbnail_url) return j.thumbnail_url;
+        if (j && j.thumbnail_url) return await rehostToCloudinary(j.thumbnail_url);
       }
     } catch (e) {
       console.error('[fetchOgImage instagram noembed]', e.message);
@@ -15614,7 +15651,7 @@ async function fetchOgImage(pageUrl) {
     ];
     for (const pat of ogPatterns) {
       const m = html.match(pat);
-      if (m && m[1] && m[1].startsWith('http')) return m[1].replace(/&amp;/g, '&');
+      if (m && m[1] && m[1].startsWith('http')) return await rehostToCloudinary(m[1].replace(/&amp;/g, '&'));
     }
     // twitter:image fallback
     const twitterPatterns = [
@@ -15623,7 +15660,7 @@ async function fetchOgImage(pageUrl) {
     ];
     for (const pat of twitterPatterns) {
       const m = html.match(pat);
-      if (m && m[1] && m[1].startsWith('http')) return m[1].replace(/&amp;/g, '&');
+      if (m && m[1] && m[1].startsWith('http')) return await rehostToCloudinary(m[1].replace(/&amp;/g, '&'));
     }
     return null;
   } catch {
