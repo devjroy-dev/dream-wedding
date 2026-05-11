@@ -4583,15 +4583,15 @@ app.post('/api/v2/couple/auth/verify-otp', async (req, res) => {
     }
 
     // Find or create user
-    // NOTE: legacy accounts store the 4-digit PIN in password_hash. Treat either
-    // pin_hash or password_hash as evidence the user has a PIN set. verify-pin
-    // mirrors this fallback and migrates password_hash -> pin_hash on success.
-    let { data: user } = await supabase.from('users').select('id, name, pin_hash, password_hash, couple_tier, dreamer_type').eq('phone', fullPhone).maybeSingle();
+    // PIN authentication uses pin_hash exclusively (post-cleanup May 2026).
+    // password_hash is reserved for vendor passwords on the vendors table only.
+    // Legacy couple users were cleaned manually; no migration script needed.
+    let { data: user } = await supabase.from('users').select('id, name, pin_hash, couple_tier, dreamer_type').eq('phone', fullPhone).maybeSingle();
     if (!user) {
-      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: 'lite' }]).select('id, name, pin_hash, password_hash, couple_tier, dreamer_type').single();
+      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: 'lite' }]).select('id, name, pin_hash, couple_tier, dreamer_type').single();
       user = created;
     }
-    const pinSet = !!(user.pin_hash || user.password_hash);
+    const pinSet = !!user.pin_hash;
     const isNewUser = !user.name;
     return res.json({
       success: true,
@@ -11677,39 +11677,20 @@ app.post('/api/v2/auth/verify-pin', async (req, res) => {
       return res.json({ success: true, userId: vendor.id, name: vendor.name || null, vendor_tier: sub?.tier || 'essential' });
     }
 
-    // Couple
+    // Couple — pin_hash only (post-cleanup May 2026; password_hash is vendor-only)
     let user = null;
     if (userId) {
-      const { data } = await supabase.from('users').select('id, pin_hash, password_hash, name, couple_tier, dreamer_type').eq('id', userId).maybeSingle();
+      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier, dreamer_type').eq('id', userId).maybeSingle();
       user = data;
     }
     if (!user && phone) {
       const bare = ('' + phone).replace(/\D/g, '').slice(-10);
-      const { data } = await supabase.from('users').select('id, pin_hash, password_hash, name, couple_tier, dreamer_type').eq('phone', '+91' + bare).maybeSingle();
+      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier, dreamer_type').eq('phone', '+91' + bare).maybeSingle();
       user = data;
     }
-    if (!user || (!user.pin_hash && !user.password_hash)) return res.json({ success: false, error: 'Account not found' });
-    // Try pin_hash first (canonical), fall back to password_hash (legacy).
-    let match = false;
-    let usedLegacy = false;
-    if (user.pin_hash) {
-      match = await bcrypt.compare(pin, user.pin_hash);
-    }
-    if (!match && user.password_hash) {
-      match = await bcrypt.compare(pin, user.password_hash);
-      if (match) usedLegacy = true;
-    }
+    if (!user || !user.pin_hash) return res.json({ success: false, error: 'Account not found' });
+    const match = await bcrypt.compare(pin, user.pin_hash);
     if (!match) return res.json({ success: false, error: 'Incorrect PIN' });
-    // Migrate legacy PIN: write password_hash value into pin_hash so the next
-    // login uses the canonical column. Fire and forget — login should not block
-    // on this. We don't clear password_hash because other code paths may still
-    // rely on it during the transition.
-    if (usedLegacy) {
-      supabase.from('users').update({ pin_hash: user.password_hash }).eq('id', user.id).then(
-        () => console.log('[verify-pin] migrated legacy PIN for user', user.id),
-        (e) => console.warn('[verify-pin] PIN migration failed for user', user.id, e?.message || e)
-      );
-    }
     return res.json({ success: true, userId: user.id, name: user.name || null, couple_tier: user.couple_tier || 'lite', dreamer_type: user.dreamer_type || user.couple_tier || 'lite' });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -11723,10 +11704,20 @@ app.post('/api/v2/auth/set-pin', async (req, res) => {
     if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
     const bcrypt = require('bcryptjs');
     const pin_hash = await bcrypt.hash(pin, 10);
-    const table = role === 'vendor' ? 'vendors' : 'users';
+    if (role === 'vendor') {
+      const { data, error } = await supabase
+        .from('vendors')
+        .update({ pin_hash })
+        .eq('phone', phone)
+        .select('id')
+        .single();
+      if (error || !data) return res.status(400).json({ error: 'Account not found' });
+      return res.json({ success: true, userId: data.id });
+    }
+    // Couple: write pin_hash, clear any legacy password_hash, stamp pin_set_at.
     const { data, error } = await supabase
-      .from(table)
-      .update({ pin_hash })
+      .from('users')
+      .update({ pin_hash, password_hash: null, pin_set_at: new Date().toISOString() })
       .eq('phone', phone)
       .select('id')
       .single();
