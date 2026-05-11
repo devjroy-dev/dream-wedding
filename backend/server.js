@@ -11271,6 +11271,54 @@ app.get('/api/v2/couple/profile/:userId', async (req, res) => {
   }
 });
 
+// PATCH /api/v2/couple/profile/:userId — partial update of bride profile fields
+// Serves the 4 save sections of Frost Settings (app/(frost)/canvas/journey/settings.tsx).
+app.patch('/api/v2/couple/profile/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
+
+    const allowed = [
+      'name',
+      'partner_name',
+      'wedding_date',
+      'photo_url',
+      'wedding_events',
+      'guest_count',
+      'discovery_categories',
+      'discovery_city',
+      'residence_country',
+      'phone',
+    ];
+    const payload = {};
+    for (const k of allowed) {
+      if (req.body && req.body[k] !== undefined) payload[k] = req.body[k];
+    }
+    if (Object.keys(payload).length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid fields to update' });
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(payload)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[PATCH /api/v2/couple/profile] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. GET /api/v2/couple/tokens/:userId
 //    Returns { balance, remaining } from users.token_balance
@@ -12105,6 +12153,23 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
           created_at: new Date().toISOString(),
         }]);
         if (error) throw error;
+        try {
+          await supabase.from('circle_activity_events').insert([{
+            couple_id: String(coupleId),
+            actor_user_id: String(coupleId),
+            actor_role: 'bride',
+            event_type: 'muse_saved',
+            payload: {
+              image_url: source_url,
+              function_tag: function_tag || null,
+              source: 'bride_dreamai',
+            },
+            entity_type: 'muse',
+            entity_id: null,
+          }]);
+        } catch (e) {
+          console.error('[muse activity event]', e.message);
+        }
         return `✓ Saved to Muse board${title ? ': ' + title : ''}`;
       }
 
@@ -13647,6 +13712,23 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         if (vendor_id) insertRow.vendor_id = vendor_id;
         const { error } = await supabase.from('moodboard_items').insert([insertRow]);
         if (error) throw error;
+        try {
+          await supabase.from('circle_activity_events').insert([{
+            couple_id: String(coupleId),
+            actor_user_id: String(coupleId),
+            actor_role: 'bride',
+            event_type: 'muse_saved',
+            payload: {
+              image_url,
+              function_tag: function_tag || null,
+              source: 'bride_dreamai',
+            },
+            entity_type: 'muse',
+            entity_id: null,
+          }]);
+        } catch (e) {
+          console.error('[muse activity event]', e.message);
+        }
         const summaryLines = [
           'Saved to your Muse',
           function_tag ? `Tagged: ${function_tag}` : 'No ceremony tag yet',
@@ -15894,10 +15976,20 @@ app.get('/api/v2/frost/circle/threads/:userId/:threadId/messages', async (req, r
 // Bride sends a message to a thread. Writes circle_messages + activity event.
 app.post('/api/v2/frost/circle/messages', async (req, res) => {
   try {
-    const { userId, thread_id, body, sender_name = 'You' } = req.body || {};
+    const {
+      userId,
+      thread_id,
+      body,
+      sender_name = 'You',
+      sender_user_id = null,
+      sender_role = null,
+    } = req.body || {};
     if (!userId || !thread_id || !body) {
       return res.status(400).json({ success: false, error: 'userId, thread_id, and body required' });
     }
+
+    const actualSenderId = sender_user_id || userId;
+    const actualSenderRole = sender_role || (actualSenderId === userId ? 'bride' : 'co_planner');
 
     const isGroup = thread_id.startsWith('grp:');
     const group_id = isGroup ? thread_id.replace('grp:', '') : null;
@@ -15906,9 +15998,9 @@ app.post('/api/v2/frost/circle/messages', async (req, res) => {
     const { data, error } = await supabase.from('circle_messages').insert([{
       couple_id: userId,
       thread_id,
-      sender_user_id: userId,
+      sender_user_id: actualSenderId,
       sender_name,
-      sender_role: 'bride',
+      sender_role: actualSenderRole,
       content: body,
       group_id,
       recipient_co_planner_id: co_planner_id,
@@ -15916,15 +16008,19 @@ app.post('/api/v2/frost/circle/messages', async (req, res) => {
 
     if (error) return res.status(500).json({ success: false, error: error.message });
 
-    await supabase.from('circle_activity_events').insert([{
-      couple_id: userId,
-      actor_user_id: userId,
-      actor_role: 'bride',
-      event_type: 'circle_message_sent',
-      payload: { thread_id, preview: body.slice(0, 80) },
-      entity_type: 'thread',
-      entity_id: thread_id,
-    }]);
+    try {
+      await supabase.from('circle_activity_events').insert([{
+        couple_id: userId,
+        actor_user_id: actualSenderId,
+        actor_role: actualSenderRole,
+        event_type: 'circle_message_sent',
+        payload: { thread_id, preview: body.slice(0, 80) },
+        entity_type: 'thread',
+        entity_id: thread_id,
+      }]);
+    } catch (e) {
+      console.error('[circle message activity event]', e.message);
+    }
 
     res.json({ success: true, data });
   } catch (err) {
