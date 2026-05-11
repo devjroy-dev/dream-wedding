@@ -14553,10 +14553,18 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
           console.error('[bride-chat vision classify]', e.message);
           routingHint = { kind: 'image_unclassified', image_url: firstUrl };
         }
-      } else if (urlKind === 'pinterest_inspiration') {
-        routingHint = { kind: 'pinterest_inspiration', image_url: firstUrl };
-      } else if (urlKind === 'instagram_link') {
-        routingHint = { kind: 'instagram_link', image_url: firstUrl };
+      } else if (urlKind === 'pinterest_inspiration' || urlKind === 'instagram_link') {
+        // Resolve the HTML page URL to the actual og:image asset so moodboard
+        // tiles can render. fetchOgImage has a 4s timeout and returns null on
+        // failure — we fall back to the raw URL (no regression vs prior).
+        let resolvedUrl = firstUrl;
+        try {
+          const ogImage = await fetchOgImage(firstUrl);
+          if (ogImage) resolvedUrl = ogImage;
+        } catch (e) {
+          console.error('[bride-chat og resolve]', e.message);
+        }
+        routingHint = { kind: urlKind, image_url: resolvedUrl, original_url: firstUrl };
       }
     } catch (e) {
       console.error('[bride-chat routing preprocess]', e.message);
