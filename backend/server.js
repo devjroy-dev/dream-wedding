@@ -12501,7 +12501,8 @@ const FROST_BRIDE_TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        image_url: { type: 'string', description: "URL of the inspiration. Pinterest, Instagram, or any image URL she pasted. Required." },
+        image_url: { type: 'string', description: "Direct renderable image URL (CDN). For Pinterest use resolved pinimg.com URL; for Instagram use resolved cdninstagram.com URL. Required." },
+        source_url: { type: 'string', description: "Optional. The original Pinterest/Instagram page URL she pasted. Stored separately from image_url for reference." },
         function_tag: { type: 'string', description: "Optional ceremony tag — 'haldi', 'mehendi', 'reception', 'sangeet', 'wedding', 'general'. Use general if unsure." },
         note: { type: 'string', description: "Optional bride's note about why she saved this." },
         vendor_id: { type: 'string', description: "Optional vendor UUID if this saves is associated with a TDW vendor." },
@@ -13699,7 +13700,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
 
       // ── ZIP 4: save_to_muse (real schema) ──
       case 'save_to_muse': {
-        const { image_url, function_tag = null, note = null, vendor_id = null } = toolInput || {};
+        const { image_url, source_url = null, function_tag = null, note = null, vendor_id = null } = toolInput || {};
         if (!image_url) {
           return { ok: false, kind: 'unknown', reply: "I'll need a link or image to save." };
         }
@@ -13707,6 +13708,8 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           user_id: coupleId,
           image_url,
         };
+        // Preserve original page URL (Pinterest/Instagram post) separately from CDN image
+        if (source_url) insertRow.source_url = source_url;
         if (function_tag) insertRow.function_tag = function_tag;
         if (note) insertRow.note = note;
         if (vendor_id) insertRow.vendor_id = vendor_id;
@@ -14317,9 +14320,19 @@ function buildBrideSystemPrompt(coupleId, opts = {}) {
     } else if (routingHint.kind === 'image_unclassified') {
       routingContext = `\n\nROUTING HINT: The bride sent an image at ${routingHint.image_url}. Classification failed. Ask her plainly what she'd like done with it.`;
     } else if (routingHint.kind === 'pinterest_inspiration') {
-      routingContext = `\n\nROUTING HINT: The bride pasted a Pinterest link: ${routingHint.image_url}. This is almost certainly inspiration. Use save_to_muse with image_url=${routingHint.image_url} unless her text clearly contradicts.`;
+      const pResolved = routingHint.original_url && routingHint.image_url !== routingHint.original_url;
+      if (pResolved) {
+        routingContext = '\n\nROUTING HINT: Pinterest image resolved. Call save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.original_url + '. This is inspiration — save it unless her text clearly contradicts.';
+      } else {
+        routingContext = '\n\nROUTING HINT: The bride pasted a Pinterest link but the image could not be resolved. Use save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.image_url + '. The tile may show a link instead of a preview.';
+      }
     } else if (routingHint.kind === 'instagram_link') {
-      routingContext = `\n\nROUTING HINT: The bride pasted an Instagram link: ${routingHint.image_url}. This is likely inspiration or a vendor reference. Use save_to_muse with image_url=${routingHint.image_url} unless she explicitly mentions a vendor name (then use book_vendor / query_my_vendors).`;
+      const iResolved = routingHint.original_url && routingHint.image_url !== routingHint.original_url;
+      if (iResolved) {
+        routingContext = '\n\nROUTING HINT: Instagram image resolved. Call save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.original_url + '. Unless she mentions a vendor name (use book_vendor instead).';
+      } else {
+        routingContext = '\n\nROUTING HINT: The bride pasted an Instagram link but the image could not be resolved (private account, reel, or carousel). Reply: that post is not publicly accessible — could she share a screenshot instead? Do not call save_to_muse yet.';
+      }
     }
   }
 
@@ -15514,34 +15527,110 @@ async function fetchWebSuggestions(query, limit) {
   }
 }
 
-// Fetch og:image meta from a page URL. Returns image URL or null.
+// Resolve a page URL (Pinterest, Instagram, or generic) to a renderable image URL.
+// Returns direct CDN image URL or null.
+//
+// Strategy per platform:
+//   Pinterest  → official oEmbed (thumbnail_url, no auth, pinimg.com CDN)
+//   Instagram  → noembed.com aggregator (thumbnail_url, no auth)
+//   Generic    → og:image / twitter:image meta scrape, full Chrome UA
 async function fetchOgImage(pageUrl) {
+  const isPinterest = /pinterest\.[a-z.]+|pin\.it/i.test(pageUrl);
+  const isInstagram = /instagram\.com|instagr\.am/i.test(pageUrl);
+
+  // Strategy 1: Pinterest oEmbed ─────────────────────────────────────────────
+  // Returns { thumbnail_url } — reliable, no auth, pinimg.com CDN URL.
+  if (isPinterest) {
+    try {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 5000);
+      const r = await fetch(
+        'https://www.pinterest.com/oembed/?url=' + encodeURIComponent(pageUrl),
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)', 'Accept': 'application/json' },
+          signal: ctrl.signal,
+        }
+      );
+      clearTimeout(timeout);
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.thumbnail_url) {
+          // Upgrade from thumbnail (236x) to larger size (736x) for better tile quality
+          return j.thumbnail_url.replace(/\/\d+x\//, '/736x/');
+        }
+      }
+    } catch (e) {
+      console.error('[fetchOgImage pinterest oembed]', e.message);
+    }
+    return null; // Pinterest OG scrape is JS-rendered — skip generic fallback
+  }
+
+  // Strategy 2: Instagram via noembed.com ────────────────────────────────────
+  // Free oEmbed aggregator, works without Meta app token for public posts.
+  if (isInstagram) {
+    try {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 5000);
+      const r = await fetch(
+        'https://noembed.com/embed?url=' + encodeURIComponent(pageUrl),
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)', 'Accept': 'application/json' },
+          signal: ctrl.signal,
+        }
+      );
+      clearTimeout(timeout);
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.thumbnail_url) return j.thumbnail_url;
+      }
+    } catch (e) {
+      console.error('[fetchOgImage instagram noembed]', e.message);
+    }
+    return null; // Instagram blocks all direct page fetches — no generic fallback
+  }
+
+  // Strategy 3: Generic og:image / twitter:image scrape ─────────────────────
+  // Full Chrome UA improves success rate on general sites.
   try {
     const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 4000);
+    const timeout = setTimeout(() => ctrl.abort(), 5000);
     const res = await fetch(pageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)',
-        'Accept': 'text/html',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cache-Control': 'no-cache',
       },
       signal: ctrl.signal,
+      redirect: 'follow',
     });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const html = await res.text();
-    // og:image (any meta tag attribute order)
-    const og1 = html.match(/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i);
-    if (og1 && og1[1]) return og1[1];
-    const og2 = html.match(/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i);
-    if (og2 && og2[1]) return og2[1];
+    // og:image — both attribute orders, both quote styles
+    const ogPatterns = [
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+    ];
+    for (const pat of ogPatterns) {
+      const m = html.match(pat);
+      if (m && m[1] && m[1].startsWith('http')) return m[1].replace(/&amp;/g, '&');
+    }
     // twitter:image fallback
-    const tw1 = html.match(/<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i);
-    if (tw1 && tw1[1]) return tw1[1];
+    const twitterPatterns = [
+      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+    ];
+    for (const pat of twitterPatterns) {
+      const m = html.match(pat);
+      if (m && m[1] && m[1].startsWith('http')) return m[1].replace(/&amp;/g, '&');
+    }
     return null;
   } catch {
     return null;
   }
 }
+
 
 // SOURCE 3: TDW vendors table — soft match by descriptors/colors, fallback to
 // random sampling so vendor slot always fills when vibe_tags don't overlap.
