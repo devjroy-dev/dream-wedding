@@ -3486,7 +3486,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
 
       case 'query_revenue': {
         const { period = 'this_month', client_name } = toolInput;
-        let query = supabase.from('vendor_invoices').select('client_name, total, advance, balance, status, created_at').eq('vendor_id', vendor.id);
+        let query = supabase.from('vendor_invoices').select('client_name, amount, gst_amount, total_amount, status, paid_date, created_at').eq('vendor_id', vendor.id);
         if (client_name) query = query.ilike('client_name', '%' + client_name + '%');
         const now = new Date();
         if (period === 'this_month') {
@@ -3502,9 +3502,13 @@ async function executeToolCall(toolName, toolInput, vendor) {
         }
         const { data } = await query;
         const invoices = data || [];
-        const total = invoices.reduce((s, i) => s + (i.total || 0), 0);
-        const received = invoices.reduce((s, i) => s + (i.advance || 0), 0);
-        const pending = invoices.reduce((s, i) => s + (i.balance || 0), 0);
+        const total = invoices.reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
+        const received = invoices
+          .filter(i => i.status === 'paid')
+          .reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
+        const pending = invoices
+          .filter(i => i.status !== 'paid')
+          .reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
         if (client_name) {
           return `💰 ${client_name}:\nTotal: Rs ${total.toLocaleString('en-IN')}\nReceived: Rs ${received.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}\n${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
         }
@@ -5193,16 +5197,16 @@ app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
     if (!client_name && !invoice_id) return res.status(400).json({ success: false, error: 'client_name or invoice_id required' });
     let invoice = null;
     if (invoice_id) {
-      const { data } = await supabase.from('vendor_invoices').select('id, client_name, balance, total').eq('id', invoice_id).maybeSingle();
+      const { data } = await supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status').eq('id', invoice_id).maybeSingle();
       invoice = data;
     } else {
-      const { data } = await supabase.from('vendor_invoices').select('id, client_name, balance, total').eq('vendor_id', vendor_id).ilike('client_name', '%' + client_name + '%').neq('status', 'paid').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const { data } = await supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status').eq('vendor_id', vendor_id).ilike('client_name', '%' + client_name + '%').neq('status', 'paid').order('created_at', { ascending: false }).limit(1).maybeSingle();
       invoice = data;
     }
     if (!invoice) return res.json({ success: false, message: 'No unpaid invoice found for ' + (client_name || invoice_id) + '.' });
     const { error } = await supabase.from('vendor_invoices').update({ status: 'paid', paid_date: new Date().toISOString().slice(0, 10) }).eq('id', invoice.id);
     if (error) throw error;
-    const paidAmount = amount || invoice.balance || invoice.total || 0;
+    const paidAmount = amount || invoice.total_amount || invoice.amount || 0;
     res.json({ success: true, message: 'Payment recorded for ' + invoice.client_name + ' - Rs ' + Number(paidAmount).toLocaleString('en-IN') + ' marked as paid' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
