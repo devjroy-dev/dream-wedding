@@ -1,6 +1,6 @@
 // backend/agentic/wedding/vendor/toolHandlers/logExpense.js
 //
-// Tool handler for log_expense. Lifted verbatim from server.js
+// Tool handler for wedding_log_expense (renamed S3, 2026-05-12). Lifted verbatim from server.js
 // _vendorChatLogExpense (Session 1.1, commit a42157b — schema-correct).
 //
 // Behavior: inserts a row into vendor_expenses with the vendor's id, the

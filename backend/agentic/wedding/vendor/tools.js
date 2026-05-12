@@ -5,16 +5,16 @@
 // load-bearing for the model's tool-selection behavior — do not edit without
 // a coordinated change to the system prompt's WHEN TO ACT vs CONFIRM rules.
 //
-// Tool naming will be renamed wedding_* in Session 3 (vendor-side only).
-// Until then, names are unprefixed.
+// Tool names are wedding_*-prefixed (Session 3, 2026-05-12) for multi-vertical
+// disambiguation. Dispatcher accepts deprecated unprefixed names via alias map.
 //
-// Note: `block_date` is the spec name; the underlying executor case in
-// server.js executeToolCall is `block_calendar_dates`. The dispatcher in
-// ./dispatcher.js maps between them.
+// Note: `wedding_block_date` is the spec name; the underlying executor case in
+// server.js executeToolCall is `block_calendar_dates` (unchanged — shared
+// dispatcher, out of scope). The dispatcher in ./dispatcher.js maps between them.
 
 const TDW_VENDOR_CHAT_TOOLS = [
   {
-    name: 'create_invoice',
+    name: 'wedding_create_invoice',
     description: 'Create a GST-compliant invoice for a client. Internal op — execute directly.',
     input_schema: {
       type: 'object',
@@ -28,7 +28,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'add_client',
+    name: 'wedding_add_client',
     description: 'Add a new client to the vendor CRM. Internal op — execute directly.',
     input_schema: {
       type: 'object',
@@ -43,7 +43,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'create_task',
+    name: 'wedding_create_task',
     description: 'Create a task for the vendor or a team member. Internal op — execute directly.',
     input_schema: {
       type: 'object',
@@ -56,7 +56,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'block_date',
+    name: 'wedding_block_date',
     description: 'Block one or more dates on the vendor calendar. Internal op — execute directly.',
     input_schema: {
       type: 'object',
@@ -69,7 +69,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'send_payment_reminder',
+    name: 'wedding_send_payment_reminder',
     description: 'Send a WhatsApp payment-due reminder to a client. Externally visible — confirm with the user before calling.',
     input_schema: {
       type: 'object',
@@ -82,7 +82,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'send_client_reminder',
+    name: 'wedding_send_client_reminder',
     description: 'Send a WhatsApp reminder to a client for fitting, meeting, event, or payment. Externally visible — confirm with the user before calling.',
     input_schema: {
       type: 'object',
@@ -95,7 +95,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'log_expense',
+    name: 'wedding_log_expense',
     description: 'Log a business expense. Internal op — execute directly.',
     input_schema: {
       type: 'object',
@@ -109,7 +109,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'reply_to_enquiry',
+    name: 'wedding_reply_to_enquiry',
     description: 'Reply to a pending couple enquiry via WhatsApp and mark it replied. Externally visible — confirm with the user before calling.',
     input_schema: {
       type: 'object',
@@ -121,7 +121,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
   {
-    name: 'record_payment',
+    name: 'wedding_record_payment',
     description: 'Mark an invoice as paid. Internal op — execute directly.',
     input_schema: {
       type: 'object',

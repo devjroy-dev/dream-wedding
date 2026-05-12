@@ -1,6 +1,6 @@
 // backend/agentic/wedding/vendor/toolHandlers/replyToEnquiry.js
 //
-// Tool handler for reply_to_enquiry. Lifted verbatim from server.js
+// Tool handler for wedding_reply_to_enquiry (renamed S3, 2026-05-12). Lifted verbatim from server.js
 // _vendorChatReplyToEnquiry (Session 1.1, commit a42157b — schema-correct).
 //
 // Behavior:

@@ -1,6 +1,6 @@
 // backend/agentic/wedding/vendor/toolHandlers/sendPaymentReminder.js
 //
-// Tool handler for send_payment_reminder. Lifted verbatim from server.js
+// Tool handler for wedding_send_payment_reminder (renamed S3, 2026-05-12). Lifted verbatim from server.js
 // _vendorChatSendPaymentReminder (Session 1.1, commit a42157b — schema-correct).
 //
 // Behavior: looks up the named client, composes a WhatsApp message (custom or

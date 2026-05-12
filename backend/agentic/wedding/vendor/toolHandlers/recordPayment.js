@@ -1,6 +1,6 @@
 // backend/agentic/wedding/vendor/toolHandlers/recordPayment.js
 //
-// Tool handler for record_payment. Lifted verbatim from server.js
+// Tool handler for wedding_record_payment (renamed S3, 2026-05-12). Lifted verbatim from server.js
 // _vendorChatRecordPayment (Session 1.1, commit d1d7f24 — schema-correct
 // with the query_revenue stale-column fix).
 //
