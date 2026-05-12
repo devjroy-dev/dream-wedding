@@ -12,14 +12,11 @@
 //   When new entity types are added (e.g. tax queries in Session 7), the
 //   snapshot must be expanded — adding a tool alone is not enough.
 //
-// KNOWN PRE-EXISTING BUG (queued for Session 2.1, NOT fixed here):
-//   The select on vendor_calendar_events references `event_name` — that
-//   column does not exist. The real column is `title`. Six call sites in
-//   server.js carry this bug today (lines 5001, 5070, 11638, 11646, 11703,
-//   11718, plus 18308/18353/18675 — all extracted here). The `|| 'Event'`
-//   fallback masks it; schedule lists render as "Event" not the real title.
-//   Per Option C decision: ship S2 with byte-identical behavior, sweep all
-//   six sites in S2.1.
+// SCHEMA NOTE (fixed in Session 2.1):
+//   The vendor_calendar_events column is `title`, not `event_name`.
+//   The SELECT below uses `title` correctly; the upcomingEvents map below
+//   re-keys it as `event_name` to preserve the ctx field name that
+//   systemPrompt.js's template literal expects.
 
 const engine = require('./engine');
 
@@ -37,7 +34,7 @@ async function fetchContext(vendorId) {
     supabase.from('vendor_clients').select('id, name, event_type, event_date, status').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
     supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
     supabase.from('vendor_enquiries').select('id, couple_id, initial_message, last_message_preview, last_message_at, created_at, status, wedding_date, couple:users(name, bride_name, groom_name, phone)').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
-    supabase.from('vendor_calendar_events').select('id, event_name, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
+    supabase.from('vendor_calendar_events').select('id, title, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
   ]);
 
   if (!vendorRes.data) return null;
@@ -82,7 +79,7 @@ async function fetchContext(vendorId) {
   const upcomingEvents = (calendar || []).slice(0, 5).map(e => ({
     date: e.event_date,
     time: e.event_time || null,
-    event_name: e.event_name || 'Event',
+    event_name: e.title || 'Event',
     client_name: e.client_name || null,
   }));
 

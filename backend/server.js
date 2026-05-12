@@ -4998,7 +4998,7 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
       supabase.from('vendor_clients').select('id, name, event_type, event_date, status, budget').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
       supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
       supabase.from('vendor_enquiries').select('id, couple_id, initial_message, last_message_preview, last_message_at, created_at, status, wedding_date, couple:users(name, bride_name, groom_name, phone)').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
-      supabase.from('vendor_calendar_events').select('id, event_name, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
+      supabase.from('vendor_calendar_events').select('id, title, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
     ]);
 
     if (!vendorRes.data) return res.status(404).json({ error: 'Vendor not found' });
@@ -5057,17 +5057,20 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
         due_date: i.due_date || null,
         status: i.status,
       })),
-      enquiries: enquiries.map(e => ({
-        id: e.id,
-        couple_name: e.couple_name || 'A couple',
-        message: e.message || '',
-        date: e.created_at,
-        replied: e.status === 'replied' || e.status === 'closed',
-      })),
+      enquiries: enquiries.map(e => {
+        const c = e.couple || {};
+        return {
+          id: e.id,
+          couple_name: c.name || c.bride_name || c.groom_name || 'A couple',
+          message: e.initial_message || e.last_message_preview || '',
+          date: e.created_at,
+          replied: e.status === 'replied' || e.status === 'closed',
+        };
+      }),
       calendar: calendar.map(e => ({
         id: e.id,
         date: e.event_date,
-        event_name: e.event_name || 'Event',
+        event_name: e.title || 'Event',
         client_name: e.client_name || null,
         time: e.event_time || null,
       })),
@@ -5178,15 +5181,24 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!enquiry_id) return res.status(400).json({ success: false, error: 'enquiry_id required' });
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
-    const { data: enquiry } = await supabase.from('vendor_enquiries').select('id, couple_name, couple_phone').eq('id', enquiry_id).maybeSingle();
+    const { data: enquiry } = await supabase.from('vendor_enquiries').select('id, couple_id').eq('id', enquiry_id).maybeSingle();
     if (!enquiry) return res.json({ success: false, message: 'Enquiry not found.' });
+    let coupleName = 'couple';
+    let couplePhone = null;
+    if (enquiry.couple_id) {
+      const { data: couple } = await supabase.from('users').select('name, bride_name, groom_name, phone').eq('id', enquiry.couple_id).maybeSingle();
+      if (couple) {
+        coupleName = couple.name || couple.bride_name || couple.groom_name || 'couple';
+        couplePhone = couple.phone || null;
+      }
+    }
     await supabase.from('vendor_enquiries').update({ status: 'replied', replied_at: new Date().toISOString() }).eq('id', enquiry_id);
     let sent = false;
-    if (enquiry.couple_phone) {
-      const phone = '+91' + enquiry.couple_phone.replace(/D/g, '').slice(-10);
+    if (couplePhone) {
+      const phone = '+91' + couplePhone.replace(/D/g, '').slice(-10);
       sent = await sendWhatsApp(phone, message);
     }
-    res.json({ success: true, message: sent ? 'Reply sent to ' + (enquiry.couple_name || 'couple') : 'Enquiry marked as replied' });
+    res.json({ success: true, message: sent ? 'Reply sent to ' + coupleName : 'Enquiry marked as replied' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
@@ -11626,7 +11638,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 3. Unanswered enquiries ──────────────────────────────────────────────
     const { data: openEnquiries } = await supabase
       .from('vendor_enquiries')
-      .select('id, couple_name, message, created_at')
+      .select('id, couple_id, initial_message, last_message_preview, created_at, couple:users(name, bride_name, groom_name)')
       .eq('vendor_id', vendorId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
@@ -11635,7 +11647,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 4. Today's calendar events ───────────────────────────────────────────
     const { data: todayEvents } = await supabase
       .from('vendor_calendar_events')
-      .select('id, event_name, event_date, event_time, client_name, notes')
+      .select('id, title, event_date, event_time, client_name, notes')
       .eq('vendor_id', vendorId)
       .eq('event_date', todayStr)
       .order('event_time', { ascending: true });
@@ -11643,7 +11655,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 5. This week's events (for summary) ──────────────────────────────────
     const { data: weekEvents } = await supabase
       .from('vendor_calendar_events')
-      .select('id, event_name, event_date, event_time, client_name')
+      .select('id, title, event_date, event_time, client_name')
       .eq('vendor_id', vendorId)
       .gte('event_date', weekStartStr)
       .lt('event_date', weekEndStr)
@@ -11686,10 +11698,12 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     for (const enq of (openEnquiries || [])) {
       const hoursAgo = Math.floor((now.getTime() - new Date(enq.created_at).getTime()) / 3600000);
       const timeLabel = hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo/24)}d ago`;
+      const c = enq.couple || {};
+      const coupleName = c.name || c.bride_name || c.groom_name || 'a couple';
       needs_attention.push({
         id: enq.id,
         type: 'enquiry',
-        title: `New enquiry from ${enq.couple_name || 'a couple'}`,
+        title: `New enquiry from ${coupleName}`,
         subtitle: `Received ${timeLabel}. A quick reply keeps the lead warm.`,
         cta: 'Reply now',
       });
@@ -11700,7 +11714,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
       needs_attention.push({
         id: ev.id,
         type: 'shoot',
-        title: ev.event_name || 'Event today',
+        title: ev.title || 'Event today',
         subtitle: ev.client_name
           ? `${ev.client_name}${ev.event_time ? ' · ' + ev.event_time : ''}`
           : (ev.event_time || 'Today'),
@@ -11715,7 +11729,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     const todays_schedule = (todayEvents || []).map(ev => ({
       id: ev.id,
       time: ev.event_time || '—',
-      event_name: ev.event_name || 'Event',
+      event_name: ev.title || 'Event',
       client_name: ev.client_name || null,
     }));
 
