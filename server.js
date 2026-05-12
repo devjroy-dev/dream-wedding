@@ -9,18 +9,6 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { createClient } = require('@supabase/supabase-js');
-const rateLimit = require('express-rate-limit');
-
-// Backend rate-limit for PIN verification. Frontend has a 5-attempt lockout
-// in couple-pin-login.tsx but a direct caller can bypass it. 5 attempts /
-// 15 min per IP applies to /api/v2/auth/verify-pin (both couple and vendor).
-const pinAttemptLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { success: false, error: 'Too many PIN attempts. Try again in 15 minutes.' },
-});
 
 const app = express();
 const server = http.createServer(app);
@@ -2549,8 +2537,7 @@ app.post('/api/vendor/onboard', async (req, res) => {
   }
 });
 
-// DEPRECATED: legacy password-based login. Now reads vendors.pin_hash directly.
-// Kept for PWA backward compatibility. New code → /api/v2/auth/verify-pin.
+// Vendor login — phone + password
 app.post('/api/vendor/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
@@ -2563,16 +2550,25 @@ app.post('/api/vendor/login', async (req, res) => {
     }
     const fullPhone = '+91' + cleanPhone;
 
-    // Look up vendor by phone in the vendors table directly; pin_hash is canonical.
-    // Note: vendors.phone is stored as a 10-digit string (cleanPhone), not the +91 form.
-    const { data: vendor } = await supabase
-      .from('vendors').select('*').eq('phone', cleanPhone).maybeSingle();
+    // Look up credentials by phone (this is where passwords live for ALL vendors,
+    // both signup-flow vendors and admin-created ones)
+    const { data: cred } = await supabase
+      .from('vendor_credentials').select('*').eq('phone_number', fullPhone).maybeSingle();
 
-    if (!vendor || !vendor.pin_hash) {
+    if (!cred || !cred.password_hash) {
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
-    const match = await bcrypt.compare(password, vendor.pin_hash);
+    const match = await bcrypt.compare(password, cred.password_hash);
     if (!match) return res.status(401).json({ success: false, error: 'Invalid phone or password' });
+
+    // Now load the vendor row
+    const { data: vendor } = await supabase
+      .from('vendors').select('*').eq('id', cred.vendor_id).maybeSingle();
+    if (!vendor) {
+      // Orphan credentials — auto-clean and reject
+      try { await supabase.from('vendor_credentials').delete().eq('id', cred.id); } catch {}
+      return res.status(401).json({ success: false, error: 'Account no longer exists' });
+    }
 
     // Get tier
     let tier = 'essential';
@@ -3406,53 +3402,29 @@ async function executeToolCall(toolName, toolInput, vendor) {
   try {
     switch (toolName) {
       case 'create_invoice': {
-        const { client_name, amount, gst_enabled = false, due_date = null } = toolInput;
-        const amountNum = Number(amount);
-        const gst_amount = gst_enabled ? Math.round(amountNum * 0.18) : 0;
-        const total_amount = amountNum + gst_amount;
+        const { client_name, amount, advance_received = 0, event_type = 'Wedding' } = toolInput;
+        const balance = amount - advance_received;
+        const cgst = Math.round(amount * 0.09);
+        const sgst = Math.round(amount * 0.09);
+        const total_with_gst = amount + cgst + sgst;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
-        // Resolve client_id only when exactly one client matches the name.
-        let client_id = null;
-        const { data: matches } = await supabase.from('vendor_clients')
-          .select('id').eq('vendor_id', vendor.id)
-          .ilike('name', client_name).limit(2);
-        if (matches && matches.length === 1) client_id = matches[0].id;
         const { data, error } = await supabase.from('vendor_invoices').insert([{
-          vendor_id: vendor.id, client_name, client_id,
-          amount: amountNum, gst_enabled, gst_amount, total_amount,
+          vendor_id: vendor.id, client_name, event_type,
+          subtotal: amount, cgst, sgst, total: total_with_gst,
+          advance: advance_received, balance: balance,
           invoice_number: invNum, status: 'pending',
-          issue_date: new Date().toISOString().slice(0, 10),
-          due_date,
         }]).select().single();
         if (error) throw error;
-        const gstLine = gst_enabled ? `\nGST (18%): Rs ${gst_amount.toLocaleString('en-IN')}` : '';
-        const totalLine = gst_enabled ? `\nTotal: Rs ${total_amount.toLocaleString('en-IN')}` : '';
-        return `✓ Invoice created for ${client_name}\nAmount: Rs ${amountNum.toLocaleString('en-IN')}${gstLine}${totalLine}\nInvoice #${invNum}`;
+        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_with_gst.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance: ₹' + advance_received.toLocaleString('en-IN') + ' · Balance: ₹' + balance.toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
       }
 
       case 'block_calendar_dates': {
         const { client_name, dates, notes = '' } = toolInput;
-        const reasonStr = notes ? `${client_name} wedding - ${notes}` : `${client_name} wedding`;
-        const rows = dates.map(d => ({
-          vendor_id: vendor.id,
-          blocked_date: d,
-          reason: reasonStr,
-        }));
-        const { error } = await supabase.from('vendor_availability_blocks')
-          .upsert(rows, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
-        if (error) throw error;
-        // Also write to vendor_calendar_events so the Calendar reference view
-        // surfaces blocked dates as visible entries. ignoreDuplicates on
-        // (vendor_id, event_date) prevents double entries if blocked again.
-        const calRows = dates.map(d => ({
-          vendor_id: vendor.id,
-          title: reasonStr,
-          event_date: d,
-          client_name: client_name || null,
-          notes: notes || null,
-        }));
-        await supabase.from('vendor_calendar_events')
-          .upsert(calRows, { onConflict: 'vendor_id,event_date', ignoreDuplicates: true });
+        for (const date of dates) {
+          await supabase.from('blocked_dates').insert([{
+            vendor_id: vendor.id, date, reason: `${client_name} wedding`, notes,
+          }]).select();
+        }
         return `✓ Blocked ${dates.length} date${dates.length > 1 ? 's' : ''} for ${client_name}\n${dates.join(', ')}`;
       }
 
@@ -3463,7 +3435,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
           event_date, event_type, budget, status: 'upcoming',
         }]);
         if (error) throw error;
-        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: Rs ' + budget.toLocaleString('en-IN') : ''}`;
+        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + budget.toLocaleString('en-IN') : ''}`;
       }
 
       case 'query_schedule': {
@@ -3485,20 +3457,20 @@ async function executeToolCall(toolName, toolInput, vendor) {
           .gte('event_date', startDate.toISOString().slice(0,10))
           .lt('event_date', endDate.toISOString().slice(0,10))
           .order('event_date');
-        const { data: blocked } = await supabase.from('vendor_availability_blocks')
-          .select('blocked_date, reason').eq('vendor_id', vendor.id)
-          .gte('blocked_date', startDate.toISOString().slice(0,10))
-          .lt('blocked_date', endDate.toISOString().slice(0,10));
+        const { data: blocked } = await supabase.from('blocked_dates')
+          .select('date, reason').eq('vendor_id', vendor.id)
+          .gte('date', startDate.toISOString().slice(0,10))
+          .lt('date', endDate.toISOString().slice(0,10));
         const events = [];
         (clients || []).forEach(c => events.push(`${c.event_date}: ${c.name} ${c.event_type || ''}`));
-        (blocked || []).forEach(b => events.push(`${b.blocked_date}: Blocked - ${b.reason || ''}`));
+        (blocked || []).forEach(b => events.push(`${b.date}: Blocked - ${b.reason || ''}`));
         if (events.length === 0) return `You're free ${label}. No events scheduled.`;
         return `📅 Schedule for ${label}:\n\n${events.join('\n')}`;
       }
 
       case 'query_revenue': {
         const { period = 'this_month', client_name } = toolInput;
-        let query = supabase.from('vendor_invoices').select('client_name, amount, gst_amount, total_amount, status, paid_date, created_at').eq('vendor_id', vendor.id);
+        let query = supabase.from('vendor_invoices').select('client_name, total, advance, balance, status, created_at').eq('vendor_id', vendor.id);
         if (client_name) query = query.ilike('client_name', '%' + client_name + '%');
         const now = new Date();
         if (period === 'this_month') {
@@ -3514,17 +3486,13 @@ async function executeToolCall(toolName, toolInput, vendor) {
         }
         const { data } = await query;
         const invoices = data || [];
-        const total = invoices.reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
-        const received = invoices
-          .filter(i => i.status === 'paid')
-          .reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
-        const pending = invoices
-          .filter(i => i.status !== 'paid')
-          .reduce((s, i) => s + (Number(i.total_amount) || 0), 0);
+        const total = invoices.reduce((s, i) => s + (i.total || 0), 0);
+        const received = invoices.reduce((s, i) => s + (i.advance || 0), 0);
+        const pending = invoices.reduce((s, i) => s + (i.balance || 0), 0);
         if (client_name) {
-          return `💰 ${client_name}:\nTotal: Rs ${total.toLocaleString('en-IN')}\nReceived: Rs ${received.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}\n${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
+          return `💰 ${client_name}:\nTotal: ₹${total.toLocaleString('en-IN')}\nReceived: ₹${received.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}\n${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
         }
-        return `💰 Revenue (${period.replace('_', ' ')}):\nTotal: Rs ${total.toLocaleString('en-IN')}\nReceived: Rs ${received.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}\n${invoices.length} booking${invoices.length !== 1 ? 's' : ''}`;
+        return `💰 Revenue (${period.replace('_', ' ')}):\nTotal: ₹${total.toLocaleString('en-IN')}\nReceived: ₹${received.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}\n${invoices.length} booking${invoices.length !== 1 ? 's' : ''}`;
       }
 
       case 'send_client_reminder': {
@@ -3547,34 +3515,15 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'create_task': {
-        const { task, client_name = '', assignee = '', due_date = null, priority = 'medium' } = toolInput;
-        // Resolve client_id only when exactly one client matches the name.
-        let client_id = null;
-        let resolved_client_name = client_name || null;
-        if (client_name) {
-          const { data: matches } = await supabase.from('vendor_clients')
-            .select('id, name').eq('vendor_id', vendor.id)
-            .ilike('name', client_name).limit(2);
-          if (matches && matches.length === 1) {
-            client_id = matches[0].id;
-            resolved_client_name = matches[0].name;
-          }
-        }
-        const assigned_to = assignee ? [assignee] : [vendor.name];
-        const { error } = await supabase.from('vendor_todos').insert([{
-          vendor_id: vendor.id,
-          title: task,
-          due_date,
-          done: false,
-          client_id,
-          client_name: resolved_client_name,
-          assigned_to,
-        }]);
-        if (error) throw error;
-        const clientLine = resolved_client_name ? `\nClient: ${resolved_client_name}` : '';
-        const assigneeLine = assignee ? `\nAssigned to: ${assignee}` : '';
-        const dueLine = due_date ? `\nDue: ${due_date}` : '';
-        return `✓ Task created: ${task}${clientLine}${assigneeLine}${dueLine}`;
+        const { task, assignee = '', due_date = null } = toolInput;
+        try {
+          await supabase.from('team_tasks').insert([{
+            vendor_id: vendor.id, title: task, description: task,
+            assignee_name: assignee || vendor.name, due_date,
+            status: 'pending', priority: 'medium',
+          }]);
+        } catch (e) {}
+        return `✓ Task created: ${task}${assignee ? '\nAssigned to: ' + assignee : ''}${due_date ? '\nDue: ' + due_date : ''}`;
       }
 
       case 'query_clients': {
@@ -3586,7 +3535,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         if (!data || data.length === 0) return search ? `No clients matching "${search}"` : 'No clients yet. Add some with "Add client [name]".';
         if (search && data.length === 1) {
           const c = data[0];
-          return `👥 ${c.name}\n${c.event_type || 'Wedding'} · ${c.event_date || 'Date TBD'}\n${c.budget ? 'Budget: Rs ' + c.budget.toLocaleString('en-IN') : ''}\nStatus: ${c.status || 'upcoming'}`;
+          return `👥 ${c.name}\n${c.event_type || 'Wedding'} · ${c.event_date || 'Date TBD'}\n${c.budget ? 'Budget: ₹' + c.budget.toLocaleString('en-IN') : ''}\nStatus: ${c.status || 'upcoming'}`;
         }
         return `👥 Clients (${data.length}):\n\n${data.map(c => `• ${c.name} - ${c.event_date || 'TBD'}`).join('\n')}`;
       }
@@ -4573,82 +4522,10 @@ app.post('/api/v2/invite/validate', async (req, res) => {
   }
 });
 
-// POST /api/v2/invite/consume
-// Marks an invite code as used after successful PIN setup.
-// Idempotent: same user can re-consume the same code without error.
-// Different user re-consuming → 400 error (code already used).
-app.post('/api/v2/invite/consume', async (req, res) => {
-  try {
-    const { code, user_id } = req.body || {};
-    if (!code || !user_id) return res.status(400).json({ success: false, error: 'code and user_id required' });
-
-    const codeStr = String(code).toUpperCase().trim();
-
-    const { data: row, error: readErr } = await supabase
-      .from('access_codes')
-      .select('id, used, used_count, used_by_user_id, expires_at, type')
-      .eq('code', codeStr)
-      .maybeSingle();
-    if (readErr || !row) return res.status(404).json({ success: false, error: 'Invalid code' });
-    if (row.expires_at && new Date(row.expires_at) < new Date()) {
-      return res.status(400).json({ success: false, error: 'Code expired' });
-    }
-
-    // Already used by THIS user → idempotent success
-    if (row.used && row.used_by_user_id === user_id) {
-      return res.json({ success: true, idempotent: true });
-    }
-    if (row.used && row.used_count >= 1) {
-      return res.status(400).json({ success: false, error: 'Code already used' });
-    }
-
-    const { error: updErr } = await supabase
-      .from('access_codes')
-      .update({
-        used: true,
-        used_count: 1,
-        used_by_user_id: user_id,
-        used_at: new Date().toISOString(),
-      })
-      .eq('id', row.id);
-    if (updErr) return res.status(500).json({ success: false, error: updErr.message });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/v2/couple/auth/send-otp — direct implementation (no redirect)
+// POST /api/v2/couple/auth/send-otp — alias
 app.post('/api/v2/couple/auth/send-otp', async (req, res) => {
-  try {
-    const { phone } = req.body;
-    if (!phone) return res.status(400).json({ success: false, error: 'Phone number required' });
-    const bare = ('' + phone).replace(/\D/g, '').slice(-10);
-    const fullPhone = '+91' + bare;
-    if (twilioClient && TWILIO_VERIFY_SID) {
-      try {
-        const verification = await twilioClient.verify.v2
-          .services(TWILIO_VERIFY_SID)
-          .verifications.create({ to: fullPhone, channel: 'sms' });
-        console.log('[OTP couple] Twilio sent:', verification.status, 'to', fullPhone);
-        return res.json({ success: true, sessionInfo: 'twilio_' + bare });
-      } catch (twilioErr) {
-        console.error('[OTP couple] Twilio error:', twilioErr.code, twilioErr.message);
-        const knownErrors = {
-          60200: 'Invalid phone number format.',
-          60203: 'Too many OTP attempts. Wait 10 minutes and try again.',
-          60212: 'Too many OTP attempts on this number. Try later.',
-        };
-        const userMsg = knownErrors[twilioErr.code] || 'Could not send code. Try again.';
-        return res.status(400).json({ success: false, error: userMsg });
-      }
-    }
-    return res.status(500).json({ success: false, error: 'OTP service unavailable.' });
-  } catch (err) {
-    console.error('[OTP couple] Unhandled error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
+  req.url = '/api/auth/send-otp';
+  return res.redirect(307, '/api/auth/send-otp');
 });
 
 // POST /api/v2/vendor/auth/send-otp — alias
@@ -4679,45 +4556,13 @@ app.post('/api/v2/couple/auth/verify-otp', async (req, res) => {
       if (otpCode !== '123456') return res.status(400).json({ success: false, error: 'OTP service unavailable.' });
     }
 
-    // Optional invite code → derive tier for newly-created user (admin still has final tier authority).
-    // Code is NOT consumed here — consumption happens after PIN is set via /api/v2/invite/consume.
-    let tierFromCode = null;
-    if (req.body.invite_code) {
-      const { data: codeRow } = await supabase
-        .from('access_codes')
-        .select('tier, type, expires_at, used, used_count')
-        .eq('code', String(req.body.invite_code).toUpperCase().trim())
-        .maybeSingle();
-      if (codeRow && !codeRow.used && (!codeRow.expires_at || new Date(codeRow.expires_at) > new Date())) {
-        tierFromCode = codeRow.tier;
-      }
-    }
-
     // Find or create user
-    // PIN authentication uses pin_hash exclusively (post-cleanup May 2026).
-    // password_hash is reserved for vendor passwords on the vendors table only.
-    // Legacy couple users were cleaned manually; no migration script needed.
-    let { data: user } = await supabase.from('users').select('id, name, pin_hash, couple_tier, dreamer_type').eq('phone', fullPhone).maybeSingle();
+    let { data: user } = await supabase.from('users').select('id, name, pin_hash, couple_tier').eq('phone', fullPhone).maybeSingle();
     if (!user) {
-      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: tierFromCode || 'lite' }]).select('id, name, pin_hash, couple_tier, dreamer_type').single();
+      const { data: created } = await supabase.from('users').insert([{ phone: fullPhone, couple_tier: 'lite' }]).select('id, name, pin_hash, couple_tier').single();
       user = created;
     }
-    const pinSet = !!user.pin_hash;
-    const isNewUser = !user.name;
-    return res.json({
-      success: true,
-      // Flat fields (preferred — current frontend reads d.user || d)
-      id: user.id,
-      userId: user.id,
-      name: user.name || null,
-      pin_set: pinSet,
-      couple_tier: user.couple_tier || 'lite',
-      dreamer_type: user.dreamer_type || null,
-      phone: fullPhone,
-      isNewUser,
-      // Backward-compatible nested shape
-      user: { id: user.id, name: user.name || null, pin_set: pinSet, couple_tier: user.couple_tier || 'lite', dreamer_type: user.dreamer_type || null, phone: fullPhone, isNewUser },
-    });
+    return res.json({ success: true, user: { id: user.id, name: user.name || null, pin_set: !!user.pin_hash, couple_tier: user.couple_tier || 'lite' } });
   } catch (e) {
     console.error('[v2/couple/auth/verify-otp]', e.message);
     res.status(500).json({ success: false, error: e.message });
@@ -5007,9 +4852,9 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
       supabase.from('vendors').select('id, name, category').eq('id', vendorId).maybeSingle(),
       supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('vendor_clients').select('id, name, event_type, event_date, status, budget').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
-      supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
-      supabase.from('vendor_enquiries').select('id, couple_id, initial_message, last_message_preview, last_message_at, created_at, status, wedding_date, couple:users(name, bride_name, groom_name, phone)').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
-      supabase.from('vendor_calendar_events').select('id, title, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
+      supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, total, advance, balance, status, due_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
+      supabase.from('vendor_enquiries').select('id, couple_name, message, created_at, status').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
+      supabase.from('vendor_calendar_events').select('id, event_name, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
     ]);
 
     if (!vendorRes.data) return res.status(404).json({ error: 'Vendor not found' });
@@ -5022,7 +4867,7 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
     const calendar = calendarRes.data || [];
 
     // ── Revenue calculations ──────────────────────────────────────────────────
-    const getAmount = inv => parseFloat(inv.total_amount || inv.amount || 0);
+    const getAmount = inv => parseFloat(inv.total_amount || inv.total || inv.amount || 0);
 
     const thisMonthRevenue = invoices
       .filter(i => i.status === 'paid' && i.created_at >= monthStart)
@@ -5034,14 +4879,14 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
 
     const outstanding = invoices
       .filter(i => i.status !== 'paid' && i.status !== 'cancelled')
-      .reduce((s, i) => s + parseFloat(i.total_amount || i.amount || 0), 0);
+      .reduce((s, i) => s + parseFloat(i.balance || i.amount || 0), 0);
 
     // ── Overdue invoices ──────────────────────────────────────────────────────
     const overdue_invoices = invoices
       .filter(i => (i.status === 'unpaid' || i.status === 'issued' || i.status === 'pending') && i.due_date && i.due_date < todayStr)
       .map(i => ({
         client_name: i.client_name,
-        amount: parseFloat(i.total_amount || i.amount || 0),
+        amount: parseFloat(i.balance || i.amount || 0),
         due_date: i.due_date,
       }));
 
@@ -5068,20 +4913,17 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
         due_date: i.due_date || null,
         status: i.status,
       })),
-      enquiries: enquiries.map(e => {
-        const c = e.couple || {};
-        return {
-          id: e.id,
-          couple_name: c.name || c.bride_name || c.groom_name || 'A couple',
-          message: e.initial_message || e.last_message_preview || '',
-          date: e.created_at,
-          replied: e.status === 'replied' || e.status === 'closed',
-        };
-      }),
+      enquiries: enquiries.map(e => ({
+        id: e.id,
+        couple_name: e.couple_name || 'A couple',
+        message: e.message || '',
+        date: e.created_at,
+        replied: e.status === 'replied' || e.status === 'closed',
+      })),
       calendar: calendar.map(e => ({
         id: e.id,
         date: e.event_date,
-        event_name: e.title || 'Event',
+        event_name: e.event_name || 'Event',
         client_name: e.client_name || null,
         time: e.event_time || null,
       })),
@@ -5157,7 +4999,7 @@ app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res)
     const vendorName = vendor ? vendor.name : 'Your vendor';
     const amountStr = amount ? 'Rs ' + Number(amount).toLocaleString('en-IN') : null;
     const msg = custom_message || (amountStr ? 'Hi ' + client.name + ', gentle reminder that ' + amountStr + ' is due. Please let us know when you would like to settle. Thanks! - ' + vendorName : 'Hi ' + client.name + ', gentle reminder about your pending payment. Thanks! - ' + vendorName);
-    const phone = '+91' + client.phone.replace(/\D/g, '').slice(-10);
+    const phone = '+91' + client.phone.replace(/D/g, '').slice(-10);
     const sent = await sendWhatsApp(phone, msg);
     res.json({ success: true, message: sent ? 'Reminder sent to ' + client.name : 'Could not send to ' + client.name + '. They may not be on WhatsApp.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -5192,24 +5034,15 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
     if (!vendor_id) return res.status(400).json({ success: false, error: 'vendor_id required' });
     if (!enquiry_id) return res.status(400).json({ success: false, error: 'enquiry_id required' });
     if (!message) return res.status(400).json({ success: false, error: 'message required' });
-    const { data: enquiry } = await supabase.from('vendor_enquiries').select('id, couple_id').eq('id', enquiry_id).maybeSingle();
+    const { data: enquiry } = await supabase.from('vendor_enquiries').select('id, couple_name, couple_phone').eq('id', enquiry_id).maybeSingle();
     if (!enquiry) return res.json({ success: false, message: 'Enquiry not found.' });
-    let coupleName = 'couple';
-    let couplePhone = null;
-    if (enquiry.couple_id) {
-      const { data: couple } = await supabase.from('users').select('name, bride_name, groom_name, phone').eq('id', enquiry.couple_id).maybeSingle();
-      if (couple) {
-        coupleName = couple.name || couple.bride_name || couple.groom_name || 'couple';
-        couplePhone = couple.phone || null;
-      }
-    }
     await supabase.from('vendor_enquiries').update({ status: 'replied', replied_at: new Date().toISOString() }).eq('id', enquiry_id);
     let sent = false;
-    if (couplePhone) {
-      const phone = '+91' + couplePhone.replace(/\D/g, '').slice(-10);
+    if (enquiry.couple_phone) {
+      const phone = '+91' + enquiry.couple_phone.replace(/D/g, '').slice(-10);
       sent = await sendWhatsApp(phone, message);
     }
-    res.json({ success: true, message: sent ? 'Reply sent to ' + coupleName : 'Enquiry marked as replied' });
+    res.json({ success: true, message: sent ? 'Reply sent to ' + (enquiry.couple_name || 'couple') : 'Enquiry marked as replied' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
@@ -5220,16 +5053,16 @@ app.post('/api/v2/dreamai/vendor-action/record-payment', async (req, res) => {
     if (!client_name && !invoice_id) return res.status(400).json({ success: false, error: 'client_name or invoice_id required' });
     let invoice = null;
     if (invoice_id) {
-      const { data } = await supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status').eq('id', invoice_id).maybeSingle();
+      const { data } = await supabase.from('vendor_invoices').select('id, client_name, balance, total').eq('id', invoice_id).maybeSingle();
       invoice = data;
     } else {
-      const { data } = await supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status').eq('vendor_id', vendor_id).ilike('client_name', '%' + client_name + '%').neq('status', 'paid').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const { data } = await supabase.from('vendor_invoices').select('id, client_name, balance, total').eq('vendor_id', vendor_id).ilike('client_name', '%' + client_name + '%').neq('status', 'paid').order('created_at', { ascending: false }).limit(1).maybeSingle();
       invoice = data;
     }
     if (!invoice) return res.json({ success: false, message: 'No unpaid invoice found for ' + (client_name || invoice_id) + '.' });
     const { error } = await supabase.from('vendor_invoices').update({ status: 'paid', paid_date: new Date().toISOString().slice(0, 10) }).eq('id', invoice.id);
     if (error) throw error;
-    const paidAmount = amount || invoice.total_amount || invoice.amount || 0;
+    const paidAmount = amount || invoice.balance || invoice.total || 0;
     res.json({ success: true, message: 'Payment recorded for ' + invoice.client_name + ' - Rs ' + Number(paidAmount).toLocaleString('en-IN') + ' marked as paid' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
@@ -7263,8 +7096,7 @@ app.post('/api/couple/waitlist', async (req, res) => {
 // COUPLE V2 — Auth + Access Waitlist (Session 10 Turn 8A)
 // ══════════════════════════════════════════════════════════════
 
-// DEPRECATED: legacy password-based login. Now reads pin_hash for PIN-as-password.
-// Kept for PWA backward compatibility. New code → /api/v2/auth/verify-pin.
+// Password login — phone + password
 app.post('/api/couple/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
@@ -7280,12 +7112,12 @@ app.post('/api/couple/login', async (req, res) => {
     const { data: user } = await supabase
       .from('users').select('*').eq('phone', fullPhone).maybeSingle();
 
-    if (!user || !user.pin_hash) {
+    if (!user || !user.password_hash) {
       // Don't reveal whether the account exists — just say invalid
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
 
-    const match = await bcrypt.compare(password, user.pin_hash);
+    const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
       return res.status(401).json({ success: false, error: 'Invalid phone or password' });
     }
@@ -8059,38 +7891,7 @@ app.get('/api/couple/vendors/:coupleId', async (req, res) => {
       .eq('couple_id', coupleId)
       .order('created_at', { ascending: false });
     if (error) throw error;
-
-    // PATCH B-5: attach paid_total to each vendor row.
-    // Fetch all paid expenses for the couple in one query, build a
-    // case-insensitive name → sum map, then walk vendors and attach.
-    // Vendor names are matched by exact lowercase comparison; substring
-    // matching would over-attribute (e.g. "Swati R" rolling up under
-    // "Swati Tomar"). The bride's actual flow logs payments against the
-    // vendor's saved name, so exact match is the correct discriminator.
-    const vendors = data || [];
-    let paidByName = new Map();
-    try {
-      const { data: paidExpenses } = await supabase
-        .from('couple_expenses')
-        .select('vendor_name, actual_amount')
-        .eq('couple_id', coupleId)
-        .eq('payment_status', 'paid');
-      for (const e of paidExpenses || []) {
-        if (!e.vendor_name) continue;
-        const key = e.vendor_name.toLowerCase().trim();
-        const prev = paidByName.get(key) || 0;
-        paidByName.set(key, prev + (Number(e.actual_amount) || 0));
-      }
-    } catch (e) {
-      // Expense fetch failure should not block the vendors list.
-      console.error('vendors list paid_total fetch error:', e.message);
-    }
-    const enriched = vendors.map(v => ({
-      ...v,
-      paid_total: paidByName.get((v.name || '').toLowerCase().trim()) || 0,
-    }));
-
-    res.json({ success: true, data: enriched });
+    res.json({ success: true, data: data || [] });
   } catch (error) {
     console.error('vendors list error:', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -11199,7 +11000,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       supabase.from('couple_guests').select('id, name, rsvp_status, household, side, events').eq('couple_id', userId),
       supabase.from('couple_events').select('id, event_name, event_type, event_date, event_city, budget_total, is_active').eq('couple_id', userId).order('event_date'),
       supabase.from('couple_budget').select('total_budget, event_envelopes').eq('couple_id', userId).maybeSingle(),
-      supabase.from('couple_expenses').select('id, category, description, planned_amount, actual_amount, payment_status, due_date, vendor_name').eq('couple_id', userId).order('due_date', { ascending: true }).limit(50),
+      supabase.from('couple_expenses').select('id, category, description, amount, is_paid, due_date, vendor_name').eq('couple_id', userId).order('due_date', { ascending: true }).limit(50),
       supabase.from('users').select('token_balance').eq('id', userId).single(),
     ]);
     const user = userR.status === 'fulfilled' ? userR.value.data : null;
@@ -11213,11 +11014,9 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
     const pendingTasks = tasks.filter(t => !t.is_complete);
     const bookedVendors = vendors.filter(v => v.status === 'booked' || v.status === 'confirmed');
     const confirmedGuests = guests.filter(g => g.rsvp_status === 'confirmed');
-    // PATCH B-6a: column-name fix. Was using e.amount/e.is_paid which don't
-    // exist; real columns are planned_amount, actual_amount, payment_status.
-    const totalExpenses = expenses.reduce((s, e) => s + (Number(e.planned_amount) || 0), 0);
-    const paidExpenses = expenses.filter(e => e.payment_status === 'paid').reduce((s, e) => s + (Number(e.actual_amount) || 0), 0);
-    const upcomingPayments = expenses.filter(e => e.payment_status !== 'paid' && e.due_date).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).slice(0, 5);
+    const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const paidExpenses = expenses.filter(e => e.is_paid).reduce((s, e) => s + (e.amount || 0), 0);
+    const upcomingPayments = expenses.filter(e => !e.is_paid && e.due_date).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).slice(0, 5);
     let daysUntilWedding = null;
     if (user?.wedding_date) {
       const now = new Date(); now.setHours(0,0,0,0);
@@ -11231,7 +11030,7 @@ app.get('/api/v2/dreamai/couple-context/:userId', async (req, res) => {
       guests: { total: guests.length, confirmed: confirmedGuests.length, pending: guests.filter(g=>!g.rsvp_status||g.rsvp_status==='pending').length, declined: guests.filter(g=>g.rsvp_status==='declined').length },
       events: events.map(e => ({ id:e.id, name:e.event_name||e.event_type, date:e.event_date, city:e.event_city, budget_total:e.budget_total, is_active:e.is_active })),
       budget: { total: budget?.total_budget||0, committed: totalExpenses, paid: paidExpenses, remaining: (budget?.total_budget||0) - totalExpenses, event_envelopes: budget?.event_envelopes||{} },
-      upcoming_payments: upcomingPayments.map(e => ({ id:e.id, vendor_name:e.vendor_name, category:e.category, amount: Number(e.planned_amount) || 0, due_date:e.due_date, description:e.description })),
+      upcoming_payments: upcomingPayments.map(e => ({ id:e.id, vendor_name:e.vendor_name, category:e.category, amount:e.amount, due_date:e.due_date, description:e.description })),
     });
   } catch (error) {
     console.error('[GET /api/v2/dreamai/couple-context] error:', error.message);
@@ -11327,54 +11126,6 @@ app.get('/api/v2/couple/profile/:userId', async (req, res) => {
   } catch (error) {
     console.error('[GET /api/v2/couple/profile] error:', error.message);
     res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// PATCH /api/v2/couple/profile/:userId — partial update of bride profile fields
-// Serves the 4 save sections of Frost Settings (app/(frost)/canvas/journey/settings.tsx).
-app.patch('/api/v2/couple/profile/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
-
-    const allowed = [
-      'name',
-      'partner_name',
-      'wedding_date',
-      'photo_url',
-      'wedding_events',
-      'guest_count',
-      'discovery_categories',
-      'discovery_city',
-      'residence_country',
-      'phone',
-    ];
-    const payload = {};
-    for (const k of allowed) {
-      if (req.body && req.body[k] !== undefined) payload[k] = req.body[k];
-    }
-    if (Object.keys(payload).length === 0) {
-      return res.status(400).json({ success: false, error: 'No valid fields to update' });
-    }
-
-    const { data, error } = await supabase
-      .from('users')
-      .update(payload)
-      .eq('id', userId)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ success: false, error: 'User not found' });
-      }
-      return res.status(500).json({ success: false, error: error.message });
-    }
-
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error('[PATCH /api/v2/couple/profile] error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -11649,7 +11400,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 3. Unanswered enquiries ──────────────────────────────────────────────
     const { data: openEnquiries } = await supabase
       .from('vendor_enquiries')
-      .select('id, couple_id, initial_message, last_message_preview, created_at, couple:users(name, bride_name, groom_name)')
+      .select('id, couple_name, message, created_at')
       .eq('vendor_id', vendorId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
@@ -11658,7 +11409,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 4. Today's calendar events ───────────────────────────────────────────
     const { data: todayEvents } = await supabase
       .from('vendor_calendar_events')
-      .select('id, title, event_date, event_time, client_name, notes')
+      .select('id, event_name, event_date, event_time, client_name, notes')
       .eq('vendor_id', vendorId)
       .eq('event_date', todayStr)
       .order('event_time', { ascending: true });
@@ -11666,7 +11417,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     // ── 5. This week's events (for summary) ──────────────────────────────────
     const { data: weekEvents } = await supabase
       .from('vendor_calendar_events')
-      .select('id, title, event_date, event_time, client_name')
+      .select('id, event_name, event_date, event_time, client_name')
       .eq('vendor_id', vendorId)
       .gte('event_date', weekStartStr)
       .lt('event_date', weekEndStr)
@@ -11709,12 +11460,10 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     for (const enq of (openEnquiries || [])) {
       const hoursAgo = Math.floor((now.getTime() - new Date(enq.created_at).getTime()) / 3600000);
       const timeLabel = hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo/24)}d ago`;
-      const c = enq.couple || {};
-      const coupleName = c.name || c.bride_name || c.groom_name || 'a couple';
       needs_attention.push({
         id: enq.id,
         type: 'enquiry',
-        title: `New enquiry from ${coupleName}`,
+        title: `New enquiry from ${enq.couple_name || 'a couple'}`,
         subtitle: `Received ${timeLabel}. A quick reply keeps the lead warm.`,
         cta: 'Reply now',
       });
@@ -11725,7 +11474,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
       needs_attention.push({
         id: ev.id,
         type: 'shoot',
-        title: ev.title || 'Event today',
+        title: ev.event_name || 'Event today',
         subtitle: ev.client_name
           ? `${ev.client_name}${ev.event_time ? ' · ' + ev.event_time : ''}`
           : (ev.event_time || 'Today'),
@@ -11740,7 +11489,7 @@ app.get('/api/v2/vendor/today/:vendorId', async (req, res) => {
     const todays_schedule = (todayEvents || []).map(ev => ({
       id: ev.id,
       time: ev.event_time || '—',
-      event_name: ev.title || 'Event',
+      event_name: ev.event_name || 'Event',
       client_name: ev.client_name || null,
     }));
 
@@ -11815,12 +11564,11 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
       const normalised = '+91' + phone.replace(/\D/g, '').slice(-10);
       const { data } = await supabase
         .from('users')
-        .select('id, pin_hash, password_hash, name, couple_tier')
+        .select('id, pin_hash, name, couple_tier')
         .eq('phone', normalised)
         .maybeSingle();
       if (!data) return res.json({ found: false, pin_set: false, userId: null });
-      // Legacy fallback: PIN may live in password_hash for older accounts
-      return res.json({ found: true, pin_set: !!(data.pin_hash || data.password_hash), userId: data.id, name: data.name || null, couple_tier: data.couple_tier || 'lite' });
+      return res.json({ found: true, pin_set: !!data.pin_hash, userId: data.id, name: data.name || null, couple_tier: data.couple_tier || 'lite' });
     }
   } catch (e) {
     return res.status(500).json({ found: false, pin_set: false, userId: null });
@@ -11828,7 +11576,7 @@ app.get('/api/v2/auth/pin-status', async (req, res) => {
 });
 
 // V9 restore: verify-pin and set-pin endpoints
-app.post('/api/v2/auth/verify-pin', pinAttemptLimiter, async (req, res) => {
+app.post('/api/v2/auth/verify-pin', async (req, res) => {
   try {
     let { phone, pin, role, userId } = req.body;
     if (!pin) return res.status(400).json({ success: false, error: 'PIN required' });
@@ -11851,21 +11599,21 @@ app.post('/api/v2/auth/verify-pin', pinAttemptLimiter, async (req, res) => {
       return res.json({ success: true, userId: vendor.id, name: vendor.name || null, vendor_tier: sub?.tier || 'essential' });
     }
 
-    // Couple — pin_hash only (post-cleanup May 2026; password_hash is vendor-only)
+    // Couple
     let user = null;
     if (userId) {
-      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier, dreamer_type').eq('id', userId).maybeSingle();
+      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier').eq('id', userId).maybeSingle();
       user = data;
     }
     if (!user && phone) {
       const bare = ('' + phone).replace(/\D/g, '').slice(-10);
-      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier, dreamer_type').eq('phone', '+91' + bare).maybeSingle();
+      const { data } = await supabase.from('users').select('id, pin_hash, name, couple_tier').eq('phone', '+91' + bare).maybeSingle();
       user = data;
     }
     if (!user || !user.pin_hash) return res.json({ success: false, error: 'Account not found' });
     const match = await bcrypt.compare(pin, user.pin_hash);
     if (!match) return res.json({ success: false, error: 'Incorrect PIN' });
-    return res.json({ success: true, userId: user.id, name: user.name || null, couple_tier: user.couple_tier || 'lite', dreamer_type: user.dreamer_type || user.couple_tier || 'lite' });
+    return res.json({ success: true, userId: user.id, name: user.name || null, couple_tier: user.couple_tier || 'lite', dreamer_type: user.couple_tier || 'lite' });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -11878,20 +11626,10 @@ app.post('/api/v2/auth/set-pin', async (req, res) => {
     if (!phone.startsWith('+')) phone = '+91' + phone.replace(/^0+/, '');
     const bcrypt = require('bcryptjs');
     const pin_hash = await bcrypt.hash(pin, 10);
-    if (role === 'vendor') {
-      const { data, error } = await supabase
-        .from('vendors')
-        .update({ pin_hash })
-        .eq('phone', phone)
-        .select('id')
-        .single();
-      if (error || !data) return res.status(400).json({ error: 'Account not found' });
-      return res.json({ success: true, userId: data.id });
-    }
-    // Couple: write pin_hash, clear any legacy password_hash, stamp pin_set_at.
+    const table = role === 'vendor' ? 'vendors' : 'users';
     const { data, error } = await supabase
-      .from('users')
-      .update({ pin_hash, password_hash: null, pin_set_at: new Date().toISOString() })
+      .from(table)
+      .update({ pin_hash })
       .eq('phone', phone)
       .select('id')
       .single();
@@ -12142,27 +11880,21 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
       }
 
       case 'query_budget': {
-        // PATCH B-6a: fixed column names. Was reading name/amount/status which
-        // don't exist on couple_expenses; real columns are vendor_name,
-        // planned_amount, actual_amount, payment_status.
         const { category = null } = toolInput;
-        let q = supabase.from('couple_expenses').select('vendor_name, planned_amount, actual_amount, category, payment_status').eq('couple_id', coupleId);
+        let q = supabase.from('couple_expenses').select('name, amount, category, status').eq('couple_id', coupleId);
         if (category) q = q.eq('category', category);
         const { data } = await q;
         const expenses = data || [];
-        // Logged = sum of planned commitments (the deal value, paid + pending).
-        // Paid = sum of actual_amount on rows marked paid.
-        const logged = expenses.reduce((s, e) => s + (Number(e.planned_amount) || 0), 0);
-        const paid = expenses.filter(e => e.payment_status === 'paid').reduce((s, e) => s + (Number(e.actual_amount) || 0), 0);
-        const pending = Math.max(0, logged - paid);
-        const { data: budgetData } = await supabase.from('couple_budget').select('total_budget').eq('couple_id', coupleId).maybeSingle();
-        const totalBudget = Number(budgetData?.total_budget) || 0;
-        const remaining = totalBudget - logged;
+        const total = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+        const paid = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + (e.amount || 0), 0);
+        const pending = total - paid;
+        const { data: budgetData } = await supabase.from('couple_budget').select('total_budget').eq('couple_id', coupleId).single();
+        const totalBudget = budgetData?.total_budget || 0;
+        const remaining = totalBudget - total;
         let reply = `💰 Budget summary${category ? ' (' + category + ')' : ''}:\n`;
         if (totalBudget > 0) reply += `Total budget: ₹${totalBudget.toLocaleString('en-IN')}\n`;
-        reply += `Logged: Rs ${logged.toLocaleString('en-IN')}\nPaid: Rs ${paid.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}`;
+        reply += `Logged: ₹${total.toLocaleString('en-IN')}\nPaid: ₹${paid.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}`;
         if (totalBudget > 0) reply += `\n${remaining >= 0 ? 'Remaining: ₹' + remaining.toLocaleString('en-IN') : 'Over budget by: ₹' + Math.abs(remaining).toLocaleString('en-IN')}`;
-        else reply += `\n(no total budget set yet — say "my budget is X lac" to set one)`;
         return reply;
       }
 
@@ -12214,23 +11946,6 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
           created_at: new Date().toISOString(),
         }]);
         if (error) throw error;
-        try {
-          await supabase.from('circle_activity_events').insert([{
-            couple_id: String(coupleId),
-            actor_user_id: String(coupleId),
-            actor_role: 'bride',
-            event_type: 'muse_saved',
-            payload: {
-              image_url: source_url,
-              function_tag: function_tag || null,
-              source: 'bride_dreamai',
-            },
-            entity_type: 'muse',
-            entity_id: null,
-          }]);
-        } catch (e) {
-          console.error('[muse activity event]', e.message);
-        }
         return `✓ Saved to Muse board${title ? ': ' + title : ''}`;
       }
 
@@ -12402,27 +12117,16 @@ RULES:
 const FROST_BRIDE_TOOLS = [
   {
     name: 'book_vendor',
-    description: 'Composite tool. Use whenever the bride wants to add or book a vendor — with OR WITHOUT a total price. If she has booked with a price ("Booked Swati for 1 lakh, paid 30k advance"), it will: (1) update vendor status to booked, (2) log the advance as a paid expense, (3) auto-create a balance reminder. If she has only added them without a quote ("add Swati R as a jeweller, no quote yet"), it will simply add them with status=enquired — no expense, no reminder. After a booking with price, ASK YES/NO follow-ups for: thank-you note draft, share with circle.',
+    description: 'Composite tool. Use when the bride says she has booked or finalized a vendor with a total price and (optionally) an advance amount. Example: "Booked Swati for 1 lakh, paid 30k advance". This will: (1) update vendor status to booked, (2) log the advance as a paid expense, (3) auto-create a balance reminder. After this, ASK YES/NO follow-ups for: thank-you note draft, share with circle.',
     input_schema: {
       type: 'object',
       properties: {
         vendor_name: { type: 'string', description: 'Vendor name as the bride said it (will be matched against her saved vendors).' },
-        total_price: { type: 'number', description: 'Total agreed price in rupees. Optional — omit if the bride has not given a quote yet.' },
+        total_price: { type: 'number', description: 'Total agreed price in rupees.' },
         advance: { type: 'number', description: 'Advance paid in rupees (optional).' },
         category: { type: 'string', description: 'Vendor category if not already in her saved list (mua, photographer, decorator, designer, jeweller, venue, caterer, choreographer, event, other).' },
       },
-      required: ['vendor_name'],
-    },
-  },
-  {
-    name: 'set_total_budget',
-    description: 'Set or update the bride\'s overall wedding budget. Use whenever she says her budget is X / her budget should be X / make her budget X. Examples: "my budget is 40 lac", "set my budget to 35 lakhs", "update my budget to 50 lac". The tool surfaces a confirm card so the bride sees the number before it commits — never write silently.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        amount: { type: 'number', description: 'Total wedding budget in rupees. Convert lakhs/lac to rupees first (1 lac = 100,000). E.g. "40 lac" → 4000000.' },
-      },
-      required: ['amount'],
+      required: ['vendor_name', 'total_price'],
     },
   },
   {
@@ -12489,18 +12193,6 @@ const FROST_BRIDE_TOOLS = [
   },
 
   {
-    name: 'query_my_reminders',
-    description: "Answers questions about the bride's reminders, tasks, or to-do list. Use when she types 'tasks', 'reminders', 'todos', 'what do I need to do', 'what's pending', or any single-word query about her tasks. Reads from couple_checklist. NOT for creating new reminders — use create_reminder for that.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', enum: ['pending', 'complete', 'all'], description: "Default 'pending' (incomplete reminders only)." },
-        event: { type: 'string', description: "Filter by wedding event (haldi, mehendi, sangeet, wedding, reception, general). Optional." },
-      },
-    },
-  },
-
-  {
     name: 'log_payment',
     description: "Log a partial or additional payment. 'Paid Swati 50k more', 'Sent another 25k to the photographer'. NOT for booking advance (book_vendor) or final balance (settle_balance).",
     input_schema: {
@@ -12562,8 +12254,7 @@ const FROST_BRIDE_TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        image_url: { type: 'string', description: "Direct renderable image URL (CDN). For Pinterest use resolved pinimg.com URL; for Instagram use resolved cdninstagram.com URL. Required." },
-        source_url: { type: 'string', description: "Optional. The original Pinterest/Instagram page URL she pasted. Stored separately from image_url for reference." },
+        image_url: { type: 'string', description: "URL of the inspiration. Pinterest, Instagram, or any image URL she pasted. Required." },
         function_tag: { type: 'string', description: "Optional ceremony tag — 'haldi', 'mehendi', 'reception', 'sangeet', 'wedding', 'general'. Use general if unsure." },
         note: { type: 'string', description: "Optional bride's note about why she saved this." },
         vendor_id: { type: 'string', description: "Optional vendor UUID if this saves is associated with a TDW vendor." },
@@ -12595,23 +12286,6 @@ const FROST_BRIDE_TOOLS = [
     },
   },
 
-  // FIX-2: add_expense ad-hoc expense logging
-  {
-    name: 'add_expense',
-    description: "Log a one-off expense the bride mentions. Use when she says 'I just spent X on Y', 'paid Z for the lehenga today', 'gave 5k to the florist'. Creates a paid expense row immediately. NOT for booking advances (use book_vendor) or for settling pending balances (use log_payment / settle_balance).",
-    input_schema: {
-      type: 'object',
-      properties: {
-        amount: { type: 'number', description: "Amount spent in INR." },
-        description: { type: 'string', description: "What the expense is for. E.g. 'flowers', 'mehendi cones', 'driver tip'. Free text." },
-        vendor_name: { type: 'string', description: "Optional vendor or recipient name. Pass if she mentions one. Otherwise omit." },
-        category: { type: 'string', description: "Optional category — 'decor', 'food', 'attire', 'logistics', 'other'. Best-guess from description." },
-        event: { type: 'string', description: "Optional event tag — 'haldi', 'mehendi', 'sangeet', 'wedding', 'reception', 'general'. Default 'general'." },
-      },
-      required: ['amount', 'description'],
-    },
-  },
-
   // ── ZIP 8: read_circle_thread ─────────────────────────────────────────────
   {
     name: 'read_circle_thread',
@@ -12625,110 +12299,6 @@ const FROST_BRIDE_TOOLS = [
       },
     },
   },
-
-  // ─── PHASE 1.6 — UPDATE / DELETE / CONTACT TOOLS ─────────────────────────
-  // These complete the bride's CRUD vocabulary. Adding/reading was already
-  // possible via book_vendor/add_expense/create_reminder + query_my_*.
-  // Now: editing existing rows, deleting them, and reaching out to vendors.
-  {
-    name: 'update_vendor',
-    description: "Edit fields on an existing vendor in the bride's couple_vendors. Use when she says 'change Swati's number to X', 'her quote is now 80k not 60k', 'move the photographer to mehendi instead of sangeet', 'Swati's category should be MUA not photographer'. The vendor must already exist on her list — if not found, returns clarify. Confirm-not-required (small edits don't need a Yes/No card).",
-    input_schema: {
-      type: 'object',
-      properties: {
-        vendor_name: { type: 'string', description: "The vendor's name as the bride refers to her — looked up via ilike against couple_vendors.name. Required." },
-        new_name: { type: 'string', description: "New name if she's renaming." },
-        phone: { type: 'string', description: "Vendor's phone number, with or without country code. Will be normalised to E.164 with +91 default." },
-        category: { type: 'string', description: "Vendor category (MUA, photographer, decorator, caterer, etc)." },
-        quoted_total: { type: 'number', description: "Updated total quote in INR." },
-        balance_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) when the balance is due." },
-        events: { type: 'array', items: { type: 'string' }, description: "Which events the vendor covers (haldi, mehendi, sangeet, wedding, reception). Replaces the existing array." },
-        status: { type: 'string', description: "Vendor pipeline status (enquired, considering, in_discussion, shortlisted, booked, declined)." },
-        notes: { type: 'string', description: "Free-text notes the bride wants attached." },
-      },
-      required: ['vendor_name'],
-    },
-  },
-  {
-    name: 'update_expense',
-    description: "Edit fields on an existing expense row. Use when she says 'the lehenga was actually 75k not 65k', 'mark Swati's advance as paid', 'change the due date to next Monday', 'the florist deposit is committed not pending'. Looked up by description or vendor_name + most-recent. Confirm-not-required.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        match_vendor_name: { type: 'string', description: "Find the most-recent expense whose vendor_name ilikes this. Use this OR match_description." },
-        match_description: { type: 'string', description: "Find the most-recent expense whose description ilikes this. Use this OR match_vendor_name." },
-        new_planned_amount: { type: 'number', description: "Updated planned amount in INR." },
-        new_actual_amount: { type: 'number', description: "Updated actual paid amount in INR." },
-        new_payment_status: { type: 'string', description: "New payment status: pending | committed | paid." },
-        new_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) for new due date." },
-        new_notes: { type: 'string', description: "New free-text notes." },
-      },
-    },
-  },
-  {
-    name: 'update_reminder',
-    description: "Edit fields on an existing reminder/task. Use when she says 'move my lehenga pickup to Tuesday', 'change priority to high', 'tag this to mehendi'. Looked up by text ilike. Confirm-not-required.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        match_text: { type: 'string', description: "Find the most-recent reminder whose text ilikes this. Required." },
-        new_text: { type: 'string', description: "Updated reminder text." },
-        new_due_date: { type: 'string', description: "ISO date (YYYY-MM-DD) for new due date." },
-        new_event: { type: 'string', description: "Tag the reminder to a specific event (haldi, mehendi, sangeet, wedding, reception)." },
-        new_priority: { type: 'string', description: "Priority: low | medium | high." },
-      },
-      required: ['match_text'],
-    },
-  },
-  {
-    name: 'delete_vendor',
-    description: "Remove a vendor from the bride's list. Confirm-required — destructive. Use when she says 'remove Swati from my vendors', 'I'm not going with Arjun anymore', 'drop the third decorator'. Returns a confirmPreview the bride must tap Yes on.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        vendor_name: { type: 'string', description: "Vendor's name; looked up via ilike. Required." },
-        confirmed: { type: 'boolean', description: "Internal — set automatically by the bride-confirm replay. Never set this from the model." },
-      },
-      required: ['vendor_name'],
-    },
-  },
-  {
-    name: 'delete_expense',
-    description: "Remove an expense row. Confirm-required — destructive. Use when she says 'undo that expense', 'remove the catering charge', 'I shouldn't have logged the lehenga twice — delete one'. Returns a confirmPreview.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        match_vendor_name: { type: 'string', description: "Match by vendor_name ilike. Use this OR match_description." },
-        match_description: { type: 'string', description: "Match by description ilike. Use this OR match_vendor_name." },
-        confirmed: { type: 'boolean', description: "Internal." },
-      },
-    },
-  },
-  {
-    name: 'delete_reminder',
-    description: "Remove a reminder. Confirm-required — destructive. Use when she says 'forget that reminder', 'I don't need the call-the-florist task', 'remove the 4pm thing'. Returns a confirmPreview.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        match_text: { type: 'string', description: "Match by text ilike. Required." },
-        confirmed: { type: 'boolean', description: "Internal." },
-      },
-      required: ['match_text'],
-    },
-  },
-  {
-    name: 'contact_vendor',
-    description: "Call or message a vendor. Use when the bride says 'call Swati', 'message Arjun about the timeline', 'WhatsApp the decorator to confirm'. Looks up the vendor's phone in couple_vendors. Returns a contact_action card the bride taps to dial or open WhatsApp. Does NOT actually place the call or send the message — opens the native app with content pre-filled. The bride is always the one who hits Send. If mode='whatsapp' AND the bride has indicated what she wants to say, draft the message in HER voice (first-person, warm, brief, Indian-bride-natural). If she didn't say what to message about, draft a soft generic opener like 'Hi <name>! Quick question for you.'. Confirm-not-required.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        vendor_name: { type: 'string', description: "Vendor's name; looked up via ilike. Required." },
-        mode: { type: 'string', enum: ['call', 'whatsapp'], description: "'call' opens the native dialer. 'whatsapp' opens WhatsApp with pre-filled message. Required." },
-        message: { type: 'string', description: "Drafted message text. Used only when mode='whatsapp'. Write in the BRIDE'S voice, not yours — first-person, warm, short, Indian-bride-natural. Examples: 'Hi Swati! Between the red and gold lehenga, which would you suggest for the wedding day?', 'Hey Arjun, just confirming — Sangeet shoot starts at 6pm right?'" },
-      },
-      required: ['vendor_name', 'mode'],
-    },
-  },
 ];
 
 // ── Bride tool executor — composite + atomic ───────────────────────────────
@@ -12737,53 +12307,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
     switch (toolName) {
 
       case 'book_vendor': {
-        const { vendor_name, total_price = null, advance = 0, category = null, confirmed = false } = toolInput;
-        const hasQuote = total_price != null && total_price > 0;
-
-        // FIX-4: dry-run gate — first call (LLM) returns preview; bride-confirm
-        // replays with confirmed=true to actually write.
-        // PATCH B-1: when no quote, the confirm card describes a no-quote add.
-        if (!confirmed) {
-          const action_id = 'booking_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingBookings.set(action_id, { coupleId, vendor_name, total_price, advance, category });
-          setTimeout(() => pendingBookings.delete(action_id), 10 * 60 * 1000);
-          if (!hasQuote) {
-            return {
-              ok: true,
-              kind: 'confirm-required',
-              reply: `Want me to add ${vendor_name}?`,
-              confirmPreview: {
-                summaryTitle: `Add ${vendor_name}?`,
-                summaryLines: [
-                  category ? `Category: ${category}` : 'Category: existing on file',
-                  'No quote yet — you can update later',
-                  'Status: enquired',
-                ],
-                confirmLabel: 'Add',
-                cancelLabel: 'Not yet',
-                action_id,
-              },
-            };
-          }
-          const balance = total_price - advance;
-          return {
-            ok: true,
-            kind: 'confirm-required',
-            reply: `Want me to lock in ${vendor_name}?`,
-            confirmPreview: {
-              summaryTitle: `Lock in ${vendor_name}?`,
-              summaryLines: [
-                `Total: ${formatINR(total_price)}`,
-                advance > 0 ? `Advance paid today: ${formatINR(advance)}` : 'No advance yet',
-                balance > 0 ? `Balance: ${formatINR(balance)} (reminder will be set 2 weeks before the wedding)` : 'Fully paid up front',
-                category ? `Category: ${category}` : 'Category: existing on file',
-              ],
-              confirmLabel: 'Lock in',
-              cancelLabel: 'Not yet',
-              action_id,
-            },
-          };
-        }
+        const { vendor_name, total_price, advance = 0, category = null } = toolInput;
 
         // 1. Find or create the vendor row in couple_vendors
         // Real schema: id, couple_id, name, category, status, quoted_total, events (jsonb), balance_due_date, ...
@@ -12795,18 +12319,10 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
 
         // Multiple matches → ask the bride which one
         if (existingVendors && existingVendors.length > 1) {
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = existingVendors.slice(0, 4).map(v => ({
-            label: v.name + (v.category ? ' (' + v.category + ')' : ''),
-            send_text: v.name,
-          }));
           return {
             ok: false,
             kind: 'clarify',
-            reply: existingVendors.length <= 4
-              ? `Which ${vendor_name}?`
-              : `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name).join(', ')}. Which one?`,
-            clarify_options: existingVendors.length <= 4 ? opts : null,
+            reply: `I see a few people named "${vendor_name}" in your list — ${existingVendors.map(v => v.name + ' (' + (v.category || 'unknown') + ')').join(', ')}. Which one?`,
           };
         }
 
@@ -12860,24 +12376,22 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           }
         }
 
-        // 3. Update vendor: status=booked (with quote) OR enquired (no quote), quoted_total, balance_due_date
-        // PATCH B-1: when no quote, only mark status='enquired' and set source/last_dreamai_action.
-        const eventTag = (vendorRow.events && Array.isArray(vendorRow.events) && vendorRow.events.length > 0)
-          ? vendorRow.events[0]
-          : 'general';
-        const updateData = hasQuote
-          ? { status: 'booked', quoted_total: total_price, source: 'dreamai', last_dreamai_action: new Date().toISOString() }
-          : { status: 'enquired', source: 'dreamai', last_dreamai_action: new Date().toISOString() };
-        if (hasQuote && balanceDueDate) updateData.balance_due_date = balanceDueDate;
+        // 3. Update vendor: status=booked, quoted_total, balance_due_date
+        const updateData = { status: 'booked', quoted_total: total_price, source: 'dreamai', last_dreamai_action: new Date().toISOString() };
+        if (balanceDueDate) updateData.balance_due_date = balanceDueDate;
         const { error: updateErr } = await supabase
           .from('couple_vendors')
           .update(updateData)
           .eq('id', vendorRow.id);
         if (updateErr) throw updateErr;
 
-        // 4. Log advance as a paid expense (if any) — only when there's a quote
+        // 4. Log advance as a paid expense (if any)
         // Real schema: event (NOT NULL), category, vendor_name, description, planned_amount, actual_amount, payment_status, due_date, notes
-        if (hasQuote && advance > 0) {
+        const eventTag = (vendorRow.events && Array.isArray(vendorRow.events) && vendorRow.events.length > 0)
+          ? vendorRow.events[0]
+          : 'general';
+
+        if (advance > 0) {
           const { error: expErr } = await supabase.from('couple_expenses').insert([{
             couple_id: coupleId,
             event: eventTag,
@@ -12893,8 +12407,8 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
 
         // 5. Also log a planned-but-unpaid expense for the balance, so the budget reflects total commitment
-        const balance = hasQuote ? (total_price - advance) : 0;
-        if (hasQuote && balance > 0) {
+        const balance = total_price - advance;
+        if (balance > 0) {
           const { error: balExpErr } = await supabase.from('couple_expenses').insert([{
             couple_id: coupleId,
             event: eventTag,
@@ -12910,10 +12424,10 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           if (balExpErr) console.error('[bride book_vendor balance expense]', balExpErr.message);
         }
 
-        // 6. Auto-create balance reminder in couple_checklist — only when there's a quote AND a balance
+        // 6. Auto-create balance reminder in couple_checklist
         // Real schema: id, couple_id, event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, ...
         let reminderCreated = false;
-        if (hasQuote && balance > 0) {
+        if (balance > 0) {
           let dueDate = balanceDueDate;
           if (!dueDate) {
             const fallback = new Date();
@@ -12933,23 +12447,6 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
 
         // 7. Build the structured response for Frost UI
-        // PATCH B-1: when no quote, summary + reply describe an enquired add, not a lock-in.
-        if (!hasQuote) {
-          const summaryLines = [
-            `${vendor_name} added as ${vendorRow.category || category || 'vendor'}`,
-            'Status: enquired',
-            'No quote yet — you can update her quote whenever you\'re ready',
-          ];
-          return {
-            ok: true,
-            kind: 'composite',
-            reply: `✓ Added ${vendor_name} to your list. You can update the quote whenever you're ready.`,
-            confirmPreview: null,
-            summaryLines,
-            followupPrompts: [],
-            vendor_id: vendorRow.id,
-          };
-        }
         const summaryLines = [
           `${vendor_name} — locked in as ${vendorRow.category || category}`,
           `₹${total_price.toLocaleString('en-IN')} total`,
@@ -12983,96 +12480,8 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           confirmPreview: null,
           summaryLines,
           followupPrompts: followups,
-          // FIX-3: return vendor_id for anchor routing — long-press jumps to vendor page
-          vendor_id: vendorRow.id,
         };
       }
-      case 'set_total_budget': {
-        // PATCH B-6a: confirm-required write to couple_budget.total_budget.
-        const { amount, confirmed = false } = toolInput || {};
-        if (amount == null || isNaN(amount) || amount <= 0) {
-          return { ok: false, kind: 'unsure', reply: "How much would you like to set your budget to?" };
-        }
-        // Dry-run: read current value to shape the confirm card (Set vs Update).
-        if (!confirmed) {
-          let currentBudget = 0;
-          try {
-            const { data: existing } = await supabase
-              .from('couple_budget')
-              .select('total_budget')
-              .eq('couple_id', coupleId)
-              .maybeSingle();
-            currentBudget = Number(existing?.total_budget) || 0;
-          } catch (e) { /* if read fails, treat as initial set */ }
-          const isUpdate = currentBudget > 0;
-          const action_id = 'budget_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingBudgetSets.set(action_id, { coupleId, amount, isUpdate, previousBudget: currentBudget });
-          setTimeout(() => pendingBudgetSets.delete(action_id), 10 * 60 * 1000);
-          if (isUpdate) {
-            return {
-              ok: true,
-              kind: 'confirm-required',
-              reply: `Want me to update your budget?`,
-              confirmPreview: {
-                summaryTitle: `Update your wedding budget?`,
-                summaryLines: [
-                  `From: ${formatINR(currentBudget)}`,
-                  `To: ${formatINR(amount)}`,
-                ],
-                confirmLabel: 'Update',
-                cancelLabel: 'Not yet',
-                action_id,
-              },
-            };
-          }
-          return {
-            ok: true,
-            kind: 'confirm-required',
-            reply: `Want me to set your budget?`,
-            confirmPreview: {
-              summaryTitle: `Set your wedding budget?`,
-              summaryLines: [
-                `Total: ${formatINR(amount)}`,
-                `This is what I'll pace your spending against.`,
-              ],
-              confirmLabel: 'Lock in',
-              cancelLabel: 'Not yet',
-              action_id,
-            },
-          };
-        }
-        // Confirmed path (replayed by bride-confirm) — but bride-confirm
-        // handles set_total_budget directly, so this branch should rarely
-        // execute. Kept for parity with other confirm-required tools.
-        try {
-          const { data: existing } = await supabase
-            .from('couple_budget')
-            .select('id')
-            .eq('couple_id', coupleId)
-            .maybeSingle();
-          if (existing) {
-            await supabase
-              .from('couple_budget')
-              .update({ total_budget: amount, updated_at: new Date().toISOString() })
-              .eq('couple_id', coupleId);
-          } else {
-            await supabase
-              .from('couple_budget')
-              .insert([{ couple_id: coupleId, total_budget: amount, event_envelopes: {} }]);
-          }
-        } catch (err) {
-          return { ok: false, kind: 'unknown', reply: "Something went sideways saving your budget. Try once more?" };
-        }
-        return {
-          ok: true,
-          kind: 'composite',
-          reply: `✓ Budget set to ${formatINR(amount)}.`,
-          confirmPreview: null,
-          summaryLines: [`Total budget: ${formatINR(amount)}`],
-          followupPrompts: [],
-        };
-      }
-
       case 'create_reminder': {
         // Real schema: couple_checklist with event (NOT NULL), text (NOT NULL), is_complete, priority, due_date, is_custom
         const { text: reminderText, due_date = null, priority = 'normal', event = 'general' } = toolInput;
@@ -13084,14 +12493,12 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           is_custom: true,
         };
         if (due_date) insertData.due_date = due_date;
-        // PATCH B-3a: capture row.id so bride-chat can derive a tool_anchor for the View pill.
-        const { data: row, error } = await supabase.from('couple_checklist').insert([insertData]).select('id').single();
+        const { error } = await supabase.from('couple_checklist').insert([insertData]);
         if (error) throw error;
         return {
           ok: true,
           kind: 'atomic',
           reply: `✦ I'll remember: ${reminderText}${due_date ? ' · ' + due_date : ''}`,
-          task_id: row?.id,
         };
       }
 
@@ -13124,48 +12531,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         };
       }
 
-      case 'query_my_reminders': {
-        const { status = 'pending', event } = toolInput || {};
-        let q = supabase
-          .from('couple_checklist')
-          .select('text, event, priority, due_date, is_complete, created_at')
-          .eq('couple_id', coupleId)
-          .order('due_date', { ascending: true, nullsFirst: false })
-          .limit(20);
-        if (status === 'pending')   q = q.eq('is_complete', false);
-        if (status === 'complete')  q = q.eq('is_complete', true);
-        if (event)                  q = q.eq('event', event);
-        const { data, error } = await q;
-        if (error) throw error;
-        const list = data || [];
-        if (list.length === 0) {
-          return {
-            ok: true,
-            kind: 'atomic',
-            reply: status === 'pending'
-              ? "Nothing pending right now. You're caught up."
-              : "Nothing on your list yet.",
-            tool_anchor: { tool: 'reminders', entity_type: 'list' },
-          };
-        }
-        const lines = list.slice(0, 8).map(r => {
-          const due = r.due_date ? ' · ' + r.due_date : '';
-          const ev = r.event && r.event !== 'general' ? ` (${r.event})` : '';
-          return `• ${r.text}${ev}${due}`;
-        });
-        const more = list.length > 8 ? `\n\n…and ${list.length - 8} more.` : '';
-        return {
-          ok: true,
-          kind: 'atomic',
-          reply: `Here's what's on your list:\n\n${lines.join('\n')}${more}`,
-          tool_anchor: { tool: 'reminders', entity_type: 'list' },
-        };
-      }
-
       // ── ZIP 3: query_my_vendors ──
-      // BUG A FIX: build bulleted reply with vendor names, status, amounts so
-      // the bride sees who's on her team without a second exchange. Mirrors
-      // query_my_reminders pattern (bullet lines into `reply`).
       case 'query_my_vendors': {
         const { status_filter = 'all', category_filter } = toolInput || {};
         let q = supabase.from('couple_vendors')
@@ -13176,53 +12542,19 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         if (category_filter) q = q.ilike('category', category_filter);
         const { data, error } = await q.order('updated_at', { ascending: false });
         if (error) throw error;
-        const list = data || [];
-        if (list.length === 0) {
-          return {
-            ok: true,
-            kind: 'reply',
-            reply: status_filter === 'booked'
-              ? "Nothing booked yet."
-              : "You haven't added anyone yet.",
-            vendors: [],
-            tool_anchor: { tool: 'vendors', entity_type: 'list' },
-          };
-        }
-        const statusLabel = (s) => {
-          if (s === 'booked') return 'booked';
-          if (s === 'shortlisted') return 'shortlisted';
-          if (s === 'considering') return 'in talks';
-          if (s === 'in_discussion') return 'in talks';
-          if (s === 'declined') return 'passed on';
-          return s || 'tracked';
-        };
-        const lines = list.slice(0, 10).map(v => {
-          const cat = v.category ? ` — ${v.category}` : '';
-          const st = ` · ${statusLabel(v.status)}`;
-          const amt = v.quoted_total ? ` · ${formatINR(v.quoted_total)}` : '';
-          return `• ${v.name}${cat}${st}${amt}`;
-        });
-        const more = list.length > 10 ? `\n\n…and ${list.length - 10} more.` : '';
-        const header = list.length === 1
-          ? "Here's who's on your team:"
-          : `Here are your ${list.length} vendors:`;
-        const slim = list.map(v => ({
+        const list = (data || []).map(v => ({
           name: v.name, category: v.category, status: v.status,
           quoted_total: v.quoted_total, balance_due_date: v.balance_due_date,
         }));
         return {
           ok: true,
           kind: 'reply',
-          reply: `${header}\n\n${lines.join('\n')}${more}`,
-          vendors: slim,
-          tool_anchor: { tool: 'vendors', entity_type: 'list' },
+          reply: list.length === 0 ? "You haven't added anyone yet." : `${list.length} vendor${list.length === 1 ? '' : 's'} match.`,
+          vendors: list,
         };
       }
 
       // ── ZIP 3: query_my_expenses ──
-      // BUG A FIX: header line with totals + bulleted expense lines so the
-      // bride sees what she paid for and what's still pending without a
-      // second exchange. Matches query_my_reminders pattern.
       case 'query_my_expenses': {
         const { vendor_name, payment_status = 'all' } = toolInput || {};
         let q = supabase.from('couple_expenses')
@@ -13237,39 +12569,12 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           .reduce((sum, r) => sum + (r.actual_amount || 0), 0);
         const totalPending = rows.filter(r => r.payment_status === 'pending')
           .reduce((sum, r) => sum + (r.planned_amount || 0), 0);
-        if (rows.length === 0) {
-          return {
-            ok: true,
-            kind: 'reply',
-            reply: vendor_name
-              ? `Nothing logged for ${vendor_name} yet.`
-              : "Nothing logged yet.",
-            total_paid: 0,
-            total_pending: 0,
-            total_committed: 0,
-            expenses: [],
-            tool_anchor: { tool: 'money', entity_type: 'list' },
-          };
-        }
-        const header = vendor_name
-          ? `${formatINR(totalPaid)} paid to ${vendor_name} · ${formatINR(totalPending)} pending`
-          : `${formatINR(totalPaid)} paid so far · ${formatINR(totalPending)} still pending`;
-        const lines = rows.slice(0, 10).map(r => {
-          const who = r.vendor_name || r.description || 'Untitled';
-          const amt = r.payment_status === 'paid'
-            ? (r.actual_amount || 0)
-            : (r.planned_amount || 0);
-          const stLabel = r.payment_status === 'paid'
-            ? 'paid'
-            : (r.payment_status === 'pending' ? 'pending' : (r.payment_status || 'tracked'));
-          const due = r.due_date && r.payment_status !== 'paid' ? ` · due ${r.due_date}` : '';
-          return `• ${who} — ${formatINR(amt)} · ${stLabel}${due}`;
-        });
-        const more = rows.length > 10 ? `\n\n…and ${rows.length - 10} more.` : '';
         return {
           ok: true,
           kind: 'reply',
-          reply: `${header}\n\n${lines.join('\n')}${more}`,
+          reply: vendor_name
+            ? `${formatINR(totalPaid)} paid to ${vendor_name}, ${formatINR(totalPending)} pending.`
+            : `${formatINR(totalPaid)} paid so far. ${formatINR(totalPending)} still pending.`,
           total_paid: totalPaid,
           total_pending: totalPending,
           total_committed: totalPaid + totalPending,
@@ -13280,37 +12585,14 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
             status: r.payment_status,
             due_date: r.due_date,
           })),
-          tool_anchor: { tool: 'money', entity_type: 'list' },
         };
       }
 
       // ── ZIP 3: log_payment ──
       case 'log_payment': {
-        const { vendor_name, amount, note, confirmed = false } = toolInput || {};
+        const { vendor_name, amount, note } = toolInput || {};
         if (!vendor_name || !amount) {
           return { ok: false, kind: 'unknown', reply: "I'll need a vendor name and an amount." };
-        }
-        // FIX-4: dry-run gate — first call returns preview.
-        if (!confirmed) {
-          const action_id = 'payment_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingPayments.set(action_id, { coupleId, vendor_name, amount, note });
-          setTimeout(() => pendingPayments.delete(action_id), 10 * 60 * 1000);
-          return {
-            ok: true,
-            kind: 'confirm-required',
-            reply: `Want me to log this payment?`,
-            confirmPreview: {
-              summaryTitle: `Log ${formatINR(amount)} to ${vendor_name}?`,
-              summaryLines: [
-                `Amount: ${formatINR(amount)}`,
-                `Vendor: ${vendor_name}`,
-                note ? `Note: "${note}"` : 'No note',
-              ],
-              confirmLabel: 'Log payment',
-              cancelLabel: 'Not yet',
-              action_id,
-            },
-          };
         }
         const { data: matches } = await supabase.from('couple_expenses')
           .select('id, vendor_name, description, planned_amount, actual_amount, payment_status, notes')
@@ -13326,25 +12608,16 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
         const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
         if (distinctNames.length > 1) {
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = distinctNames.slice(0, 4).map(n => ({
-            label: n,
-            send_text: n,
-          }));
           return {
             ok: false,
             kind: 'clarify',
-            reply: distinctNames.length <= 4
-              ? `Which one did you pay?`
-              : `I see a few different vendors matching "${vendor_name}" — ${distinctNames.join(', ')}. Which one?`,
+            reply: `I see a few different vendors matching "${vendor_name}". Which one did you pay?`,
             candidates: distinctNames,
-            clarify_options: distinctNames.length <= 4 ? opts : null,
           };
         }
         const target = matches[0];
         const newActual = (target.actual_amount || 0) + amount;
-        const planned = target.planned_amount || 0;
-        const newStatus = newActual >= planned ? 'paid' : 'pending';
+        const newStatus = newActual >= (target.planned_amount || 0) ? 'paid' : 'pending';
         const mergedNotes = note
           ? (target.notes ? target.notes + ' | ' + note : note)
           : target.notes;
@@ -13355,46 +12628,31 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           updated_at: new Date().toISOString(),
         }).eq('id', target.id);
         if (updateErr) throw updateErr;
-        // PATCH B-2: detect overpayment and surface it instead of "Fully settled".
-        const overpaid = newActual > planned && planned > 0 ? newActual - planned : 0;
-        const remaining = Math.max(0, planned - newActual);
+        const remaining = Math.max(0, (target.planned_amount || 0) - newActual);
         const summaryLines = [
           `Payment of ${formatINR(amount)} recorded`,
-          `Total paid: ${formatINR(newActual)} of ${formatINR(planned)}`,
-          overpaid > 0
-            ? `Overpaid by ${formatINR(overpaid)} — the planned amount may be out of date`
-            : (remaining > 0 ? `Balance remaining: ${formatINR(remaining)}` : 'Fully settled'),
+          `Total paid: ${formatINR(newActual)} of ${formatINR(target.planned_amount || 0)}`,
+          remaining > 0 ? `Balance remaining: ${formatINR(remaining)}` : 'Fully settled',
         ];
-        const followups = overpaid > 0
-          ? [{
-              id: 'log_payment_update_planned',
-              text: `Total paid is more than planned. Want me to update the planned amount to ${formatINR(newActual)}?`,
-              yesLabel: 'Yes, update',
-              noLabel: 'Leave as is',
-            }]
-          : (remaining > 0 ? [{
-              id: 'log_payment_remind_me',
-              text: `Want me to remind you when the next payment is due?`,
-              yesLabel: 'Yes, set reminder',
-              noLabel: 'Not now',
-            }] : []);
+        const followups = remaining > 0 ? [{
+          id: 'log_payment_remind_me',
+          text: `Want me to remind you when the next payment is due?`,
+          yesLabel: 'Yes, set reminder',
+          noLabel: 'Not now',
+        }] : [];
         return {
           ok: true,
           kind: 'composite',
-          reply: overpaid > 0
-            ? `✓ ${formatINR(amount)} logged for ${target.vendor_name}. Note: paid is now ${formatINR(overpaid)} over the planned amount.`
-            : `✓ ${formatINR(amount)} logged for ${target.vendor_name}.`,
+          reply: `✓ ${formatINR(amount)} logged for ${target.vendor_name}.`,
           confirmPreview: null,
           summaryLines,
           followupPrompts: followups,
-          // FIX-3: return expense_id for anchor routing
-          expense_id: target.id,
         };
       }
 
       // ── ZIP 3: settle_balance ──
       case 'settle_balance': {
-        const { vendor_name, amount_override, confirmed = false } = toolInput || {};
+        const { vendor_name, amount_override } = toolInput || {};
         if (!vendor_name) {
           return { ok: false, kind: 'unknown', reply: "Which vendor did you settle?" };
         }
@@ -13411,48 +12669,12 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
             reply: `I couldn't find a pending balance for ${vendor_name}. Maybe it's already settled?`,
           };
         }
-        // FIX-4: dry-run gate — first call returns preview.
-        if (!confirmed) {
-          const previewTarget = matches[0];
-          const previewAmount = amount_override != null ? amount_override : (previewTarget.planned_amount || 0);
-          const action_id = 'settle_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingSettles.set(action_id, { coupleId, vendor_name, amount_override });
-          setTimeout(() => pendingSettles.delete(action_id), 10 * 60 * 1000);
-          return {
-            ok: true,
-            kind: 'confirm-required',
-            reply: `Want me to settle ${previewTarget.vendor_name}?`,
-            confirmPreview: {
-              summaryTitle: `Settle ${previewTarget.vendor_name}?`,
-              summaryLines: [
-                `Final payment: ${formatINR(previewAmount)}`,
-                `Vendor will be marked paid`,
-                `Balance reminder will be cleared`,
-              ],
-              confirmLabel: 'Settle',
-              cancelLabel: 'Not yet',
-              action_id,
-            },
-          };
-        }
         const distinctNames = [...new Set(matches.map(m => m.vendor_name))];
         if (distinctNames.length > 1) {
-          {
-            const opts = distinctNames.slice(0, 4).map(n => ({ label: n, send_text: n }));
-            return {
-              ok: false, kind: 'clarify',
-              reply: `Which one did you settle?`,
-              candidates: distinctNames,
-              clarify_options: distinctNames.length <= 4 ? opts : null,
-            };
-          }
+          return { ok: false, kind: 'clarify', reply: `Which one did you settle?`, candidates: distinctNames };
         }
         const target = matches[0];
         const settleAmount = amount_override != null ? amount_override : (target.planned_amount || 0);
-        const planned = target.planned_amount || 0;
-        // PATCH B-2: detect overpayment on settle (only meaningful when bride
-        // passed amount_override > planned — naked settle uses planned itself).
-        const overpaid = settleAmount > planned && planned > 0 ? settleAmount - planned : 0;
         const { error: expErr } = await supabase.from('couple_expenses').update({
           actual_amount: settleAmount,
           payment_status: 'paid',
@@ -13469,43 +12691,22 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           .eq('couple_id', coupleId)
           .eq('is_custom', true)
           .ilike('text', `%balance%${vendor_name}%`);
-        const settleSummary = [
-          `Final payment of ${formatINR(settleAmount)} recorded`,
-          `Vendor marked as paid`,
-          `Balance reminder cleared`,
-        ];
-        if (overpaid > 0) {
-          settleSummary.push(`Overpaid by ${formatINR(overpaid)} — the planned amount may be out of date`);
-        }
-        const settleFollowups = overpaid > 0
-          ? [{
-              id: 'settle_update_planned',
-              text: `Total paid is more than planned. Want me to update the planned amount to ${formatINR(settleAmount)}?`,
-              yesLabel: 'Yes, update',
-              noLabel: 'Leave as is',
-            }, {
-              id: 'settle_thank_you',
-              text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
-              yesLabel: 'Yes, draft it',
-              noLabel: 'Not now',
-            }]
-          : [{
-              id: 'settle_thank_you',
-              text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
-              yesLabel: 'Yes, draft it',
-              noLabel: 'Not now',
-            }];
         return {
           ok: true,
           kind: 'composite',
-          reply: overpaid > 0
-            ? `✓ ${target.vendor_name} settled. Note: total paid is ${formatINR(overpaid)} over the planned amount.`
-            : `✓ ${target.vendor_name} fully settled.`,
+          reply: `✓ ${target.vendor_name} fully settled.`,
           confirmPreview: null,
-          summaryLines: settleSummary,
-          followupPrompts: settleFollowups,
-          // FIX-3: return expense_id for anchor routing — long-press jumps to expense
-          expense_id: target.id,
+          summaryLines: [
+            `Final payment of ${formatINR(settleAmount)} recorded`,
+            `Vendor marked as paid`,
+            `Balance reminder cleared`,
+          ],
+          followupPrompts: [{
+            id: 'settle_thank_you',
+            text: `Want me to draft a thank-you note for ${target.vendor_name}?`,
+            yesLabel: 'Yes, draft it',
+            noLabel: 'Not now',
+          }],
         };
       }
 
@@ -13574,74 +12775,6 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
             },
           };
         }
-      }
-
-      // FIX-2: add_expense ad-hoc expense logging — fire-and-forget on bride mention
-      case 'add_expense': {
-        const { amount, description, vendor_name = null, category = 'other', event = 'general' } = toolInput || {};
-        if (!amount || !description) {
-          return { ok: false, kind: 'unknown', reply: "I'll need an amount and what it's for." };
-        }
-        const { data: row, error } = await supabase.from('couple_expenses').insert([{
-          couple_id: coupleId,
-          event,
-          category,
-          vendor_name,
-          description,
-          planned_amount: amount,
-          actual_amount: amount,
-          payment_status: 'paid',
-          notes: 'Logged ad-hoc via DreamAi',
-        }]).select('id').single();
-        if (error) throw error;
-        // PATCH B-4: if vendor_name was tagged AND that vendor has a quote,
-        // check drift. The new expense almost always pushes expense sum
-        // higher than the quote. Offer to bump the vendor quote.
-        let addDriftReply = '';
-        let addDriftFollowups = [{
-          id: 'add_expense_remind_me',
-          text: `Want me to remind you about this when budget review comes up?`,
-          yesLabel: 'Yes',
-          noLabel: 'Not now',
-        }];
-        if (vendor_name) {
-          try {
-            const drift = await checkBudgetDrift(coupleId, vendor_name);
-            if (drift && drift.direction === 'bump_quote') {
-              const action_id = 'drift_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-              pendingDriftResolves.set(action_id, {
-                coupleId,
-                kind: 'bump_quote',
-                vendor_id: drift.vendor.id,
-                vendor_name: drift.vendor.name,
-                new_quoted_total: drift.expenseSum,
-              });
-              addDriftReply = ` Heads up: planned expenses for ${drift.vendor.name} now sum to ${formatINR(drift.expenseSum)}, ${formatINR(-drift.drift)} more than her quote (${formatINR(drift.vendor.quoted_total)}).`;
-              // Replace the generic "remind me" followup with the drift one —
-              // it's higher signal and we don't want to overwhelm with two pills.
-              addDriftFollowups = [{
-                id: 'drift_resolve_' + action_id,
-                text: `Want me to bump ${drift.vendor.name}'s quote to ${formatINR(drift.expenseSum)}?`,
-                yesLabel: 'Yes, bump it',
-                noLabel: 'Leave as is',
-              }];
-              setTimeout(() => pendingDriftResolves.delete(action_id), 10 * 60 * 1000);
-            }
-          } catch (e) { /* swallow drift errors */ }
-        }
-        return {
-          ok: true,
-          kind: 'composite',
-          reply: `✓ ${formatINR(amount)} logged for ${description}.` + addDriftReply,
-          confirmPreview: null,
-          summaryLines: [
-            `${formatINR(amount)} — ${description}`,
-            vendor_name ? `Vendor: ${vendor_name}` : 'No vendor tagged',
-            `Marked as paid`,
-          ],
-          followupPrompts: addDriftFollowups,
-          expense_id: row?.id,
-        };
       }
 
       // ── ZIP 8: read_circle_thread (confirm-not-required, read-only) ──
@@ -13761,7 +12894,7 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
 
       // ── ZIP 4: save_to_muse (real schema) ──
       case 'save_to_muse': {
-        const { image_url, source_url = null, function_tag = null, note = null, vendor_id = null } = toolInput || {};
+        const { image_url, function_tag = null, note = null, vendor_id = null } = toolInput || {};
         if (!image_url) {
           return { ok: false, kind: 'unknown', reply: "I'll need a link or image to save." };
         }
@@ -13769,30 +12902,11 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
           user_id: coupleId,
           image_url,
         };
-        // Preserve original page URL (Pinterest/Instagram post) separately from CDN image
-        if (source_url) insertRow.source_url = source_url;
         if (function_tag) insertRow.function_tag = function_tag;
         if (note) insertRow.note = note;
         if (vendor_id) insertRow.vendor_id = vendor_id;
         const { error } = await supabase.from('moodboard_items').insert([insertRow]);
         if (error) throw error;
-        try {
-          await supabase.from('circle_activity_events').insert([{
-            couple_id: String(coupleId),
-            actor_user_id: String(coupleId),
-            actor_role: 'bride',
-            event_type: 'muse_saved',
-            payload: {
-              image_url,
-              function_tag: function_tag || null,
-              source: 'bride_dreamai',
-            },
-            entity_type: 'muse',
-            entity_id: null,
-          }]);
-        } catch (e) {
-          console.error('[muse activity event]', e.message);
-        }
         const summaryLines = [
           'Saved to your Muse',
           function_tag ? `Tagged: ${function_tag}` : 'No ceremony tag yet',
@@ -13847,503 +12961,6 @@ async function executeBrideToolCall(toolName, toolInput, coupleId) {
         }
       }
 
-      // ─── PHASE 1.6 — UPDATE / DELETE / CONTACT EXECUTOR CASES ───────────
-
-      case 'update_vendor': {
-        const {
-          vendor_name, new_name, phone, category, quoted_total,
-          balance_due_date, events, status, notes,
-        } = toolInput || {};
-        if (!vendor_name) {
-          return { ok: false, kind: 'unsure', reply: "Which vendor?" };
-        }
-        const { data: matches } = await supabase
-          .from('couple_vendors')
-          .select('id, name')
-          .eq('couple_id', coupleId)
-          .ilike('name', '%' + vendor_name + '%');
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list. Want to add them?` };
-        }
-        if (matches.length > 1) {
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({ label: m.name, send_text: m.name }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const updates = {};
-        if (new_name) updates.name = new_name;
-        if (phone) {
-          // Normalise to E.164 with +91 default if no country code
-          let p = String(phone).replace(/[^0-9+]/g, '');
-          if (!p.startsWith('+')) {
-            if (p.length === 10) p = '+91' + p;
-            else if (p.startsWith('91') && p.length === 12) p = '+' + p;
-          }
-          updates.phone = p;
-        }
-        if (category) updates.category = category;
-        if (quoted_total != null) updates.quoted_total = quoted_total;
-        if (balance_due_date) updates.balance_due_date = balance_due_date;
-        if (Array.isArray(events) && events.length > 0) updates.events = events;
-        if (status) updates.status = status;
-        if (notes) updates.notes = notes;
-        if (Object.keys(updates).length === 0) {
-          return { ok: false, kind: 'unsure', reply: "Tell me what to change for them." };
-        }
-        updates.updated_at = new Date().toISOString();
-        const { error } = await supabase
-          .from('couple_vendors')
-          .update(updates)
-          .eq('id', matches[0].id);
-        if (error) throw error;
-        const fields = Object.keys(updates).filter(k => k !== 'updated_at');
-        const fieldsLabel = fields.join(', ');
-        // PATCH B-4: when quoted_total changes, check for drift against summed
-        // expense planned_amounts. If drift exists, surface it and offer fix.
-        let driftReply = '';
-        let driftFollowups = [];
-        if (quoted_total != null) {
-          try {
-            const drift = await checkBudgetDrift(coupleId, matches[0].name);
-            if (drift) {
-              const action_id = 'drift_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-              if (drift.direction === 'add_balance') {
-                pendingDriftResolves.set(action_id, {
-                  coupleId,
-                  kind: 'add_balance',
-                  vendor_id: drift.vendor.id,
-                  vendor_name: drift.vendor.name,
-                  category: drift.vendor.category || 'other',
-                  amount: drift.drift,
-                });
-                driftReply = ` Heads up: planned expenses for ${drift.vendor.name} sum to ${formatINR(drift.expenseSum)}, ${formatINR(drift.drift)} less than the new quote.`;
-                driftFollowups = [{
-                  id: 'drift_resolve_' + action_id,
-                  text: `Want me to add a ${formatINR(drift.drift)} balance-due row?`,
-                  yesLabel: 'Yes, add it',
-                  noLabel: 'Leave as is',
-                }];
-              } else {
-                pendingDriftResolves.set(action_id, {
-                  coupleId,
-                  kind: 'bump_quote',
-                  vendor_id: drift.vendor.id,
-                  vendor_name: drift.vendor.name,
-                  new_quoted_total: drift.expenseSum,
-                });
-                driftReply = ` Heads up: planned expenses for ${drift.vendor.name} sum to ${formatINR(drift.expenseSum)}, ${formatINR(-drift.drift)} more than the new quote.`;
-                driftFollowups = [{
-                  id: 'drift_resolve_' + action_id,
-                  text: `Want me to bump ${drift.vendor.name}'s quote to ${formatINR(drift.expenseSum)}?`,
-                  yesLabel: 'Yes, bump it',
-                  noLabel: 'Leave as is',
-                }];
-              }
-              setTimeout(() => pendingDriftResolves.delete(action_id), 10 * 60 * 1000);
-            }
-          } catch (e) { /* drift check failures should never block the main update */ }
-        }
-        return {
-          ok: true, kind: 'reply',
-          reply: `Updated ${matches[0].name} — ${fieldsLabel}.` + driftReply,
-          vendor_id: matches[0].id,
-          tool_anchor: { tool: 'vendors', entity_type: 'vendor', entity_id: String(matches[0].id) },
-          followupPrompts: driftFollowups,
-        };
-      }
-
-      case 'update_expense': {
-        const {
-          match_vendor_name, match_description,
-          new_planned_amount, new_actual_amount, new_payment_status,
-          new_due_date, new_notes,
-        } = toolInput || {};
-        if (!match_vendor_name && !match_description) {
-          return { ok: false, kind: 'unsure', reply: "Which expense?" };
-        }
-        let q = supabase.from('couple_expenses')
-          .select('id, vendor_name, description, planned_amount, actual_amount, payment_status')
-          .eq('couple_id', coupleId);
-        if (match_vendor_name) q = q.ilike('vendor_name', '%' + match_vendor_name + '%');
-        if (match_description) q = q.ilike('description', '%' + match_description + '%');
-        const { data: matches } = await q.order('created_at', { ascending: false }).limit(5);
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: "I couldn't find that expense." };
-        }
-        if (matches.length > 1) {
-          const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: (m.vendor_name || m.description || 'Untitled') + ' · ' + formatINR(m.actual_amount || m.planned_amount || 0),
-            send_text: m.vendor_name || m.description || '',
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : "A few match — which one?\n\n" + lines.join('\n'),
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const updates = {};
-        if (new_planned_amount != null) updates.planned_amount = new_planned_amount;
-        if (new_actual_amount != null) updates.actual_amount = new_actual_amount;
-        if (new_payment_status) updates.payment_status = new_payment_status;
-        if (new_due_date) updates.due_date = new_due_date;
-        if (new_notes) updates.notes = new_notes;
-        if (Object.keys(updates).length === 0) {
-          return { ok: false, kind: 'unsure', reply: "Tell me what to change about it." };
-        }
-        updates.updated_at = new Date().toISOString();
-        const { error } = await supabase
-          .from('couple_expenses')
-          .update(updates)
-          .eq('id', matches[0].id);
-        if (error) throw error;
-        const label = matches[0].vendor_name || matches[0].description || 'expense';
-        // PATCH B-4: when planned_amount changes, check vendor-side drift.
-        let driftReply = '';
-        let driftFollowups = [];
-        if (new_planned_amount != null && matches[0].vendor_name) {
-          try {
-            const drift = await checkBudgetDrift(coupleId, matches[0].vendor_name);
-            if (drift) {
-              const action_id = 'drift_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-              // After an expense edit, prefer offering to update the vendor quote
-              // (bride just reported the new expense reality).
-              pendingDriftResolves.set(action_id, {
-                coupleId,
-                kind: 'bump_quote',
-                vendor_id: drift.vendor.id,
-                vendor_name: drift.vendor.name,
-                new_quoted_total: drift.expenseSum,
-              });
-              if (drift.direction === 'add_balance') {
-                driftReply = ` Heads up: ${drift.vendor.name}'s quote (${formatINR(drift.vendor.quoted_total)}) is now ${formatINR(drift.drift)} more than the planned-expense total.`;
-                driftFollowups = [{
-                  id: 'drift_resolve_' + action_id,
-                  text: `Want me to lower ${drift.vendor.name}'s quote to ${formatINR(drift.expenseSum)}?`,
-                  yesLabel: 'Yes, lower it',
-                  noLabel: 'Leave as is',
-                }];
-              } else {
-                driftReply = ` Heads up: planned expenses for ${drift.vendor.name} now sum to ${formatINR(drift.expenseSum)}, ${formatINR(-drift.drift)} more than her quote.`;
-                driftFollowups = [{
-                  id: 'drift_resolve_' + action_id,
-                  text: `Want me to bump ${drift.vendor.name}'s quote to ${formatINR(drift.expenseSum)}?`,
-                  yesLabel: 'Yes, bump it',
-                  noLabel: 'Leave as is',
-                }];
-              }
-              setTimeout(() => pendingDriftResolves.delete(action_id), 10 * 60 * 1000);
-            }
-          } catch (e) { /* swallow drift errors */ }
-        }
-        return {
-          ok: true, kind: 'reply',
-          reply: `Updated ${label}.` + driftReply,
-          expense_id: matches[0].id,
-          tool_anchor: { tool: 'money', entity_type: 'expense', entity_id: String(matches[0].id) },
-          followupPrompts: driftFollowups,
-        };
-      }
-
-      case 'update_reminder': {
-        const { match_text, new_text, new_due_date, new_event, new_priority } = toolInput || {};
-        if (!match_text) {
-          return { ok: false, kind: 'unsure', reply: "Which reminder?" };
-        }
-        const { data: matches } = await supabase
-          .from('couple_checklist')
-          .select('id, text, is_complete')
-          .eq('couple_id', coupleId)
-          .ilike('text', '%' + match_text + '%')
-          .order('created_at', { ascending: false })
-          .limit(5);
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: "I couldn't find that reminder." };
-        }
-        if (matches.length > 1) {
-          const lines = matches.map(m => '• ' + m.text);
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: m.text.length > 50 ? m.text.slice(0, 47) + '…' : m.text,
-            send_text: m.text,
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : "A few match — which one?\n\n" + lines.join('\n'),
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const updates = {};
-        if (new_text) updates.text = new_text;
-        if (new_due_date) updates.due_date = new_due_date;
-        if (new_event) updates.event = new_event;
-        if (new_priority) updates.priority = new_priority;
-        if (Object.keys(updates).length === 0) {
-          return { ok: false, kind: 'unsure', reply: "Tell me what to change." };
-        }
-        const { error } = await supabase
-          .from('couple_checklist')
-          .update(updates)
-          .eq('id', matches[0].id);
-        if (error) throw error;
-        return {
-          ok: true, kind: 'reply',
-          reply: `Updated.`,
-          task_id: matches[0].id,
-          tool_anchor: { tool: 'tasks', entity_type: 'task', entity_id: String(matches[0].id) },
-        };
-      }
-
-      case 'delete_vendor': {
-        const { vendor_name, confirmed = false } = toolInput || {};
-        if (!vendor_name) {
-          return { ok: false, kind: 'unsure', reply: "Which vendor?" };
-        }
-        const { data: matches } = await supabase
-          .from('couple_vendors')
-          .select('id, name, category')
-          .eq('couple_id', coupleId)
-          .ilike('name', '%' + vendor_name + '%');
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} on your list.` };
-        }
-        if (matches.length > 1) {
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: m.name + (m.category ? ' (' + m.category + ')' : ''),
-            send_text: m.name,
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        if (!confirmed) {
-          const action_id = 'vendor_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingVendorDeletes.set(action_id, { coupleId, vendor_id: matches[0].id, vendor_name: matches[0].name });
-          setTimeout(() => pendingVendorDeletes.delete(action_id), 10 * 60 * 1000);
-          return {
-            ok: true, kind: 'confirm-required',
-            reply: `Remove ${matches[0].name} from your vendors?`,
-            confirmPreview: {
-              summaryTitle: `Remove ${matches[0].name}?`,
-              summaryLines: [
-                matches[0].category ? `Category: ${matches[0].category}` : 'Category: not set',
-                'They\'ll be gone from your team.',
-                'You can always add them back.',
-              ],
-              confirmLabel: 'Remove',
-              cancelLabel: 'Keep',
-              action_id,
-            },
-          };
-        }
-        // Confirmed — actually delete
-        const { error } = await supabase
-          .from('couple_vendors')
-          .delete()
-          .eq('id', matches[0].id);
-        if (error) throw error;
-        return {
-          ok: true, kind: 'reply',
-          reply: `Removed ${matches[0].name}.`,
-        };
-      }
-
-      case 'delete_expense': {
-        const { match_vendor_name, match_description, confirmed = false } = toolInput || {};
-        if (!match_vendor_name && !match_description) {
-          return { ok: false, kind: 'unsure', reply: "Which expense?" };
-        }
-        let q = supabase.from('couple_expenses')
-          .select('id, vendor_name, description, planned_amount, actual_amount')
-          .eq('couple_id', coupleId);
-        if (match_vendor_name) q = q.ilike('vendor_name', '%' + match_vendor_name + '%');
-        if (match_description) q = q.ilike('description', '%' + match_description + '%');
-        const { data: matches } = await q.order('created_at', { ascending: false }).limit(5);
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: "I couldn't find that expense." };
-        }
-        if (matches.length > 1) {
-          const lines = matches.map(m => '• ' + (m.vendor_name || m.description || 'Untitled') + ' — ' + formatINR(m.actual_amount || m.planned_amount || 0));
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: (m.vendor_name || m.description || 'Untitled') + ' · ' + formatINR(m.actual_amount || m.planned_amount || 0),
-            send_text: m.vendor_name || m.description || '',
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : "A few match — which one?\n\n" + lines.join('\n'),
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const target = matches[0];
-        const targetLabel = target.vendor_name || target.description || 'expense';
-        const targetAmount = target.actual_amount || target.planned_amount || 0;
-        if (!confirmed) {
-          const action_id = 'expense_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingExpenseDeletes.set(action_id, { coupleId, expense_id: target.id, label: targetLabel });
-          setTimeout(() => pendingExpenseDeletes.delete(action_id), 10 * 60 * 1000);
-          return {
-            ok: true, kind: 'confirm-required',
-            reply: `Remove the ${targetLabel} expense?`,
-            confirmPreview: {
-              summaryTitle: `Remove ${targetLabel}?`,
-              summaryLines: [
-                targetAmount > 0 ? `${formatINR(targetAmount)}` : 'No amount on file',
-                'It\'ll be gone from your money page.',
-              ],
-              confirmLabel: 'Remove',
-              cancelLabel: 'Keep',
-              action_id,
-            },
-          };
-        }
-        const { error } = await supabase
-          .from('couple_expenses')
-          .delete()
-          .eq('id', target.id);
-        if (error) throw error;
-        return {
-          ok: true, kind: 'reply',
-          reply: `Removed ${targetLabel}.`,
-        };
-      }
-
-      case 'delete_reminder': {
-        const { match_text, confirmed = false } = toolInput || {};
-        if (!match_text) {
-          return { ok: false, kind: 'unsure', reply: "Which reminder?" };
-        }
-        const { data: matches } = await supabase
-          .from('couple_checklist')
-          .select('id, text')
-          .eq('couple_id', coupleId)
-          .ilike('text', '%' + match_text + '%')
-          .order('created_at', { ascending: false })
-          .limit(5);
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: "I couldn't find that reminder." };
-        }
-        if (matches.length > 1) {
-          const lines = matches.map(m => '• ' + m.text);
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: m.text.length > 50 ? m.text.slice(0, 47) + '…' : m.text,
-            send_text: m.text,
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : "A few match — which one?\n\n" + lines.join('\n'),
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const target = matches[0];
-        if (!confirmed) {
-          const action_id = 'reminder_del_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          pendingReminderDeletes.set(action_id, { coupleId, reminder_id: target.id, text: target.text });
-          setTimeout(() => pendingReminderDeletes.delete(action_id), 10 * 60 * 1000);
-          return {
-            ok: true, kind: 'confirm-required',
-            reply: `Forget the reminder "${target.text}"?`,
-            confirmPreview: {
-              summaryTitle: `Forget this reminder?`,
-              summaryLines: [
-                target.text,
-                'It\'ll be gone from your list.',
-              ],
-              confirmLabel: 'Forget it',
-              cancelLabel: 'Keep',
-              action_id,
-            },
-          };
-        }
-        const { error } = await supabase
-          .from('couple_checklist')
-          .delete()
-          .eq('id', target.id);
-        if (error) throw error;
-        return {
-          ok: true, kind: 'reply',
-          reply: `Forgotten.`,
-        };
-      }
-
-      case 'contact_vendor': {
-        const { vendor_name, mode, message } = toolInput || {};
-        if (!vendor_name) {
-          return { ok: false, kind: 'unsure', reply: "Who do you want to reach?" };
-        }
-        if (mode !== 'call' && mode !== 'whatsapp') {
-          return { ok: false, kind: 'unsure', reply: "Call or WhatsApp?" };
-        }
-        const { data: matches } = await supabase
-          .from('couple_vendors')
-          .select('id, name, phone, category')
-          .eq('couple_id', coupleId)
-          .ilike('name', '%' + vendor_name + '%');
-        if (!matches || matches.length === 0) {
-          return { ok: false, kind: 'unsure', reply: `I don't have ${vendor_name} saved. What's their number?` };
-        }
-        if (matches.length > 1) {
-          // Phase 1.7: clarify_options for tappable pill disambiguation
-          const opts = matches.slice(0, 4).map(m => ({
-            label: m.name + (m.category ? ' (' + m.category + ')' : ''),
-            send_text: m.name,
-          }));
-          return {
-            ok: false, kind: 'clarify',
-            reply: matches.length <= 4
-              ? `Which one?`
-              : `A few names match — ${matches.map(m => m.name).join(', ')}. Which one?`,
-            clarify_options: matches.length <= 4 ? opts : null,
-          };
-        }
-        const v = matches[0];
-        if (!v.phone) {
-          return {
-            ok: false, kind: 'unsure',
-            reply: `I don't have a number for ${v.name}. Tell me her phone and I'll save it.`,
-          };
-        }
-        // Normalise phone for outbound URLs (digits only, with country code)
-        let cleanPhone = String(v.phone).replace(/[^0-9]/g, '');
-        if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
-        const replyText = mode === 'call'
-          ? `Tap to call ${v.name}.`
-          : `Tap to message ${v.name}.`;
-        return {
-          ok: true, kind: 'reply',
-          reply: replyText,
-          contact_action: {
-            kind: mode,
-            name: v.name,
-            phone: '+' + cleanPhone,
-            label: v.category || null,
-            message: mode === 'whatsapp' ? (message || `Hi ${v.name}! Quick question for you.`) : null,
-          },
-          tool_anchor: { tool: 'vendors', entity_type: 'vendor', entity_id: String(v.id) },
-        };
-      }
-
       case 'general_reply':
         return { ok: true, kind: 'reply', reply: toolInput.reply };
 
@@ -14381,19 +12998,9 @@ function buildBrideSystemPrompt(coupleId, opts = {}) {
     } else if (routingHint.kind === 'image_unclassified') {
       routingContext = `\n\nROUTING HINT: The bride sent an image at ${routingHint.image_url}. Classification failed. Ask her plainly what she'd like done with it.`;
     } else if (routingHint.kind === 'pinterest_inspiration') {
-      const pResolved = routingHint.original_url && routingHint.image_url !== routingHint.original_url;
-      if (pResolved) {
-        routingContext = '\n\nROUTING HINT: Pinterest image resolved. Call save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.original_url + '. This is inspiration — save it unless her text clearly contradicts.';
-      } else {
-        routingContext = '\n\nROUTING HINT: The bride pasted a Pinterest link but the image could not be resolved. Use save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.image_url + '. The tile may show a link instead of a preview.';
-      }
+      routingContext = `\n\nROUTING HINT: The bride pasted a Pinterest link: ${routingHint.image_url}. This is almost certainly inspiration. Use save_to_muse with image_url=${routingHint.image_url} unless her text clearly contradicts.`;
     } else if (routingHint.kind === 'instagram_link') {
-      const iResolved = routingHint.original_url && routingHint.image_url !== routingHint.original_url;
-      if (iResolved) {
-        routingContext = '\n\nROUTING HINT: Instagram image resolved. Call save_to_muse with image_url=' + routingHint.image_url + ' and source_url=' + routingHint.original_url + '. Unless she mentions a vendor name (use book_vendor instead).';
-      } else {
-        routingContext = '\n\nROUTING HINT: The bride pasted an Instagram link but the image could not be resolved (private account, reel, or carousel). Reply: that post is not publicly accessible — could she share a screenshot instead? Do not call save_to_muse yet.';
-      }
+      routingContext = `\n\nROUTING HINT: The bride pasted an Instagram link: ${routingHint.image_url}. This is likely inspiration or a vendor reference. Use save_to_muse with image_url=${routingHint.image_url} unless she explicitly mentions a vendor name (then use book_vendor / query_my_vendors).`;
     }
   }
 
@@ -14412,40 +13019,6 @@ VOICE:
   · "Your mother has been quiet today. That usually means she is choosing."
   · "Sixty-three days. The brass band has not been booked yet."
 - When you take an action, narrate it briefly: "Done. Swati's locked in."
-
-THE BRIDE'S APP SURFACES (memorize this — she will ask about them):
-The bride's app has these primary surfaces, accessed from the home screen:
-  - HOME — date, countdown, two image boxes (Muse + Discover), Dream Ai card, Circle card, Journey button
-  - MUSE — her moodboard. Pinterest pins, photos, inspiration. (long-press home Muse box)
-  - DISCOVER — vendor discovery. Greyscale heroes, blind swipe, my-discovery feed. (long-press home Discover box)
-  - DREAM (you) — this conversation. (long-press home Dream Ai card)
-  - CIRCLE — her people: partner, family, planners, vendors. (long-press home Circle card)
-  - JOURNEY — the hub of all her planning tools. (tap or long-press Journey button at home)
-    Inside Journey, sub-tools live as tiles:
-      · VENDORS — her booked + considered team
-      · REMINDERS (also called TASKS, TODOS) — her checklist of things to do
-      · MONEY — her budget, payments, receipts
-      · EVENTS — the haldi, mehendi, sangeet, wedding, reception
-      · GUESTS — guest list and RSVPs
-      · MESSAGES — one-on-one threads with each vendor
-      · HOT DATES — Hindu Vivah Muhurat dates
-      · COUTURE — atelier-only by-appointment pieces
-      · HONEYMOON — destination packages and bookings
-
-If she asks about a surface, you know where it is. If she asks about a tool, you know it exists. NEVER tell her a feature doesn't exist when it does. If she asks for something genuinely missing (e.g., a dietary tracker), be honest — say it doesn't exist yet.
-
-ONE-WORD QUERIES (CRITICAL):
-The bride often types just one or two words. Treat these as queries about that surface, not as ambiguous input. Map them like this:
-  - "tasks" / "reminders" / "todos" / "what's pending" → query_my_reminders
-  - "vendors" / "team" / "my vendors" / "who have I booked" → query_my_vendors
-  - "spent" / "budget" / "money" / "how much have I spent" → query_my_expenses (or query_budget)
-  - "messages" / "conversations" → general_reply pointing her to the Messages tab in Journey ("Your conversations live in Journey → Messages. Want me to open it for you?")
-  - "circle" → general_reply pointing her to Circle ("Your Circle is on the home screen — tap the Circle card.")
-  - "muse" → general_reply ("Long-press the left photograph on home to open your Muse.")
-  - "discover" → general_reply ("Long-press the right photograph on home to open Discover.")
-  - "events" / "guests" / "hot dates" / "couture" / "honeymoon" → general_reply pointing to that Journey tile
-
-Single-word inputs are NEVER ambiguous. They are always queries about that surface. NEVER respond to "tasks" with "I'm not sure what you mean."
 
 INTERACTION GRAMMAR (LOCKED):
 - The bride should rarely have to type. After ANY action, if there are optional follow-ups, ALWAYS phrase them as Yes/No questions returned in followupPrompts. Maximum 3 per turn.
@@ -14468,11 +13041,10 @@ ROUTING RULES (DreamAi-as-Router):
 
 
 HONEST UNKNOWNS RULE:
-- If you do not understand what she wants AND it is not a one-word query about a surface, say so plainly. Use general_reply with: "I'm not sure what you'd like me to do. Could you say it differently?"
+- If you do not understand what she wants, say so plainly. Use general_reply with: "I'm not sure what you'd like me to do. Could you say it differently?"
 - NEVER guess. Never invent vendor names. Never assume which Swati if there are multiple.
 - If a vendor name matches multiple of her saved vendors, ask which one.
 - If a vendor name matches none, ask if she wants to add them and what category.
-- NEVER claim a feature doesn't exist if it's listed in THE BRIDE'S APP SURFACES above.
 
 LOOKUP-FIRST RULE:
 - Before booking, paying, or referring to any vendor by name, the system looks them up in her couple_vendors. You don't have to do this manually — the book_vendor tool handles it. Just trust the tool's clarify/unsure responses.
@@ -14480,47 +13052,12 @@ LOOKUP-FIRST RULE:
 WHEN TO USE WHICH TOOL:
 - "Booked Swati for 1L, 30k advance" → book_vendor (composite — handles vendor + price + expense + balance reminder)
 - "Remind me to pick up the lehenga on Monday" → create_reminder
-- "Tasks" / "Reminders" / "What's pending" → query_my_reminders
-- "Vendors" / "My team" / "Who have I booked" → query_my_vendors
-- "Spent" / "Budget" / "How much" → query_my_expenses
 - "What are good MUAs in Delhi?" → search_tdw_vendors (TDW catalog only)
-- "Show me ideas" / "surprise me" / "give me reception inspo" → surprise_me
-- "Tell my family" / "Send to circle" → broadcast_to_circle
+- "Which vendors have I shortlisted?" → query_vendors (her own list)
+- "How much have I spent?" → query_budget
 - "I just spent 5k on flowers" → add_expense
-- "My budget is 40 lac", "Set my budget to 35 lakhs", "Make my budget 50 lac" → set_total_budget (convert lakhs → rupees: 1 lac = 100,000)
-- "Change Swati's number to X", "Her quote is now 80k" → update_vendor
-- "Move my lehenga pickup to Tuesday", "Make this high priority" → update_reminder
-- "The lehenga was 75k not 65k", "Mark Swati's advance as paid" → update_expense
-  · Note: when you change a vendor's quote OR an expense's planned amount, the system automatically detects budget drift and may append a heads-up + Yes/No followup to your reply. You don't need to mention or pre-empt this — it's automatic and the bride sees it as part of the response.
-- "Remove Swati from my vendors", "I'm not going with Arjun anymore" → delete_vendor
-- "Forget that reminder", "Undo that expense" → delete_reminder / delete_expense
-- "Call Swati", "Phone the decorator" → contact_vendor (mode='call')
-- "Message Arjun about timeline", "WhatsApp Swati to confirm the lehenga" → contact_vendor (mode='whatsapp', draft message in BRIDE'S voice)
 - Conversation, observation, question, advice, idle thought → general_reply
 - web_search is available for genuinely outside-the-platform questions ("what is mehendi") — use sparingly.
-
-CONTACT_VENDOR DRAFTING (CRITICAL):
-When the bride asks you to message someone, draft the message in HER voice, never yours. The drafted message goes inside contact_vendor's 'message' parameter and will appear pre-filled in WhatsApp. The bride taps Send.
-- First-person, brief, warm, Indian-bride-natural register.
-- Include enough context that the recipient understands without follow-up.
-- Examples (study these, write in this register):
-  · "Hi Swati! Between the red and gold lehenga, which would you suggest for the wedding day? Want to lock it in."
-  · "Hey Arjun, just confirming — Sangeet shoot starts at 6pm right? Mehendi is 10am the day before."
-  · "Hi Priya! Quick one — is the 50k advance for the decor due before Diwali or after?"
-- If the bride hasn't said what to message about, use a soft generic: "Hi <name>! Quick question for you."
-- Never write the message in your own poetic voice. The bride sends from her own number; the message must sound like her, not like an AI assistant.
-
-DELETE BEHAVIOR:
-- Deletes are confirm-required. The model returns a confirmPreview; the bride taps Yes/No on the FrostConfirmCard. The system handles the actual write on confirm.
-- For deletes that match multiple rows, ask which one. Never delete the most-recent without asking.
-
-UPDATE BEHAVIOR:
-- Updates are NOT confirm-required (small edits don't need ceremony).
-- If the bride's match phrase narrows to multiple rows, ask which one before updating.
-- After a successful update, narrate briefly: "Updated Swati — phone."
-
-TRUTHFUL CONFIRMATIONS (CRITICAL):
-NEVER narrate a successful action with words like 'Done', 'Saved', 'Logged', 'Added' unless you have actually called the corresponding tool and received a result with ok: true. If you cannot call any tool that fits the bride's intent, say so plainly: "I can't quite do that yet — would you like me to do X instead?" Never invent vendor names, expense IDs, dates, or other data to appear helpful. When tools return kind: 'clarify' or kind: 'unsure', surface those results exactly — do not paraphrase or fabricate. If you find yourself wanting to list multiple options to the bride, that is a clarify situation — call the corresponding tool with proper input, never make up the list yourself.
 
 KEEP REPLIES SHORT.
 She is reading on a phone, often quickly. One or two sentences, max three. The product is meant to feel light.${routingContext}`;
@@ -14528,11 +13065,6 @@ She is reading on a phone, often quickly. One or two sentences, max three. The p
 
 // ── Bride context idle-line helper ─────────────────────────────────────────
 async function getBrideContextSummary(coupleId) {
-  // BUG B FIX: schema-correct reads.
-  //   couple_expenses uses actual_amount/planned_amount/payment_status (NOT amount/status).
-  //   wedding_date lives on users (NOT couple_profiles).
-  // Old code silently zeroed every field for every bride. Bride-idle and any
-  // future prompt context that reads this summary returned junk.
   const summary = { vendors_booked: 0, vendors_shortlisted: 0, expenses_paid: 0, total_spent: 0, days_until_wedding: null };
   try {
     const { data: vendors } = await supabase
@@ -14545,23 +13077,17 @@ async function getBrideContextSummary(coupleId) {
     }
     const { data: expenses } = await supabase
       .from('couple_expenses')
-      .select('actual_amount, planned_amount, payment_status')
+      .select('amount, status')
       .eq('couple_id', coupleId);
     if (expenses) {
-      summary.expenses_paid = expenses.filter(e => e.payment_status === 'paid').length;
-      summary.total_spent = expenses.reduce((s, e) => {
-        // For paid rows use actual_amount; for pending rows fall back to planned_amount.
-        const amt = e.payment_status === 'paid'
-          ? (e.actual_amount || e.planned_amount || 0)
-          : (e.planned_amount || 0);
-        return s + amt;
-      }, 0);
+      summary.expenses_paid = expenses.filter(e => e.status === 'paid').length;
+      summary.total_spent = expenses.reduce((s, e) => s + (e.amount || 0), 0);
     }
     try {
       const { data: profile } = await supabase
-        .from('users')
+        .from('couple_profiles')
         .select('wedding_date')
-        .eq('id', coupleId)
+        .eq('couple_id', coupleId)
         .maybeSingle();
       if (profile && profile.wedding_date) {
         const today = new Date(); today.setHours(0,0,0,0);
@@ -14627,18 +13153,10 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
           console.error('[bride-chat vision classify]', e.message);
           routingHint = { kind: 'image_unclassified', image_url: firstUrl };
         }
-      } else if (urlKind === 'pinterest_inspiration' || urlKind === 'instagram_link') {
-        // Resolve the HTML page URL to the actual og:image asset so moodboard
-        // tiles can render. fetchOgImage has a 4s timeout and returns null on
-        // failure — we fall back to the raw URL (no regression vs prior).
-        let resolvedUrl = firstUrl;
-        try {
-          const ogImage = await fetchOgImage(firstUrl);
-          if (ogImage) resolvedUrl = ogImage;
-        } catch (e) {
-          console.error('[bride-chat og resolve]', e.message);
-        }
-        routingHint = { kind: urlKind, image_url: resolvedUrl, original_url: firstUrl };
+      } else if (urlKind === 'pinterest_inspiration') {
+        routingHint = { kind: 'pinterest_inspiration', image_url: firstUrl };
+      } else if (urlKind === 'instagram_link') {
+        routingHint = { kind: 'instagram_link', image_url: firstUrl };
       }
     } catch (e) {
       console.error('[bride-chat routing preprocess]', e.message);
@@ -14685,8 +13203,6 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
     let confirmPreview = null;
     let followupPrompts = [];
     let summaryLines = [];
-    let contactAction = null; // PHASE 1.6.1 — contact_vendor tool result
-    let clarifyOptions = null; // PHASE 1.7 — disambiguation pills from clarify branches
     const toolsUsed = [];
     const toolAnchors = []; // ZIP 8: long-press routing metadata, Option B (response-only, no DB)
 
@@ -14720,26 +13236,6 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
         if (toolResult && toolResult.summaryLines) {
           summaryLines = toolResult.summaryLines;
         }
-        // FIX-1: bubble confirmPreview from toolResult so the frontend can render
-        // the FrostConfirmCard. Previously confirmPreview was initialised to null
-        // and never reassigned — broadcast_to_circle and ocr_receipt's confirms
-        // never reached the bride's screen.
-        if (toolResult && toolResult.confirmPreview) {
-          confirmPreview = toolResult.confirmPreview;
-        }
-        // PHASE 1.6.1: propagate contact_vendor tool's contact_action card to
-        // the frontend, so FrostContactCard can render with the bride's choice
-        // of channel (phone call vs WhatsApp call vs WhatsApp msg vs SMS).
-        if (toolResult && toolResult.contact_action) {
-          contactAction = toolResult.contact_action;
-        }
-        // PHASE 1.7: propagate clarify_options for tappable pill disambiguation.
-        // Multi-match clarify branches return options the frontend renders as
-        // a FrostClarifyCard. Bride taps → frontend resends send_text as a
-        // user message, model re-runs the original tool with the disambiguator.
-        if (toolResult && toolResult.clarify_options) {
-          clarifyOptions = toolResult.clarify_options;
-        }
         // ZIP 8: derive anchor metadata centrally from tool result
         // Each tool can return tool_anchor: { tool, entity_type, entity_id }
         // This powers long-press routing in the Dream canvas (Option B — response-only)
@@ -14771,8 +13267,6 @@ app.post('/api/v2/dreamai/bride-chat', async (req, res) => {
       summaryLines,
       followupPrompts,
       confirmPreview,
-      contactAction,
-      clarifyOptions,
       toolsUsed,
       toolAnchors,
     });
@@ -14803,49 +13297,6 @@ app.post('/api/v2/dreamai/bride-followup', async (req, res) => {
     if (answer === 'no') {
       // Honor the no — gentle close
       reply = '✦ Got it.';
-    } else if (prompt_id && prompt_id.startsWith('drift_resolve_')) {
-      // PATCH B-4: bride tapped Yes on a drift fix. Look up the proposed
-      // fix from pendingDriftResolves and execute the write.
-      const action_id = prompt_id.slice('drift_resolve_'.length);
-      const proposal = pendingDriftResolves.get(action_id);
-      if (!proposal) {
-        reply = "✦ That moment passed. Tell me again what you'd like to fix?";
-      } else {
-        pendingDriftResolves.delete(action_id);
-        try {
-          if (proposal.kind === 'add_balance') {
-            // Insert a balance-due expense row to match the new vendor quote.
-            const { error: insErr } = await supabase.from('couple_expenses').insert([{
-              couple_id: proposal.coupleId,
-              event: 'general',
-              category: proposal.category || 'other',
-              vendor_name: proposal.vendor_name,
-              description: 'Balance to match updated quote',
-              planned_amount: proposal.amount,
-              actual_amount: 0,
-              payment_status: 'pending',
-              notes: 'Added by DreamAi to reconcile vendor quote drift',
-            }]);
-            if (insErr) throw insErr;
-            reply = `✦ Added ${formatINR(proposal.amount)} balance row for ${proposal.vendor_name}. Numbers match now.`;
-          } else if (proposal.kind === 'bump_quote') {
-            // Update vendor quoted_total to match the expense sum.
-            const { error: updErr } = await supabase.from('couple_vendors').update({
-              quoted_total: proposal.new_quoted_total,
-              source: 'dreamai',
-              last_dreamai_action: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }).eq('id', proposal.vendor_id);
-            if (updErr) throw updErr;
-            reply = `✦ Updated ${proposal.vendor_name}'s quote to ${formatINR(proposal.new_quoted_total)}. Numbers match now.`;
-          } else {
-            reply = '✦ Done.';
-          }
-        } catch (err) {
-          console.error('[Bride DreamAi] drift resolve error:', err.message);
-          reply = "✦ Something went sideways trying to fix that. Try once more?";
-        }
-      }
     } else if (prompt_id === 'thank_you_note') {
       // Draft a thank-you and store it as a draft message (or just return text for v1)
       const vendorName = context.vendor_name || 'them';
@@ -14902,46 +13353,6 @@ app.get('/api/v2/dreamai/bride-idle/:userId', async (req, res) => {
 
     const ctx = await getBrideContextSummary(userId);
 
-    // PATCH B-6a: budget cold-open prompt — once-only, gated by activity.
-    // Fires if (a) budget_prompt_shown_at is null AND (b) the bride has
-    // booked at least one vendor OR has at least one expense logged.
-    // Once shown, write the timestamp so it never fires again.
-    let budgetPromptLine = null;
-    try {
-      const { data: budgetRow } = await supabase
-        .from('couple_budget')
-        .select('total_budget, budget_prompt_shown_at')
-        .eq('couple_id', userId)
-        .maybeSingle();
-      const totalBudget = Number(budgetRow?.total_budget) || 0;
-      const alreadyShown = !!budgetRow?.budget_prompt_shown_at;
-      const hasActivity = (ctx.vendors_booked > 0) || (ctx.expenses_paid > 0);
-      if (totalBudget === 0 && !alreadyShown && hasActivity) {
-        budgetPromptLine = "Want to set a total budget so I can pace you?";
-        // Write the timestamp first — if the response fails downstream we
-        // still don't want to re-prompt later. Idempotent: ensures the row
-        // exists (couple_budget GET endpoint creates default if missing,
-        // but the bride may not have visited it yet).
-        try {
-          if (budgetRow) {
-            await supabase
-              .from('couple_budget')
-              .update({ budget_prompt_shown_at: new Date().toISOString() })
-              .eq('couple_id', userId);
-          } else {
-            await supabase
-              .from('couple_budget')
-              .insert([{
-                couple_id: userId,
-                total_budget: 0,
-                event_envelopes: {},
-                budget_prompt_shown_at: new Date().toISOString(),
-              }]);
-          }
-        } catch (e) { /* timestamp write failure is non-fatal — we'll re-fire next idle */ }
-      }
-    } catch (e) { /* budget read failure: skip the prompt, fall through to normal idle */ }
-
     const promptText = `You are DreamAi — the bride's poetic AI inside Frost.
 
 Generate exactly TWO short observations (1 sentence each, under 18 words each) for the bride to see on her landing page right now. The voice is Cormorant-italic — warm, attentive, sometimes practical, sometimes poetic. Like a friend at the next table.
@@ -14977,11 +13388,6 @@ One line should reference her actual context. The other can be more poetic/obser
     if (lines.length < 2) {
       lines.push('Pick a colour for the morning. I will think about it with you.');
     }
-    // PATCH B-6a: replace the second line with the budget cold-open if gated.
-    // Keeps the LLM's context-aware first line, surfaces the budget nudge below.
-    if (budgetPromptLine) {
-      lines[1] = budgetPromptLine;
-    }
 
     BRIDE_IDLE_CACHE.set(userId, { hourBucket, lines });
 
@@ -15008,62 +13414,6 @@ One line should reference her actual context. The other can be more poetic/obser
 
 const pendingBroadcasts = new Map();
 const pendingReceipts = new Map();
-// FIX-4: pendingBookings/Payments/Settles dry-run gates for destructive tools.
-// Holds the tool's parsed input + computed preview lines for 10 minutes; the
-// frontend POSTs /bride-confirm with action_id → server replays via the helper.
-const pendingBookings = new Map();
-const pendingPayments = new Map();
-const pendingSettles  = new Map();
-// Phase 1.6: destructive delete dry-run gates.
-const pendingVendorDeletes   = new Map();
-const pendingExpenseDeletes  = new Map();
-const pendingReminderDeletes = new Map();
-// PATCH B-6a: budget set/update dry-run gate.
-const pendingBudgetSets = new Map();
-// PATCH B-4: drift resolves — the bride taps Yes on a "want me to add a
-// balance row?" / "want me to bump Swati's quote?" followup pill, the
-// followup handler reads the proposed fix from this Map and writes it.
-const pendingDriftResolves = new Map();
-
-// PATCH B-4: budget drift detector. Returns null if vendor not found or no
-// quote set, otherwise { vendor, expenseSum, drift, direction }.
-//
-//   drift = quoted_total - expenseSum
-//   drift > 0 → expenses are LESS than the contract (need a balance row added)
-//   drift < 0 → expenses are MORE than the contract (vendor quote may be stale)
-//   drift = 0 → no drift, return null so callers can early-out
-//
-// Vendor's quoted_total is the source of truth (the contract). Expense rows
-// are bookkeeping. So when drift is positive, we offer to add an expense to
-// match the contract. When drift is negative AND the bride just edited an
-// expense (or added one), we offer to bump the vendor quote — the bride
-// reported the new spend, and that may be the true new total.
-async function checkBudgetDrift(coupleId, vendorName) {
-  if (!vendorName) return null;
-  const { data: vendors } = await supabase
-    .from('couple_vendors')
-    .select('id, name, quoted_total, category')
-    .eq('couple_id', coupleId)
-    .ilike('name', '%' + vendorName + '%');
-  if (!vendors || vendors.length !== 1) return null; // skip if no match or ambiguous
-  const vendor = vendors[0];
-  const quoted = Number(vendor.quoted_total) || 0;
-  if (quoted === 0) return null; // no quote set → no drift to detect
-  const { data: expenses } = await supabase
-    .from('couple_expenses')
-    .select('planned_amount, payment_status')
-    .eq('couple_id', coupleId)
-    .ilike('vendor_name', '%' + vendor.name + '%');
-  const expenseSum = (expenses || []).reduce((s, e) => s + (Number(e.planned_amount) || 0), 0);
-  const drift = quoted - expenseSum;
-  if (Math.abs(drift) < 1) return null; // tolerate sub-rupee rounding
-  return {
-    vendor,
-    expenseSum,
-    drift,
-    direction: drift > 0 ? 'add_balance' : 'bump_quote',
-  };
-}
 
 function formatINR(amount) {
   if (amount == null || isNaN(amount)) return '₹0';
@@ -15088,15 +13438,13 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
   try {
     const { userId, action_id, vendor_name } = req.body || {};
     if (!userId || !action_id) {
-      // BUG C FIX: include `reply` so the frontend can render the failure.
-      return res.status(400).json({ success: false, error: 'userId and action_id required', reply: 'Something went sideways. Try once more?' });
+      return res.status(400).json({ success: false, error: 'userId and action_id required' });
     }
 
     if (pendingBroadcasts.has(action_id)) {
       const action = pendingBroadcasts.get(action_id);
       if (action.coupleId !== userId) {
-        // BUG C FIX: include `reply` so the frontend can render the failure.
-        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
       }
       pendingBroadcasts.delete(action_id);
       const { message, topic, mode } = action;
@@ -15115,7 +13463,7 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
           content: message,
           group_id,
         }]);
-        if (msgErr) return res.status(500).json({ success: false, error: msgErr.message, reply: 'Something went sideways while sending. Try once more?' });
+        if (msgErr) return res.status(500).json({ success: false, error: msgErr.message });
 
         await supabase.from('circle_activity_events').insert([{
           couple_id: userId,
@@ -15148,7 +13496,7 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
         }));
         if (msgs.length > 0) {
           const { error: msgErr } = await supabase.from('circle_messages').insert(msgs);
-          if (msgErr) return res.status(500).json({ success: false, error: msgErr.message, reply: 'Something went sideways while sending. Try once more?' });
+          if (msgErr) return res.status(500).json({ success: false, error: msgErr.message });
         }
 
         const recipientNames = activeWithUsers.map(m => m.name || 'Someone').join(', ');
@@ -15170,51 +13518,10 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
       }
     }
 
-    if (pendingBudgetSets.has(action_id)) {
-      // PATCH B-6a: bride tapped Lock in / Update on the budget confirm card.
-      const action = pendingBudgetSets.get(action_id);
-      if (action.coupleId !== userId) {
-        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      }
-      pendingBudgetSets.delete(action_id);
-      try {
-        // Upsert pattern: GET endpoint already creates a default row, but
-        // the bride may have never visited that endpoint. Handle both cases.
-        const { data: existing } = await supabase
-          .from('couple_budget')
-          .select('id')
-          .eq('couple_id', userId)
-          .maybeSingle();
-        if (existing) {
-          const { error: updErr } = await supabase
-            .from('couple_budget')
-            .update({ total_budget: action.amount, updated_at: new Date().toISOString() })
-            .eq('couple_id', userId);
-          if (updErr) throw updErr;
-        } else {
-          const { error: insErr } = await supabase
-            .from('couple_budget')
-            .insert([{ couple_id: userId, total_budget: action.amount, event_envelopes: {} }]);
-          if (insErr) throw insErr;
-        }
-      } catch (err) {
-        return res.status(500).json({ success: false, error: err.message, reply: 'Something went sideways saving your budget. Try once more?' });
-      }
-      const verb = action.isUpdate ? 'updated' : 'set';
-      return res.json({
-        success: true,
-        reply: `✓ Budget ${verb} to ${formatINR(action.amount)}.`,
-        summaryLines: action.isUpdate
-          ? [`From ${formatINR(action.previousBudget)} to ${formatINR(action.amount)}`]
-          : [`Total budget: ${formatINR(action.amount)}`],
-      });
-    }
-
     if (pendingReceipts.has(action_id)) {
       const action = pendingReceipts.get(action_id);
       if (action.coupleId !== userId) {
-        // BUG C FIX: include `reply` so the frontend can render the failure.
-        return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
+        return res.status(403).json({ success: false, error: 'action does not belong to this user' });
       }
       pendingReceipts.delete(action_id);
       const { image_url, ocr, suggested_vendor } = action;
@@ -15233,101 +13540,16 @@ app.post('/api/v2/dreamai/bride-confirm', async (req, res) => {
         receipt_url: image_url,
         notes: 'Logged via DreamAi OCR on ' + finalDate,
       }]);
-      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways while filing the receipt. Try once more?' });
+      if (error) return res.status(500).json({ success: false, error: error.message });
       return res.json({
         success: true,
         reply: `✓ Filed ${formatINR(finalAmount)} under ${finalVendor}.`,
       });
     }
 
-    // FIX-4: pendingBookings/Payments/Settles dry-run gates — confirm handlers.
-    // The frontend hits /bride-confirm with the action_id; we replay the tool
-    // with confirmed=true via executeBrideToolCall so the same write logic runs.
-    if (pendingBookings.has(action_id)) {
-      const args = pendingBookings.get(action_id);
-      // BUG C FIX: include `reply` so the frontend can render the failure.
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingBookings.delete(action_id);
-      const result = await executeBrideToolCall('book_vendor', { ...args, confirmed: true }, userId);
-      return res.json({
-        success: !!result?.ok,
-        reply: result?.reply || `✓ ${args.vendor_name} locked in.`,
-        summaryLines: result?.summaryLines || [],
-        followupPrompts: result?.followupPrompts || [],
-        vendor_id: result?.vendor_id,
-      });
-    }
-    if (pendingPayments.has(action_id)) {
-      const args = pendingPayments.get(action_id);
-      // BUG C FIX: include `reply` so the frontend can render the failure.
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingPayments.delete(action_id);
-      const result = await executeBrideToolCall('log_payment', { ...args, confirmed: true }, userId);
-      return res.json({
-        success: !!result?.ok,
-        reply: result?.reply || `✓ Payment logged.`,
-        summaryLines: result?.summaryLines || [],
-        followupPrompts: result?.followupPrompts || [],
-        expense_id: result?.expense_id,
-      });
-    }
-    if (pendingSettles.has(action_id)) {
-      const args = pendingSettles.get(action_id);
-      // BUG C FIX: include `reply` so the frontend can render the failure.
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingSettles.delete(action_id);
-      const result = await executeBrideToolCall('settle_balance', { ...args, confirmed: true }, userId);
-      return res.json({
-        success: !!result?.ok,
-        reply: result?.reply || `✓ Settled.`,
-        summaryLines: result?.summaryLines || [],
-        followupPrompts: result?.followupPrompts || [],
-        expense_id: result?.expense_id,
-      });
-    }
-
-    // ─── PHASE 1.6 — DELETE REPLAYS ────────────────────────────────────
-    if (pendingVendorDeletes.has(action_id)) {
-      const args = pendingVendorDeletes.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingVendorDeletes.delete(action_id);
-      const result = await executeBrideToolCall('delete_vendor', { vendor_name: args.vendor_name, confirmed: true }, userId);
-      return res.json({
-        success: !!result?.ok,
-        reply: result?.reply || `Removed ${args.vendor_name}.`,
-      });
-    }
-    if (pendingExpenseDeletes.has(action_id)) {
-      const args = pendingExpenseDeletes.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingExpenseDeletes.delete(action_id);
-      // Direct delete by id since match has already been narrowed
-      const { error } = await supabase
-        .from('couple_expenses')
-        .delete()
-        .eq('id', args.expense_id);
-      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways while removing it. Try once more?' });
-      return res.json({ success: true, reply: `Removed ${args.label}.` });
-    }
-    if (pendingReminderDeletes.has(action_id)) {
-      const args = pendingReminderDeletes.get(action_id);
-      if (args.coupleId !== userId) return res.status(403).json({ success: false, error: 'action does not belong to this user', reply: 'That action belongs to a different signed-in account.' });
-      pendingReminderDeletes.delete(action_id);
-      const { error } = await supabase
-        .from('couple_checklist')
-        .delete()
-        .eq('id', args.reminder_id);
-      if (error) return res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways. Try once more?' });
-      return res.json({ success: true, reply: `Forgotten.` });
-    }
-
-    // BUG C FIX: include `reply` so the frontend can render the failure.
-    // This is the MOST COMMON bride-confirm failure: the 10-minute setTimeout
-    // cleanup expired the action before she tapped. Voice should be gentle.
-    return res.status(404).json({ success: false, error: 'action not found or expired', reply: 'That moment passed. Tell me again?' });
+    return res.status(404).json({ success: false, error: 'action not found or expired' });
   } catch (error) {
-    // BUG C FIX: include `reply` so the frontend can render the failure.
-    res.status(500).json({ success: false, error: error.message, reply: 'Something went sideways. Try once more?' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -15588,147 +13810,34 @@ async function fetchWebSuggestions(query, limit) {
   }
 }
 
-// Re-host an external image URL to Cloudinary so it never expires.
-// Cloudinary 'url' upload param: we pass the source URL and Cloudinary
-// fetches + stores it under our account. Returns permanent secure_url.
-// Falls back to sourceUrl on any error so the save always succeeds.
-async function rehostToCloudinary(sourceUrl) {
-  const CLOUD = 'dccso5ljv';
-  const PRESET = 'dream_wedding_uploads';
-  try {
-    const body = new URLSearchParams();
-    body.append('file', sourceUrl);
-    body.append('upload_preset', PRESET);
-    body.append('tags', 'muse_save');
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 12000);
-    const r = await fetch(
-      'https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload',
-      { method: 'POST', body, signal: ctrl.signal }
-    );
-    clearTimeout(timeout);
-    if (!r.ok) {
-      console.error('[rehostToCloudinary] status:', r.status);
-      return sourceUrl;
-    }
-    const j = await r.json();
-    if (j.error) {
-      console.error('[rehostToCloudinary] error:', j.error.message);
-      return sourceUrl;
-    }
-    // Add transforms: auto quality/format, 800px wide, face-aware crop
-    return j.secure_url.replace('/upload/', '/upload/q_auto,f_auto,w_800,c_fill,g_auto/');
-  } catch (e) {
-    console.error('[rehostToCloudinary]', e.message);
-    return sourceUrl;
-  }
-}
-
-// Resolve a page URL (Pinterest, Instagram, or generic) to a renderable image URL.
-// Returns direct CDN image URL or null.
-//
-// Strategy per platform:
-//   Pinterest  → official oEmbed (thumbnail_url, no auth, pinimg.com CDN)
-//   Instagram  → noembed.com aggregator (thumbnail_url, no auth)
-//   Generic    → og:image / twitter:image meta scrape, full Chrome UA
+// Fetch og:image meta from a page URL. Returns image URL or null.
 async function fetchOgImage(pageUrl) {
-  const isPinterest = /pinterest\.[a-z.]+|pin\.it/i.test(pageUrl);
-  const isInstagram = /instagram\.com|instagr\.am/i.test(pageUrl);
-
-  // Strategy 1: Pinterest oEmbed ─────────────────────────────────────────────
-  // Returns { thumbnail_url } — reliable, no auth, pinimg.com CDN URL.
-  if (isPinterest) {
-    try {
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 5000);
-      const r = await fetch(
-        'https://www.pinterest.com/oembed/?url=' + encodeURIComponent(pageUrl),
-        {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)', 'Accept': 'application/json' },
-          signal: ctrl.signal,
-        }
-      );
-      clearTimeout(timeout);
-      if (r.ok) {
-        const j = await r.json();
-        if (j && j.thumbnail_url) {
-          // Upgrade size then rehost to Cloudinary for permanence
-          const pinUrl = j.thumbnail_url.replace(/\/\d+x\//, '/736x/');
-          return await rehostToCloudinary(pinUrl);
-        }
-      }
-    } catch (e) {
-      console.error('[fetchOgImage pinterest oembed]', e.message);
-    }
-    return null; // Pinterest OG scrape is JS-rendered — skip generic fallback
-  }
-
-  // Strategy 2: Instagram via noembed.com ────────────────────────────────────
-  // Free oEmbed aggregator, works without Meta app token for public posts.
-  if (isInstagram) {
-    try {
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 5000);
-      const r = await fetch(
-        'https://noembed.com/embed?url=' + encodeURIComponent(pageUrl),
-        {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)', 'Accept': 'application/json' },
-          signal: ctrl.signal,
-        }
-      );
-      clearTimeout(timeout);
-      if (r.ok) {
-        const j = await r.json();
-        if (j && j.thumbnail_url) return await rehostToCloudinary(j.thumbnail_url);
-      }
-    } catch (e) {
-      console.error('[fetchOgImage instagram noembed]', e.message);
-    }
-    return null; // Instagram blocks all direct page fetches — no generic fallback
-  }
-
-  // Strategy 3: Generic og:image / twitter:image scrape ─────────────────────
-  // Full Chrome UA improves success rate on general sites.
   try {
     const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 5000);
+    const timeout = setTimeout(() => ctrl.abort(), 4000);
     const res = await fetch(pageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Cache-Control': 'no-cache',
+        'User-Agent': 'Mozilla/5.0 (compatible; TDWBot/1.0)',
+        'Accept': 'text/html',
       },
       signal: ctrl.signal,
-      redirect: 'follow',
     });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const html = await res.text();
-    // og:image — both attribute orders, both quote styles
-    const ogPatterns = [
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
-    ];
-    for (const pat of ogPatterns) {
-      const m = html.match(pat);
-      if (m && m[1] && m[1].startsWith('http')) return await rehostToCloudinary(m[1].replace(/&amp;/g, '&'));
-    }
+    // og:image (any meta tag attribute order)
+    const og1 = html.match(/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i);
+    if (og1 && og1[1]) return og1[1];
+    const og2 = html.match(/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i);
+    if (og2 && og2[1]) return og2[1];
     // twitter:image fallback
-    const twitterPatterns = [
-      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
-    ];
-    for (const pat of twitterPatterns) {
-      const m = html.match(pat);
-      if (m && m[1] && m[1].startsWith('http')) return await rehostToCloudinary(m[1].replace(/&amp;/g, '&'));
-    }
+    const tw1 = html.match(/<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i);
+    if (tw1 && tw1[1]) return tw1[1];
     return null;
   } catch {
     return null;
   }
 }
-
 
 // SOURCE 3: TDW vendors table — soft match by descriptors/colors, fallback to
 // random sampling so vendor slot always fills when vibe_tags don't overlap.
@@ -15948,6 +14057,31 @@ app.get('/api/v2/dreamai/bride-schema-check/:userId', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: GET /api/v2/discover-heroes
+// Frost native reads this — public, unauthenticated, only active rows.
+// Mirror of the admin-only version in backend/server.js (which Railway does
+// not run). Required for the Frost landing's Discover box image picker.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/v2/discover-heroes', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('discover_heroes')
+      .select('id, image_url, caption, category_tag, cta_url, sort_order')
+      .eq('is_active', true)
+      .or(`visible_from.is.null,visible_from.lte.${now}`)
+      .or(`visible_to.is.null,visible_to.gte.${now}`)
+      .order('sort_order', { ascending: true })
+      .limit(20);
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('[discover-heroes GET]', err.message);
+    res.status(500).json({ success: false, data: [], error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/v2/frost/home-images/:userId
 // Composite picker for the Frost landing's two image boxes. Called on every
 // home-screen entry (mount + focus). Returns one Muse image + one Discover
@@ -16004,9 +14138,10 @@ app.get('/api/v2/frost/home-images/:userId', async (req, res) => {
     let museUrl = null;
     if (museUrls.length > 0) {
       // Prefer a Muse URL that isn't the chosen discoverUrl.
+      // (Statistically rare collision but enforced.)
       museUrl = pickRandomExcept(museUrls, discoverUrl) || museUrls[0];
-      // If we ended up with the same URL (single-item Muse that matches
-      // discover), repick discover instead.
+      // If after filtering we ended up with the same URL (single-item Muse
+      // that matches discover), repick discover instead.
       if (museUrl === discoverUrl && heroUrls.length > 1) {
         discoverUrl = pickRandomExcept(heroUrls, museUrl);
       }
@@ -16171,20 +14306,10 @@ app.get('/api/v2/frost/circle/threads/:userId/:threadId/messages', async (req, r
 // Bride sends a message to a thread. Writes circle_messages + activity event.
 app.post('/api/v2/frost/circle/messages', async (req, res) => {
   try {
-    const {
-      userId,
-      thread_id,
-      body,
-      sender_name = 'You',
-      sender_user_id = null,
-      sender_role = null,
-    } = req.body || {};
+    const { userId, thread_id, body, sender_name = 'You' } = req.body || {};
     if (!userId || !thread_id || !body) {
       return res.status(400).json({ success: false, error: 'userId, thread_id, and body required' });
     }
-
-    const actualSenderId = sender_user_id || userId;
-    const actualSenderRole = sender_role || (actualSenderId === userId ? 'bride' : 'co_planner');
 
     const isGroup = thread_id.startsWith('grp:');
     const group_id = isGroup ? thread_id.replace('grp:', '') : null;
@@ -16193,9 +14318,9 @@ app.post('/api/v2/frost/circle/messages', async (req, res) => {
     const { data, error } = await supabase.from('circle_messages').insert([{
       couple_id: userId,
       thread_id,
-      sender_user_id: actualSenderId,
+      sender_user_id: userId,
       sender_name,
-      sender_role: actualSenderRole,
+      sender_role: 'bride',
       content: body,
       group_id,
       recipient_co_planner_id: co_planner_id,
@@ -16203,19 +14328,15 @@ app.post('/api/v2/frost/circle/messages', async (req, res) => {
 
     if (error) return res.status(500).json({ success: false, error: error.message });
 
-    try {
-      await supabase.from('circle_activity_events').insert([{
-        couple_id: userId,
-        actor_user_id: actualSenderId,
-        actor_role: actualSenderRole,
-        event_type: 'circle_message_sent',
-        payload: { thread_id, preview: body.slice(0, 80) },
-        entity_type: 'thread',
-        entity_id: thread_id,
-      }]);
-    } catch (e) {
-      console.error('[circle message activity event]', e.message);
-    }
+    await supabase.from('circle_activity_events').insert([{
+      couple_id: userId,
+      actor_user_id: userId,
+      actor_role: 'bride',
+      event_type: 'circle_message_sent',
+      payload: { thread_id, preview: body.slice(0, 80) },
+      entity_type: 'thread',
+      entity_id: thread_id,
+    }]);
 
     res.json({ success: true, data });
   } catch (err) {
@@ -17221,18 +15342,12 @@ app.post('/api/v2/dreamai/chat', async (req, res) => {
 
 const ADMIN_PASSWORD = 'Mira@2551354';
 
-function checkAdminAuth(req, res, next) {
-  // Dual-purpose: works as Express middleware OR as in-handler gate.
-  //   Middleware: app.post(path, checkAdminAuth, handler)         → calls next() on pass, 401s on fail
-  //   Gate:       if (!checkAdminAuth(req, res)) return;          → returns true/false (next is undefined, conditional skipped)
-  // Fixed May 10 evening — previously broke all admin routes that wired this as middleware
-  // (cover-photos/upload, exploring-photos/upload, discover-heroes/* — they hung silently on success).
+function checkAdminAuth(req, res) {
   const pwd = req.headers['x-admin-password'];
   if (pwd !== ADMIN_PASSWORD) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return false;
   }
-  if (typeof next === 'function') next();
   return true;
 }
 
@@ -17549,153 +15664,15 @@ app.delete('/api/v2/admin/exploring-photos/:id', async (req, res) => {
 });
 
 // ── GET /api/v2/exploring-photos — public, used by native app Just Exploring
-
-// ─── Discover Heroes ─────────────────────────────────────────────────────────
-// Admin-managed carousel (up to 5 active slots) for the Frost Discover canvas.
-// Schema: discover_heroes (id, image_url, caption, category_tag, cta_url,
-//          sort_order, visible_from, visible_to, is_active, created_at)
-
-// GET /api/v2/discover-heroes — public, unauthenticated (read by Frost native)
-app.get('/api/v2/discover-heroes', async (req, res) => {
-  try {
-    const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('discover_heroes')
-      .select('id, image_url, caption, category_tag, cta_url, sort_order')
-      .eq('is_active', true)
-      .or(`visible_from.is.null,visible_from.lte.${now}`)
-      .or(`visible_to.is.null,visible_to.gte.${now}`)
-      .order('sort_order', { ascending: true })
-      .limit(20); // FIX-6: limit bumped 5→20 so admin can upload as many heroes as they want
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) {
-    console.error('[discover-heroes GET]', err.message);
-    res.status(500).json({ success: false, data: [], error: err.message });
-  }
-});
-
-// GET /api/v2/admin/discover-heroes — admin read (all rows, includes inactive)
-app.get('/api/v2/admin/discover-heroes', checkAdminAuth, async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('discover_heroes')
-      .select('*')
-      .order('sort_order', { ascending: true });
-    if (error) throw error;
-    res.json({ success: true, data: data || [] });
-  } catch (err) {
-    console.error('[admin/discover-heroes GET]', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/v2/admin/discover-heroes — create hero
-app.post('/api/v2/admin/discover-heroes', checkAdminAuth, async (req, res) => {
-  try {
-    const { image_url, caption, category_tag, cta_url,
-            sort_order, visible_from, visible_to, is_active } = req.body;
-    if (!image_url) return res.status(400).json({ success: false, error: 'image_url required' });
-    const { data, error } = await supabase
-      .from('discover_heroes')
-      .insert({
-        image_url,
-        caption:      caption      || null,
-        category_tag: category_tag || null,
-        cta_url:      cta_url      || null,
-        sort_order:   sort_order   || 1,
-        visible_from: visible_from || null,
-        visible_to:   visible_to   || null,
-        is_active:    is_active !== false,
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error('[admin/discover-heroes POST]', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /api/v2/admin/discover-heroes/:id — update (caption, sort_order, active, url, etc.)
-app.put('/api/v2/admin/discover-heroes/:id', checkAdminAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const allowed = ['image_url', 'caption', 'category_tag', 'cta_url',
-                     'sort_order', 'visible_from', 'visible_to', 'is_active'];
-    const updates = {};
-    for (const k of allowed) {
-      if (req.body[k] !== undefined) updates[k] = req.body[k];
-    }
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ success: false, error: 'No valid fields to update' });
-    }
-    const { data, error } = await supabase
-      .from('discover_heroes')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error('[admin/discover-heroes PUT]', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /api/v2/admin/discover-heroes/:id
-app.delete('/api/v2/admin/discover-heroes/:id', checkAdminAuth, async (req, res) => {
-  try {
-    const { error } = await supabase
-      .from('discover_heroes')
-      .delete()
-      .eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[admin/discover-heroes DELETE]', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/v2/admin/discover-heroes/upload — multipart upload → cover-photos bucket
-// Uses the same multer + Supabase Storage pattern as cover-photos upload.
-// File goes to cover-photos/heroes/ subfolder (no new bucket needed).
-app.post('/api/v2/admin/discover-heroes/upload', checkAdminAuth, uploadMemory.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ success: false, error: 'No file received' });
-    const ext = (req.file.originalname || 'photo.jpg').split('.').pop() || 'jpg';
-    const fileName = `heroes/hero_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-    const { error: uploadError } = await supabase.storage
-      .from('cover-photos')
-      .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype || 'image/jpeg',
-        cacheControl: '31536000',
-        upsert: false,
-      });
-    if (uploadError) throw uploadError;
-    const { data: pub } = supabase.storage.from('cover-photos').getPublicUrl(fileName);
-    res.json({ success: true, url: pub.publicUrl });
-  } catch (err) {
-    console.error('[admin/discover-heroes upload]', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 app.get('/api/v2/exploring-photos', async (req, res) => {
   try {
     const { data, error } = await supabase.from('exploring_photos')
       .select('id, image_url, caption, display_order')
       .eq('active', true)
       .order('display_order', { ascending: true });
-    if (error) { console.error('[exploring-photos]', error); return res.status(500).json({ success: false, error: error.message }); }
-    // FIX-5: include success:true so native consumers (blind-swipe, discover/feed)
-    // that check d.success can actually render the photos. Cover-photos consumer
-    // ignores success field and reads d.photos directly — unchanged behaviour.
-    res.json({ success: true, photos: data || [] });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    if (error) { console.error('[exploring-photos]', error); return res.status(500).json({ error: error.message }); }
+    res.json({ photos: data || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── GET /api/v2/admin/preview-vendors ────────────────────────────────────
@@ -18022,377 +15999,3 @@ app.get('/api/v3/admin/system/health', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
-
-// ─── PHASE 1.6 LOADED ─── //
-
-// ─── PHASE 1.6.1 LOADED ─── //
-
-// ─── PHASE 1.7 LOADED ─── //
-
-// ─── PATCH B-1 LOADED ─── //
-
-// ─── PATCH B-2 LOADED ─── //
-
-// ─── PATCH B-3a LOADED ─── //
-
-// ─── PATCH B-4 LOADED ─── //
-
-// ─── PATCH B-5 LOADED ─── //
-
-// ─── PATCH B-6a LOADED ─── //
-
-// ═════════════════════════════════════════════════════════════════════════
-// SANCTUARY MODE — Pages endpoints (Session 29 evening)
-// ═════════════════════════════════════════════════════════════════════════
-
-// GET /api/v2/pages/summary?couple_id=…
-// Returns the three sub-line strings for the Sanctuary block labels:
-// muse (Haiku Vision when she has saves, fallback static), moments (locked copy),
-// pages (count-based template).
-// Cached for 1 hour per user via in-memory Map. No new infra.
-const _summaryCache = new Map(); // key: user_id, value: { ts, payload }
-const SUMMARY_CACHE_MS = 60 * 60 * 1000; // 1 hour
-
-app.get('/api/v2/pages/summary', async (req, res) => {
-  try {
-    const userId = req.query.couple_id || req.query.user_id;
-    if (!userId) return res.status(400).json({ success: false, error: 'couple_id required' });
-
-    // Check cache
-    const cached = _summaryCache.get(userId);
-    if (cached && (Date.now() - cached.ts) < SUMMARY_CACHE_MS) {
-      return res.json({ success: true, data: cached.payload, cached: true });
-    }
-
-    // Fetch counts in parallel
-    const [musesRes, vendorsRes, expensesRes] = await Promise.all([
-      supabase.from('moodboard_items').select('id, image_url, function_tag').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
-      supabase.from('couple_vendors').select('id', { count: 'exact', head: true }).eq('couple_id', userId),
-      supabase.from('couple_expenses').select('id', { count: 'exact', head: true }).eq('couple_id', userId),
-    ]);
-
-    const muses = musesRes.data || [];
-    const totalMusesRes = await supabase.from('moodboard_items').select('id', { count: 'exact', head: true }).eq('user_id', userId);
-    const totalMusesCount = totalMusesRes.count || 0;
-    const vendorCount = vendorsRes.count || 0;
-    const expenseCount = expensesRes.count || 0;
-
-    // ── MUSE sub-line — Haiku Vision over last 5 saves
-    let museLine = 'Nothing yet.';
-    if (totalMusesCount > 0 && muses.length > 0) {
-      try {
-        const sampleImages = muses.filter(m => m.image_url).slice(0, 5).map(m => m.image_url);
-        const numWord = numberToWord(totalMusesCount);
-        if (sampleImages.length === 0) {
-          museLine = `${numWord} saved.`;
-        } else {
-          // Call Haiku for taste read — returns 1 short phrase
-          const tasteRead = await haikuTasteRead(sampleImages);
-          if (tasteRead && tasteRead.length > 0) {
-            museLine = `${numWord} saved. ${tasteRead}`;
-          } else {
-            museLine = `${numWord} saved.`;
-          }
-        }
-      } catch (err) {
-        console.error('[pages/summary muse]', err.message);
-        museLine = `${numberToWord(totalMusesCount)} saved.`;
-      }
-    }
-
-    // ── MOMENTS sub-line — locked copy
-    const momentsLine = 'These moments will always remind you of your journey.';
-
-    // ── PAGES sub-line — template with counts
-    let pagesLine;
-    if (vendorCount === 0 && expenseCount === 0) {
-      pagesLine = 'Quiet for now.';
-    } else if (vendorCount === 0) {
-      pagesLine = `${numberToWord(expenseCount)} ${expenseCount === 1 ? 'receipt' : 'receipts'} kept.`;
-    } else if (expenseCount === 0) {
-      pagesLine = `${numberToWord(vendorCount)} ${vendorCount === 1 ? 'vendor' : 'vendors'} held.`;
-    } else {
-      pagesLine = `${numberToWord(vendorCount)} ${vendorCount === 1 ? 'vendor' : 'vendors'}. ${numberToWord(expenseCount)} ${expenseCount === 1 ? 'receipt' : 'receipts'}.`;
-    }
-
-    const payload = { muse: museLine, moments: momentsLine, pages: pagesLine };
-    _summaryCache.set(userId, { ts: Date.now(), payload });
-    return res.json({ success: true, data: payload, cached: false });
-  } catch (err) {
-    console.error('[pages/summary]', err);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Convert count to word for the small numbers (1-99). Above 99, use digits.
-function numberToWord(n) {
-  if (n < 0) return String(n);
-  if (n > 99) return String(n);
-  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
-  const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
-  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-  let word;
-  if (n === 0) word = 'zero';
-  else if (n < 10) word = ones[n];
-  else if (n < 20) word = teens[n - 10];
-  else {
-    const t = Math.floor(n / 10), o = n % 10;
-    word = o === 0 ? tens[t] : `${tens[t]}-${ones[o]}`;
-  }
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
-// Haiku taste read — returns a short, italic-ready phrase about her saves.
-// Reuses the existing Anthropic client (assumed available in scope as `anthropic`).
-async function haikuTasteRead(imageUrls) {
-  if (!imageUrls || imageUrls.length === 0) return null;
-  if (!anthropic) return null;
-  try {
-    const blocks = imageUrls.slice(0, 5).map(url => ({
-      type: 'image',
-      source: { type: 'url', url },
-    }));
-    blocks.push({
-      type: 'text',
-      text: 'These are images a bride has saved to her wedding moodboard. In ONE short phrase (max 8 words), name the dominant aesthetic — colours, mood, or motif. Examples: "Mostly emerald and blush." / "Soft mandap light." / "Old-money quiet." No punctuation at the start. Single sentence ending with a period.',
-    });
-    const reply = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 60,
-      messages: [{ role: 'user', content: blocks }],
-    });
-    const text = reply?.content?.[0]?.text?.trim() || '';
-    if (!text) return null;
-    // Truncate at first newline or period+space
-    const clean = text.split('\n')[0].trim();
-    return clean.length > 64 ? null : clean;
-  } catch (err) {
-    console.error('[haikuTasteRead]', err.message);
-    return null;
-  }
-}
-
-// GET /api/v2/pages/:slice?couple_id=…
-// Returns structured payload for one Pages slice. Slices: vendors, money, dates.
-app.get('/api/v2/pages/:slice', async (req, res) => {
-  try {
-    const userId = req.query.couple_id || req.query.user_id;
-    if (!userId) return res.status(400).json({ success: false, error: 'couple_id required' });
-    const slice = String(req.params.slice || '').toLowerCase();
-
-    if (slice === 'vendors') {
-      const { data, error } = await supabase.from('couple_vendors')
-        .select('id, name, category, status, quoted_total, balance_due_date, events, phone, contract_url')
-        .eq('couple_id', userId)
-        .order('category', { ascending: true })
-        .order('name', { ascending: true });
-      if (error) throw error;
-      // Group by category
-      const grouped = {};
-      for (const v of (data || [])) {
-        const cat = v.category || 'Other';
-        if (!grouped[cat]) grouped[cat] = [];
-        grouped[cat].push(v);
-      }
-      return res.json({ success: true, slice: 'vendors', data: grouped, total: (data || []).length });
-    }
-
-    if (slice === 'money') {
-      const groupBy = String(req.query.group_by || 'vendor').toLowerCase(); // 'vendor' | 'category'
-      const { data, error } = await supabase.from('couple_expenses')
-        .select('id, event, category, description, vendor_name, planned_amount, actual_amount, payment_status, due_date, created_at, receipt_url')
-        .eq('couple_id', userId)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      const rows = data || [];
-      // Aggregate
-      let totalPlanned = 0, totalActual = 0, totalOutstanding = 0;
-      for (const r of rows) {
-        totalPlanned += Number(r.planned_amount || 0);
-        totalActual += Number(r.actual_amount || 0);
-        if (r.payment_status !== 'paid') {
-          totalOutstanding += Number(r.actual_amount || r.planned_amount || 0);
-        }
-      }
-      // Group
-      const grouped = {};
-      for (const r of rows) {
-        const key = groupBy === 'category' ? (r.category || 'Other') : (r.vendor_name || 'Other');
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(r);
-      }
-      return res.json({
-        success: true, slice: 'money', group_by: groupBy, data: grouped,
-        totals: { planned: totalPlanned, actual: totalActual, outstanding: totalOutstanding },
-        total_rows: rows.length,
-      });
-    }
-
-    if (slice === 'dates') {
-      // UNION across events, expenses (created_at), vendors (created_at), checklist (completed_at)
-      const [eventsR, expensesR, vendorsR, checklistR] = await Promise.all([
-        supabase.from('couple_events').select('id, event_name, event_type, event_date, event_city, venue').eq('couple_id', userId).eq('is_active', true),
-        supabase.from('couple_expenses').select('id, description, vendor_name, actual_amount, planned_amount, payment_status, created_at').eq('couple_id', userId).order('created_at', { ascending: false }).limit(100),
-        supabase.from('couple_vendors').select('id, name, category, status, created_at').eq('couple_id', userId).order('created_at', { ascending: false }).limit(100),
-        supabase.from('couple_checklist').select('id, text, event, completed_at, priority').eq('couple_id', userId).eq('is_complete', true).not('completed_at', 'is', null).order('completed_at', { ascending: false }).limit(100),
-      ]);
-
-      const items = [];
-
-      for (const e of (eventsR.data || [])) {
-        if (!e.event_date) continue;
-        items.push({
-          id: 'event:' + e.id,
-          type: 'event',
-          date: e.event_date,
-          label: e.event_name || e.event_type || 'Event',
-          sub: e.event_city || e.venue || null,
-          ref_id: e.id,
-        });
-      }
-      for (const x of (expensesR.data || [])) {
-        items.push({
-          id: 'expense:' + x.id,
-          type: 'expense',
-          date: x.created_at,
-          label: x.description || 'Expense',
-          sub: x.vendor_name ? (x.payment_status === 'paid' ? `Paid to ${x.vendor_name}` : `Owed to ${x.vendor_name}`) : null,
-          amount: x.actual_amount || x.planned_amount,
-          ref_id: x.id,
-        });
-      }
-      for (const v of (vendorsR.data || [])) {
-        items.push({
-          id: 'vendor:' + v.id,
-          type: 'vendor',
-          date: v.created_at,
-          label: `${v.name}` + (v.status ? ` · ${v.status}` : ''),
-          sub: v.category || null,
-          ref_id: v.id,
-        });
-      }
-      for (const c of (checklistR.data || [])) {
-        items.push({
-          id: 'task:' + c.id,
-          type: 'task',
-          date: c.completed_at,
-          label: `Done — ${c.text || 'task'}`,
-          sub: c.event || null,
-          ref_id: c.id,
-        });
-      }
-
-      // Sort newest-first
-      items.sort((a, b) => {
-        const da = new Date(a.date).getTime();
-        const db = new Date(b.date).getTime();
-        return db - da;
-      });
-
-      return res.json({ success: true, slice: 'dates', data: items, total: items.length });
-    }
-
-    return res.status(400).json({ success: false, error: 'Unknown slice. Use: vendors | money | dates' });
-  } catch (err) {
-    console.error('[pages/:slice]', err);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ─── PATCH SANCTUARY-PAGES LOADED ─── //
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/v3/dreamai/vendor-chat — PWA vendor DreamAI (agentic, native tool_use)
-//
-// Thin wrapper. The agentic engine is extracted to
-// backend/agentic/wedding/vendor/ in Session 2 (2026-05-12).
-//
-// Body:    { userId, message, surface?, history? }
-//          surface defaults to 'native'. 'web' (Session 5+) and 'whatsapp'
-//          (Session 9+) are the other valid values.
-//          history items shaped { role, text }. If empty, the engine
-//          hydrates the last 10 turns from vendor_dreamai_messages.
-// Returns: { success, reply, toolsUsed: string[], iterations: number }
-// Model:   claude-haiku-4-5-20251001 (locked)
-// Limits:  max 8 iterations, ~$0.50 cost, 45s wall time (unchanged from S1).
-// Persistence: every turn writes user+assistant rows to vendor_dreamai_messages
-//              and a telemetry row to dreamai_usage.
-// ─────────────────────────────────────────────────────────────────────────────
-
-app.post('/api/v3/dreamai/vendor-chat', async (req, res) => {
-  try {
-    const { userId, message, history = [], surface = 'native', justDoIt = true } = req.body || {};
-    if (!userId || !message) {
-      return res.status(400).json({ success: false, error: 'userId and message are required' });
-    }
-    const result = await vendorChatEngine.runAgenticTurn({
-      vendorId: userId,
-      message,
-      history,
-      surface,
-      justDoIt,
-    });
-    return res.status(result.status || 200).json(result.body);
-  } catch (err) {
-    console.error('[DreamAi v3 vendor-chat] error:', err.message);
-    return res.status(500).json({ success: false, error: err.message, reply: 'Something went wrong. Try again.' });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/v3/dreamai/vendor-confirm — Session 4 (2026-05-12)
-//
-// Companion endpoint to /api/v3/dreamai/vendor-chat. When the chat endpoint
-// returns { awaitingConfirm: true, pendingTool: { id, name, input, preview } }
-// the native frontend renders an ActionCard. Tapping Confirm POSTs here with
-// action: 'confirm'; tapping Cancel POSTs with action: 'cancel'.
-//
-// Body:    { userId, pendingToolId, action: 'confirm' | 'cancel' }
-// Returns: same envelope shape as /vendor-chat completion —
-//          { success, reply, toolsUsed, iterations }
-// ─────────────────────────────────────────────────────────────────────────────
-
-app.post('/api/v3/dreamai/vendor-confirm', async (req, res) => {
-  try {
-    const { userId, pendingToolId, action } = req.body || {};
-    if (!userId || !pendingToolId || !action) {
-      return res.status(400).json({ success: false, error: 'userId, pendingToolId, action required' });
-    }
-    if (action !== 'confirm' && action !== 'cancel') {
-      return res.status(400).json({ success: false, error: "action must be 'confirm' or 'cancel'" });
-    }
-
-    let result;
-    if (action === 'confirm') {
-      result = await vendorChatEngine.resumeAgenticTurn({
-        vendorId: userId,
-        pendingToken: pendingToolId,
-      });
-    } else {
-      result = await vendorChatEngine.cancelPending({
-        vendorId: userId,
-        pendingToken: pendingToolId,
-      });
-    }
-    return res.status(result.status || 200).json(result.body);
-  } catch (err) {
-    console.error('[DreamAi v3 vendor-confirm] error:', err.message);
-    return res.status(500).json({ success: false, error: err.message, reply: 'Something went wrong. Try again.' });
-  }
-});
-
-// ─── PATCH V3-VENDOR-CHAT LOADED ─── //
-
-// ─── Session 2 (2026-05-12) — wire the vendor agentic engine ────────────────
-// Placed at end-of-file so executeToolCall, sendWhatsApp, and normalizePhone
-// are textually defined before their references are captured. The route
-// handler above is registered with Express by this point but won't fire
-// until the HTTP server starts listening, which happens after this init.
-const vendorChatEngine = require('./agentic/wedding/vendor');
-vendorChatEngine.init({
-  supabase,
-  anthropic,
-  helpers: { executeToolCall, sendWhatsApp, normalizePhone },
-});
-
