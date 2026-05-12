@@ -3406,29 +3406,41 @@ async function executeToolCall(toolName, toolInput, vendor) {
   try {
     switch (toolName) {
       case 'create_invoice': {
-        const { client_name, amount, advance_received = 0, event_type = 'Wedding' } = toolInput;
-        const balance = amount - advance_received;
-        const cgst = Math.round(amount * 0.09);
-        const sgst = Math.round(amount * 0.09);
-        const total_with_gst = amount + cgst + sgst;
+        const { client_name, amount, gst_enabled = false, due_date = null } = toolInput;
+        const amountNum = Number(amount);
+        const gst_amount = gst_enabled ? Math.round(amountNum * 0.18) : 0;
+        const total_amount = amountNum + gst_amount;
         const invNum = 'INV-' + Date.now().toString().slice(-6);
+        // Resolve client_id only when exactly one client matches the name.
+        let client_id = null;
+        const { data: matches } = await supabase.from('vendor_clients')
+          .select('id').eq('vendor_id', vendor.id)
+          .ilike('name', client_name).limit(2);
+        if (matches && matches.length === 1) client_id = matches[0].id;
         const { data, error } = await supabase.from('vendor_invoices').insert([{
-          vendor_id: vendor.id, client_name, event_type,
-          subtotal: amount, cgst, sgst, total: total_with_gst,
-          advance: advance_received, balance: balance,
+          vendor_id: vendor.id, client_name, client_id,
+          amount: amountNum, gst_enabled, gst_amount, total_amount,
           invoice_number: invNum, status: 'pending',
+          issue_date: new Date().toISOString().slice(0, 10),
+          due_date,
         }]).select().single();
         if (error) throw error;
-        return `✓ Invoice created for ${client_name}\n₹${amount.toLocaleString('en-IN')} + GST = ₹${total_with_gst.toLocaleString('en-IN')}\n${advance_received > 0 ? 'Advance: ₹' + advance_received.toLocaleString('en-IN') + ' · Balance: ₹' + balance.toLocaleString('en-IN') + '\n' : ''}Invoice #${invNum}\nView: vendor.thedreamwedding.in`;
+        const gstLine = gst_enabled ? `\nGST (18%): Rs ${gst_amount.toLocaleString('en-IN')}` : '';
+        const totalLine = gst_enabled ? `\nTotal: Rs ${total_amount.toLocaleString('en-IN')}` : '';
+        return `✓ Invoice created for ${client_name}\nAmount: Rs ${amountNum.toLocaleString('en-IN')}${gstLine}${totalLine}\nInvoice #${invNum}`;
       }
 
       case 'block_calendar_dates': {
         const { client_name, dates, notes = '' } = toolInput;
-        for (const date of dates) {
-          await supabase.from('blocked_dates').insert([{
-            vendor_id: vendor.id, date, reason: `${client_name} wedding`, notes,
-          }]).select();
-        }
+        const reasonStr = notes ? `${client_name} wedding - ${notes}` : `${client_name} wedding`;
+        const rows = dates.map(d => ({
+          vendor_id: vendor.id,
+          blocked_date: d,
+          reason: reasonStr,
+        }));
+        const { error } = await supabase.from('vendor_availability_blocks')
+          .upsert(rows, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
+        if (error) throw error;
         return `✓ Blocked ${dates.length} date${dates.length > 1 ? 's' : ''} for ${client_name}\n${dates.join(', ')}`;
       }
 
@@ -3439,7 +3451,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
           event_date, event_type, budget, status: 'upcoming',
         }]);
         if (error) throw error;
-        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: ₹' + budget.toLocaleString('en-IN') : ''}`;
+        return `✓ Client added: ${client_name}${event_date ? '\nEvent: ' + event_date : ''}${budget ? '\nBudget: Rs ' + budget.toLocaleString('en-IN') : ''}`;
       }
 
       case 'query_schedule': {
@@ -3461,13 +3473,13 @@ async function executeToolCall(toolName, toolInput, vendor) {
           .gte('event_date', startDate.toISOString().slice(0,10))
           .lt('event_date', endDate.toISOString().slice(0,10))
           .order('event_date');
-        const { data: blocked } = await supabase.from('blocked_dates')
-          .select('date, reason').eq('vendor_id', vendor.id)
-          .gte('date', startDate.toISOString().slice(0,10))
-          .lt('date', endDate.toISOString().slice(0,10));
+        const { data: blocked } = await supabase.from('vendor_availability_blocks')
+          .select('blocked_date, reason').eq('vendor_id', vendor.id)
+          .gte('blocked_date', startDate.toISOString().slice(0,10))
+          .lt('blocked_date', endDate.toISOString().slice(0,10));
         const events = [];
         (clients || []).forEach(c => events.push(`${c.event_date}: ${c.name} ${c.event_type || ''}`));
-        (blocked || []).forEach(b => events.push(`${b.date}: Blocked - ${b.reason || ''}`));
+        (blocked || []).forEach(b => events.push(`${b.blocked_date}: Blocked - ${b.reason || ''}`));
         if (events.length === 0) return `You're free ${label}. No events scheduled.`;
         return `📅 Schedule for ${label}:\n\n${events.join('\n')}`;
       }
@@ -3494,9 +3506,9 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const received = invoices.reduce((s, i) => s + (i.advance || 0), 0);
         const pending = invoices.reduce((s, i) => s + (i.balance || 0), 0);
         if (client_name) {
-          return `💰 ${client_name}:\nTotal: ₹${total.toLocaleString('en-IN')}\nReceived: ₹${received.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}\n${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
+          return `💰 ${client_name}:\nTotal: Rs ${total.toLocaleString('en-IN')}\nReceived: Rs ${received.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}\n${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
         }
-        return `💰 Revenue (${period.replace('_', ' ')}):\nTotal: ₹${total.toLocaleString('en-IN')}\nReceived: ₹${received.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}\n${invoices.length} booking${invoices.length !== 1 ? 's' : ''}`;
+        return `💰 Revenue (${period.replace('_', ' ')}):\nTotal: Rs ${total.toLocaleString('en-IN')}\nReceived: Rs ${received.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}\n${invoices.length} booking${invoices.length !== 1 ? 's' : ''}`;
       }
 
       case 'send_client_reminder': {
@@ -3519,15 +3531,35 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'create_task': {
-        const { task, assignee = '', due_date = null } = toolInput;
-        try {
-          await supabase.from('team_tasks').insert([{
-            vendor_id: vendor.id, title: task, description: task,
-            assignee_name: assignee || vendor.name, due_date,
-            status: 'pending', priority: 'medium',
-          }]);
-        } catch (e) {}
-        return `✓ Task created: ${task}${assignee ? '\nAssigned to: ' + assignee : ''}${due_date ? '\nDue: ' + due_date : ''}`;
+        const { task, client_name = '', assignee = '', due_date = null, priority = 'medium' } = toolInput;
+        // Resolve client_id only when exactly one client matches the name.
+        let client_id = null;
+        let resolved_client_name = client_name || null;
+        if (client_name) {
+          const { data: matches } = await supabase.from('vendor_clients')
+            .select('id, name').eq('vendor_id', vendor.id)
+            .ilike('name', client_name).limit(2);
+          if (matches && matches.length === 1) {
+            client_id = matches[0].id;
+            resolved_client_name = matches[0].name;
+          }
+        }
+        const assigned_to = assignee ? [assignee] : [vendor.name];
+        const { error } = await supabase.from('vendor_todos').insert([{
+          vendor_id: vendor.id,
+          title: task,
+          due_date,
+          priority,
+          done: false,
+          client_id,
+          client_name: resolved_client_name,
+          assigned_to,
+        }]);
+        if (error) throw error;
+        const clientLine = resolved_client_name ? `\nClient: ${resolved_client_name}` : '';
+        const assigneeLine = assignee ? `\nAssigned to: ${assignee}` : '';
+        const dueLine = due_date ? `\nDue: ${due_date}` : '';
+        return `✓ Task created: ${task}${clientLine}${assigneeLine}${dueLine}`;
       }
 
       case 'query_clients': {
@@ -3539,7 +3571,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
         if (!data || data.length === 0) return search ? `No clients matching "${search}"` : 'No clients yet. Add some with "Add client [name]".';
         if (search && data.length === 1) {
           const c = data[0];
-          return `👥 ${c.name}\n${c.event_type || 'Wedding'} · ${c.event_date || 'Date TBD'}\n${c.budget ? 'Budget: ₹' + c.budget.toLocaleString('en-IN') : ''}\nStatus: ${c.status || 'upcoming'}`;
+          return `👥 ${c.name}\n${c.event_type || 'Wedding'} · ${c.event_date || 'Date TBD'}\n${c.budget ? 'Budget: Rs ' + c.budget.toLocaleString('en-IN') : ''}\nStatus: ${c.status || 'upcoming'}`;
         }
         return `👥 Clients (${data.length}):\n\n${data.map(c => `• ${c.name} - ${c.event_date || 'TBD'}`).join('\n')}`;
       }
@@ -12099,7 +12131,7 @@ async function executeCoupleToolCall(toolName, toolInput, coupleId) {
         const remaining = totalBudget - logged;
         let reply = `💰 Budget summary${category ? ' (' + category + ')' : ''}:\n`;
         if (totalBudget > 0) reply += `Total budget: ₹${totalBudget.toLocaleString('en-IN')}\n`;
-        reply += `Logged: ₹${logged.toLocaleString('en-IN')}\nPaid: ₹${paid.toLocaleString('en-IN')}\nPending: ₹${pending.toLocaleString('en-IN')}`;
+        reply += `Logged: Rs ${logged.toLocaleString('en-IN')}\nPaid: Rs ${paid.toLocaleString('en-IN')}\nPending: Rs ${pending.toLocaleString('en-IN')}`;
         if (totalBudget > 0) reply += `\n${remaining >= 0 ? 'Remaining: ₹' + remaining.toLocaleString('en-IN') : 'Over budget by: ₹' + Math.abs(remaining).toLocaleString('en-IN')}`;
         else reply += `\n(no total budget set yet — say "my budget is X lac" to set one)`;
         return reply;
@@ -18353,25 +18385,53 @@ async function _vendorChatReplyToEnquiry(vendorId, { enquiry_id, message }) {
   if (!message) return 'message required.';
   const { data: enquiry } = await supabase
     .from('vendor_enquiries')
-    .select('id, couple_name, couple_phone, vendor_id')
+    .select('id, couple_id, vendor_id')
     .eq('id', enquiry_id)
     .maybeSingle();
   if (!enquiry) return 'Enquiry not found.';
   if (enquiry.vendor_id && enquiry.vendor_id !== vendorId) return 'Enquiry does not belong to this vendor.';
 
-  await supabase
-    .from('vendor_enquiries')
-    .update({ status: 'replied', replied_at: new Date().toISOString() })
-    .eq('id', enquiry_id);
+  // Look up couple's name + phone from users table.
+  let coupleName = 'couple';
+  let couplePhone = null;
+  if (enquiry.couple_id) {
+    const { data: couple } = await supabase
+      .from('users')
+      .select('name, bride_name, groom_name, phone')
+      .eq('id', enquiry.couple_id)
+      .maybeSingle();
+    if (couple) {
+      coupleName = couple.name || couple.bride_name || couple.groom_name || 'couple';
+      couplePhone = couple.phone || null;
+    }
+  }
+
+  // Log message into the enquiry thread.
+  await supabase.from('vendor_enquiry_messages').insert([{
+    enquiry_id,
+    from_role: 'vendor',
+    content: message,
+    read_by_other: false,
+  }]);
+
+  // Update enquiry metadata.
+  await supabase.from('vendor_enquiries').update({
+    status: 'replied',
+    last_message_at: new Date().toISOString(),
+    last_message_preview: message.slice(0, 200),
+    last_message_from: 'vendor',
+    couple_unread_count: 1,
+    vendor_unread_count: 0,
+  }).eq('id', enquiry_id);
 
   let sent = false;
-  if (enquiry.couple_phone) {
-    const phone = '+91' + normalizePhone(enquiry.couple_phone);
+  if (couplePhone) {
+    const phone = '+91' + normalizePhone(couplePhone);
     sent = await sendWhatsApp(phone, message);
   }
   return sent
-    ? 'Reply sent to ' + (enquiry.couple_name || 'couple') + '.'
-    : 'Enquiry marked as replied.';
+    ? 'Reply sent to ' + coupleName + '.'
+    : 'Reply logged. ' + coupleName + (couplePhone ? ' may not be reachable on WhatsApp.' : ' has no phone on file.');
 }
 
 async function _vendorChatRecordPayment(vendorId, { client_name, amount, invoice_id }) {
@@ -18380,7 +18440,7 @@ async function _vendorChatRecordPayment(vendorId, { client_name, amount, invoice
   if (invoice_id) {
     const { data } = await supabase
       .from('vendor_invoices')
-      .select('id, vendor_id, client_name, balance, total')
+      .select('id, vendor_id, client_name, amount, total_amount, status')
       .eq('id', invoice_id)
       .maybeSingle();
     invoice = data;
@@ -18388,7 +18448,7 @@ async function _vendorChatRecordPayment(vendorId, { client_name, amount, invoice
   } else {
     const { data } = await supabase
       .from('vendor_invoices')
-      .select('id, client_name, balance, total')
+      .select('id, client_name, amount, total_amount, status')
       .eq('vendor_id', vendorId)
       .ilike('client_name', '%' + client_name + '%')
       .neq('status', 'paid')
@@ -18403,7 +18463,7 @@ async function _vendorChatRecordPayment(vendorId, { client_name, amount, invoice
     .update({ status: 'paid', paid_date: new Date().toISOString().slice(0, 10) })
     .eq('id', invoice.id);
   if (error) throw error;
-  const paid = amount || invoice.balance || invoice.total || 0;
+  const paid = amount || invoice.total_amount || invoice.amount || 0;
   return 'Payment recorded for ' + invoice.client_name + ' — Rs ' + Number(paid).toLocaleString('en-IN') + ' marked as paid.';
 }
 
