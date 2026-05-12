@@ -5157,7 +5157,7 @@ app.post('/api/v2/dreamai/vendor-action/send-payment-reminder', async (req, res)
     const vendorName = vendor ? vendor.name : 'Your vendor';
     const amountStr = amount ? 'Rs ' + Number(amount).toLocaleString('en-IN') : null;
     const msg = custom_message || (amountStr ? 'Hi ' + client.name + ', gentle reminder that ' + amountStr + ' is due. Please let us know when you would like to settle. Thanks! - ' + vendorName : 'Hi ' + client.name + ', gentle reminder about your pending payment. Thanks! - ' + vendorName);
-    const phone = '+91' + client.phone.replace(/D/g, '').slice(-10);
+    const phone = '+91' + client.phone.replace(/\D/g, '').slice(-10);
     const sent = await sendWhatsApp(phone, msg);
     res.json({ success: true, message: sent ? 'Reminder sent to ' + client.name : 'Could not send to ' + client.name + '. They may not be on WhatsApp.' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -5206,7 +5206,7 @@ app.post('/api/v2/dreamai/vendor-action/reply-to-enquiry', async (req, res) => {
     await supabase.from('vendor_enquiries').update({ status: 'replied', replied_at: new Date().toISOString() }).eq('id', enquiry_id);
     let sent = false;
     if (couplePhone) {
-      const phone = '+91' + couplePhone.replace(/D/g, '').slice(-10);
+      const phone = '+91' + couplePhone.replace(/\D/g, '').slice(-10);
       sent = await sendWhatsApp(phone, message);
     }
     res.json({ success: true, message: sent ? 'Reply sent to ' + coupleName : 'Enquiry marked as replied' });
