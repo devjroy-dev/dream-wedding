@@ -46,3 +46,7 @@ web/.env.local
 .vercel
 *.patch
 tdw-2
+
+# Session patch scripts and backups (transient)
+patch_S*.py
+*.bak
