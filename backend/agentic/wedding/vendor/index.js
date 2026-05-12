@@ -11,13 +11,21 @@
 //     helpers: { executeToolCall, sendWhatsApp, normalizePhone },
 //   });
 //
-// Then in the route handler:
+// Then in the route handlers:
 //
 //   const result = await vendorChatEngine.runAgenticTurn({
-//     vendorId, message, history, surface
+//     vendorId, message, history, surface, justDoIt
+//   });
+//
+//   const result = await vendorChatEngine.resumeAgenticTurn({
+//     vendorId, pendingToken
+//   });
+//
+//   const result = await vendorChatEngine.cancelPending({
+//     vendorId, pendingToken
 //   });
 
 const { init } = require('./engine');
-const { runAgenticTurn } = require('./loop');
+const { runAgenticTurn, resumeAgenticTurn, cancelPending } = require('./loop');
 
-module.exports = { init, runAgenticTurn };
+module.exports = { init, runAgenticTurn, resumeAgenticTurn, cancelPending };

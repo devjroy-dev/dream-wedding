@@ -18311,7 +18311,7 @@ app.get('/api/v2/pages/:slice', async (req, res) => {
 
 app.post('/api/v3/dreamai/vendor-chat', async (req, res) => {
   try {
-    const { userId, message, history = [], surface = 'native' } = req.body || {};
+    const { userId, message, history = [], surface = 'native', justDoIt = true } = req.body || {};
     if (!userId || !message) {
       return res.status(400).json({ success: false, error: 'userId and message are required' });
     }
@@ -18320,10 +18320,53 @@ app.post('/api/v3/dreamai/vendor-chat', async (req, res) => {
       message,
       history,
       surface,
+      justDoIt,
     });
     return res.status(result.status || 200).json(result.body);
   } catch (err) {
     console.error('[DreamAi v3 vendor-chat] error:', err.message);
+    return res.status(500).json({ success: false, error: err.message, reply: 'Something went wrong. Try again.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v3/dreamai/vendor-confirm — Session 4 (2026-05-12)
+//
+// Companion endpoint to /api/v3/dreamai/vendor-chat. When the chat endpoint
+// returns { awaitingConfirm: true, pendingTool: { id, name, input, preview } }
+// the native frontend renders an ActionCard. Tapping Confirm POSTs here with
+// action: 'confirm'; tapping Cancel POSTs with action: 'cancel'.
+//
+// Body:    { userId, pendingToolId, action: 'confirm' | 'cancel' }
+// Returns: same envelope shape as /vendor-chat completion —
+//          { success, reply, toolsUsed, iterations }
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post('/api/v3/dreamai/vendor-confirm', async (req, res) => {
+  try {
+    const { userId, pendingToolId, action } = req.body || {};
+    if (!userId || !pendingToolId || !action) {
+      return res.status(400).json({ success: false, error: 'userId, pendingToolId, action required' });
+    }
+    if (action !== 'confirm' && action !== 'cancel') {
+      return res.status(400).json({ success: false, error: "action must be 'confirm' or 'cancel'" });
+    }
+
+    let result;
+    if (action === 'confirm') {
+      result = await vendorChatEngine.resumeAgenticTurn({
+        vendorId: userId,
+        pendingToken: pendingToolId,
+      });
+    } else {
+      result = await vendorChatEngine.cancelPending({
+        vendorId: userId,
+        pendingToken: pendingToolId,
+      });
+    }
+    return res.status(result.status || 200).json(result.body);
+  } catch (err) {
+    console.error('[DreamAi v3 vendor-confirm] error:', err.message);
     return res.status(500).json({ success: false, error: err.message, reply: 'Something went wrong. Try again.' });
   }
 });
