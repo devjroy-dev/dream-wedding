@@ -44,7 +44,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
   },
   {
     name: 'wedding_create_task',
-    description: 'Create a task for the vendor or a team member. Internal op — execute directly.',
+    description: 'Create a task or reminder for the vendor or a team member. Use for: "remind me to X", "add a task", "do not let me forget", "make a note to", "follow up on". Internal op — execute directly. One task per request unless explicitly asked for more.',
     input_schema: {
       type: 'object',
       properties: {
@@ -96,7 +96,7 @@ const TDW_VENDOR_CHAT_TOOLS = [
   },
   {
     name: 'wedding_log_expense',
-    description: 'Log a business expense. Internal op — execute directly.',
+    description: 'Log a business expense already incurred. Use for: "spent X on Y", "paid X for Y", "bought X", "purchased X", "log Rs X for Y". Do NOT use for "remind me to pay" — that is a task. Internal op — execute directly.',
     input_schema: {
       type: 'object',
       properties: {
