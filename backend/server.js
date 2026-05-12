@@ -4996,7 +4996,7 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
       supabase.from('vendors').select('id, name, category').eq('id', vendorId).maybeSingle(),
       supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('vendor_clients').select('id, name, event_type, event_date, status, budget').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
-      supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, total, advance, balance, status, due_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
+      supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
       supabase.from('vendor_enquiries').select('id, couple_name, message, created_at, status').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
       supabase.from('vendor_calendar_events').select('id, event_name, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
     ]);
@@ -5011,7 +5011,7 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
     const calendar = calendarRes.data || [];
 
     // ── Revenue calculations ──────────────────────────────────────────────────
-    const getAmount = inv => parseFloat(inv.total_amount || inv.total || inv.amount || 0);
+    const getAmount = inv => parseFloat(inv.total_amount || inv.amount || 0);
 
     const thisMonthRevenue = invoices
       .filter(i => i.status === 'paid' && i.created_at >= monthStart)
@@ -5023,14 +5023,14 @@ app.get('/api/v2/dreamai/vendor-context/:vendorId', async (req, res) => {
 
     const outstanding = invoices
       .filter(i => i.status !== 'paid' && i.status !== 'cancelled')
-      .reduce((s, i) => s + parseFloat(i.balance || i.amount || 0), 0);
+      .reduce((s, i) => s + parseFloat(i.total_amount || i.amount || 0), 0);
 
     // ── Overdue invoices ──────────────────────────────────────────────────────
     const overdue_invoices = invoices
       .filter(i => (i.status === 'unpaid' || i.status === 'issued' || i.status === 'pending') && i.due_date && i.due_date < todayStr)
       .map(i => ({
         client_name: i.client_name,
-        amount: parseFloat(i.balance || i.amount || 0),
+        amount: parseFloat(i.total_amount || i.amount || 0),
         due_date: i.due_date,
       }));
 
@@ -18303,7 +18303,7 @@ async function _vendorChatFetchContext(vendorId) {
     supabase.from('vendors').select('id, name, category').eq('id', vendorId).maybeSingle(),
     supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('vendor_clients').select('id, name, event_type, event_date, status').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
-    supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, total, advance, balance, status, due_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
+    supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
     supabase.from('vendor_enquiries').select('id, couple_name, message, created_at, status').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
     supabase.from('vendor_calendar_events').select('id, event_name, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
   ]);
@@ -18319,7 +18319,7 @@ async function _vendorChatFetchContext(vendorId) {
 
   const outstanding = invoices
     .filter(i => i.status !== 'paid' && i.status !== 'cancelled')
-    .reduce((s, i) => s + parseFloat(i.balance || i.amount || 0), 0);
+    .reduce((s, i) => s + parseFloat(i.total_amount || i.amount || 0), 0);
 
   const overdue = invoices.filter(i =>
     (i.status === 'unpaid' || i.status === 'issued' || i.status === 'pending') &&
