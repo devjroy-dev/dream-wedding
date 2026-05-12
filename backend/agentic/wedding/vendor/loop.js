@@ -203,14 +203,19 @@ async function runAgenticTurn({ vendorId, message, history = [], surface = 'nati
   const systemPrompt = buildSystemPrompt(ctx);
   const vendor = { id: ctx.vendor.id, name: ctx.vendor.name };
 
-  let effectiveHistory = Array.isArray(history) ? history : [];
-  if (effectiveHistory.length === 0) {
+  // history === null/undefined → caller omitted it (native app, web chat) → auto-load from DB for continuity.
+  // history === []              → caller explicitly passed empty (WhatsApp, test curls) → blank slate, no DB load.
+  // history === [...]           → caller passed explicit turns → use as-is.
+  let effectiveHistory;
+  if (history === null || history === undefined) {
     try {
       effectiveHistory = await readHistory(vendorId, 10);
     } catch (err) {
       console.error('[vendor-engine.loop] history hydration failed:', err.message);
       effectiveHistory = [];
     }
+  } else {
+    effectiveHistory = Array.isArray(history) ? history : [];
   }
 
   const historyMessages = effectiveHistory.slice(-10).map(h => ({
@@ -500,11 +505,18 @@ async function _finalizeTurn({ vendorId, surface, firstUserMessage, outcome, sta
   if (firstUserMessage) {
     rowsToWrite.push({ role: 'user', content: firstUserMessage });
   }
-  rowsToWrite.push({
-    role: 'assistant',
-    content: reply,
-    tool_calls: toolsUsed.length ? toolsUsed : null,
-  });
+  // Only persist the assistant turn when tools actually fired, or when the model
+  // gave a clean read-only / clarifying answer (stopReason === 'end_turn').
+  // Never persist a "Done" reply with zero tool calls — that was a hallucination;
+  // feeding it back as history poisons future turns.
+  const isMutationHallucination = toolsUsed.length === 0 && stopReason !== 'end_turn';
+  if (!isMutationHallucination) {
+    rowsToWrite.push({
+      role: 'assistant',
+      content: reply,
+      tool_calls: toolsUsed.length ? toolsUsed : null,
+    });
+  }
 
   try {
     await writeHistory(vendorId, surface, rowsToWrite);

@@ -18322,7 +18322,7 @@ app.get('/api/v2/pages/:slice', async (req, res) => {
 
 app.post('/api/v3/dreamai/vendor-chat', async (req, res) => {
   try {
-    const { userId, message, history = [], surface = 'native', justDoIt = true } = req.body || {};
+    const { userId, message, history = null, surface = 'native', justDoIt = true } = req.body || {};
     if (!userId || !message) {
       return res.status(400).json({ success: false, error: 'userId and message are required' });
     }
