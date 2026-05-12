@@ -49,8 +49,6 @@ tdw-2
 
 # Session patch scripts and backups (transient)
 patch_S*.py
-*.bak
-
-# Session 2 cleanup — also ignore .bak2 variants
-*.bak2
+*.bak*
 patch_*.py
+docs/governance/
