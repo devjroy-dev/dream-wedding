@@ -102,8 +102,11 @@ function buildToolPreview(toolName, toolInput) {
       return ref ? 'Edit invoice (' + ref + ')' + tail : 'Edit invoice' + tail;
     }
     case 'wedding_delete_invoice': {
-      const ref = input.invoice_id ? '#' + safe(input.invoice_id, 10) : safe(input.client_name);
-      return ref ? 'Delete invoice — ' + ref : 'Delete invoice';
+      const client = safe(input.client_name, 40);
+      const amt = fmtRs(input.amount);
+      if (client && amt) return 'Delete invoice — ' + client + ' · ' + amt;
+      if (client) return 'Delete invoice — ' + client;
+      return 'Delete invoice';
     }
     case 'wedding_edit_expense': {
       const ref   = input.expense_id ? '#' + safe(input.expense_id, 10) : safe(input.description_match, 30);
@@ -115,8 +118,11 @@ function buildToolPreview(toolName, toolInput) {
       return ref ? 'Edit expense (' + ref + ')' + tail : 'Edit expense' + tail;
     }
     case 'wedding_delete_expense': {
-      const ref = input.expense_id ? '#' + safe(input.expense_id, 10) : safe(input.description_match, 30);
-      return ref ? 'Delete expense — ' + ref : 'Delete expense';
+      const desc = safe(input.description_match || input.description, 40);
+      const amt = fmtRs(input.amount);
+      if (desc && amt) return 'Delete expense — ' + desc + ' · ' + amt;
+      if (desc) return 'Delete expense — ' + desc;
+      return 'Delete expense';
     }
     case 'wedding_edit_client': {
       const ref   = input.client_id ? '#' + safe(input.client_id, 10) : safe(input.client_name);
@@ -130,8 +136,8 @@ function buildToolPreview(toolName, toolInput) {
       return ref ? 'Edit client (' + ref + ')' + tail : 'Edit client' + tail;
     }
     case 'wedding_delete_client': {
-      const ref = input.client_id ? '#' + safe(input.client_id, 10) : safe(input.client_name);
-      return ref ? 'Delete client — ' + ref : 'Delete client';
+      const name = safe(input.client_name, 40);
+      return name ? 'Delete client — ' + name : 'Delete client';
     }
 
     default:

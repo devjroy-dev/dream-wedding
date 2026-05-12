@@ -3441,6 +3441,18 @@ async function executeToolCall(toolName, toolInput, vendor) {
         const { error } = await supabase.from('vendor_availability_blocks')
           .upsert(rows, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
         if (error) throw error;
+        // Also write to vendor_calendar_events so the Calendar reference view
+        // surfaces blocked dates as visible entries. ignoreDuplicates on
+        // (vendor_id, event_date) prevents double entries if blocked again.
+        const calRows = dates.map(d => ({
+          vendor_id: vendor.id,
+          title: reasonStr,
+          event_date: d,
+          client_name: client_name || null,
+          notes: notes || null,
+        }));
+        await supabase.from('vendor_calendar_events')
+          .upsert(calRows, { onConflict: 'vendor_id,event_date', ignoreDuplicates: true });
         return `✓ Blocked ${dates.length} date${dates.length > 1 ? 's' : ''} for ${client_name}\n${dates.join(', ')}`;
       }
 
@@ -3553,7 +3565,6 @@ async function executeToolCall(toolName, toolInput, vendor) {
           vendor_id: vendor.id,
           title: task,
           due_date,
-          priority,
           done: false,
           client_id,
           client_name: resolved_client_name,
