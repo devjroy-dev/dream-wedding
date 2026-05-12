@@ -1771,7 +1771,7 @@ app.post('/api/payment-schedules', async (req, res) => {
             vendor_id: data.vendor_id,
             title: `${inst.label || 'Payment'} due: ${data.client_name || 'Client'}`,
             event_date: inst.due_date,
-            event_type: 'Payment',
+            type: 'payment',
             amount: parseInt(inst.amount) || 0,
             notes: `₹${(parseInt(inst.amount) || 0).toLocaleString('en-IN')} from ${data.client_name || 'client'}`,
             source_type: 'payment_schedule',
@@ -4160,7 +4160,7 @@ app.post('/api/pai/confirm', async (req, res) => {
             title: data.title,
             event_date: data.event_date,
             event_time: data.event_time || null,
-            event_type: data.event_type || 'Event',
+            type: data.event_type || data.type || 'generic',
             venue: data.venue || null,
             notes: data.notes || null,
           }]).select().single();
