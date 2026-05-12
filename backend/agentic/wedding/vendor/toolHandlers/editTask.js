@@ -27,6 +27,7 @@ async function editTask(vendorId, { task_id, title_match, title, due_date, done,
       .from('vendor_todos')
       .select('id, vendor_id, title')
       .eq('id', task_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Task not found.';
     if (data.vendor_id !== vendorId) return 'Task does not belong to this vendor.';
@@ -37,6 +38,7 @@ async function editTask(vendorId, { task_id, title_match, title, due_date, done,
       .select('id, vendor_id, title')
       .eq('vendor_id', vendorId)
       .ilike('title', '%' + title_match + '%')
+      .is('deleted_at', null)
       .limit(2);
     if (!data || data.length === 0) return 'No task matching "' + title_match + '" found.';
     if (data.length > 1) return 'More than one task matches "' + title_match + '". Specify the task_id.';

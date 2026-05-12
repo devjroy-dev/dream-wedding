@@ -28,6 +28,7 @@ async function editInvoice(vendorId, { invoice_id, client_name, amount, due_date
       .from('vendor_invoices')
       .select('id, vendor_id, client_name, amount, gst_enabled, gst_amount, total_amount, status, due_date')
       .eq('id', invoice_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Invoice not found.';
     if (data.vendor_id !== vendorId) return 'Invoice does not belong to this vendor.';
@@ -39,6 +40,7 @@ async function editInvoice(vendorId, { invoice_id, client_name, amount, due_date
       .eq('vendor_id', vendorId)
       .ilike('client_name', '%' + client_name + '%')
       .neq('status', 'paid')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(2);
     if (!data || data.length === 0) return 'No unpaid invoice found for ' + client_name + '.';

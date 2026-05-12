@@ -2,9 +2,8 @@
 //
 // Tool handler for wedding_delete_client (Session 7, 2026-05-12).
 //
-// Hard delete — matches the existing DELETE /api/vendor-clients/:id endpoint
-// pattern in server.js line 1323. Soft-delete deferred to a schema-migration
-// session per SESSION_BOUNDARIES §125.
+// Updated Session 8.5b (2026-05-13): converted to soft-delete (deleted_at).
+// Sets deleted_at = now() instead of hard DELETE.
 //
 // Note: deleting a client does NOT cascade-delete invoices or expenses.
 // vendor_invoices has client_id as a soft FK (sometimes null); orphaned rows
@@ -24,6 +23,7 @@ async function deleteClient(vendorId, { client_id, client_name }) {
       .from('vendor_clients')
       .select('id, vendor_id, name')
       .eq('id', client_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Client not found.';
     if (data.vendor_id !== vendorId) return 'Client does not belong to this vendor.';
@@ -34,6 +34,7 @@ async function deleteClient(vendorId, { client_id, client_name }) {
       .select('id, vendor_id, name')
       .eq('vendor_id', vendorId)
       .ilike('name', '%' + client_name + '%')
+      .is('deleted_at', null)
       .limit(2);
     if (!data || data.length === 0) return 'No client matching "' + client_name + '" found.';
     if (data.length > 1) return 'More than one client matches "' + client_name + '". Specify the client_id.';
@@ -44,7 +45,7 @@ async function deleteClient(vendorId, { client_id, client_name }) {
 
   const { error } = await supabase
     .from('vendor_clients')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', target.id)
     .eq('vendor_id', vendorId);
   if (error) throw error;

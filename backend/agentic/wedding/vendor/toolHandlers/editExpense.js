@@ -20,6 +20,7 @@ async function editExpense(vendorId, { expense_id, description_match, amount, ca
       .from('vendor_expenses')
       .select('id, vendor_id, amount, category, description, expense_date')
       .eq('id', expense_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Expense not found.';
     if (data.vendor_id !== vendorId) return 'Expense does not belong to this vendor.';
@@ -30,6 +31,7 @@ async function editExpense(vendorId, { expense_id, description_match, amount, ca
       .select('id, vendor_id, amount, category, description, expense_date')
       .eq('vendor_id', vendorId)
       .ilike('description', '%' + description_match + '%')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(2);
     if (!data || data.length === 0) return 'No expense matching "' + description_match + '" found.';

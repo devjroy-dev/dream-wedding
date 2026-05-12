@@ -73,12 +73,14 @@ async function queryTaxSummary(vendorId, { quarter, financial_year } = {}) {
       .select('gst_amount')
       .eq('vendor_id', vendorId)
       .eq('status', 'paid')
+      .is('deleted_at', null)
       .gte('paid_date', win.start)
       .lte('paid_date', win.end),
     supabase
       .from('vendor_expenses')
       .select('amount')
       .eq('vendor_id', vendorId)
+      .is('deleted_at', null)
       .gte('expense_date', win.start)
       .lte('expense_date', win.end),
     supabase

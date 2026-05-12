@@ -27,6 +27,7 @@ async function editCalendarEvent(vendorId, { event_id, title_match, title, event
       .from('vendor_calendar_events')
       .select('id, vendor_id, title')
       .eq('id', event_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Calendar event not found.';
     if (data.vendor_id !== vendorId) return 'Event does not belong to this vendor.';
@@ -37,6 +38,7 @@ async function editCalendarEvent(vendorId, { event_id, title_match, title, event
       .select('id, vendor_id, title')
       .eq('vendor_id', vendorId)
       .ilike('title', '%' + title_match + '%')
+      .is('deleted_at', null)
       .limit(2);
     if (!data || data.length === 0) return 'No calendar event matching "' + title_match + '" found.';
     if (data.length > 1) return 'More than one event matches "' + title_match + '". Specify the event_id.';

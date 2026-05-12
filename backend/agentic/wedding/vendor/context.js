@@ -31,10 +31,10 @@ async function fetchContext(vendorId) {
   const [vendorRes, subRes, clientsRes, invoicesRes, enquiriesRes, calendarRes] = await Promise.all([
     supabase.from('vendors').select('id, name, category').eq('id', vendorId).maybeSingle(),
     supabase.from('vendor_subscriptions').select('tier').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('vendor_clients').select('id, name, event_type, event_date, status').eq('vendor_id', vendorId).order('event_date', { ascending: true }).limit(20),
-    supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(30),
+    supabase.from('vendor_clients').select('id, name, event_type, event_date, status').eq('vendor_id', vendorId).is('deleted_at', null).order('event_date', { ascending: true }).limit(20),
+    supabase.from('vendor_invoices').select('id, client_name, amount, total_amount, status, due_date, paid_date, created_at').eq('vendor_id', vendorId).is('deleted_at', null).order('created_at', { ascending: false }).limit(30),
     supabase.from('vendor_enquiries').select('id, couple_id, initial_message, last_message_preview, last_message_at, created_at, status, wedding_date, couple:users(name, bride_name, groom_name, phone)').eq('vendor_id', vendorId).order('created_at', { ascending: false }).limit(10),
-    supabase.from('vendor_calendar_events').select('id, title, event_date, event_time, client_name').eq('vendor_id', vendorId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
+    supabase.from('vendor_calendar_events').select('id, title, event_date, event_time, client_name').eq('vendor_id', vendorId).is('deleted_at', null).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(10),
   ]);
 
   if (!vendorRes.data) return null;

@@ -19,6 +19,7 @@ async function editClient(vendorId, { client_id, client_name, name, phone, event
       .from('vendor_clients')
       .select('id, vendor_id, name')
       .eq('id', client_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Client not found.';
     if (data.vendor_id !== vendorId) return 'Client does not belong to this vendor.';
@@ -29,6 +30,7 @@ async function editClient(vendorId, { client_id, client_name, name, phone, event
       .select('id, vendor_id, name')
       .eq('vendor_id', vendorId)
       .ilike('name', '%' + client_name + '%')
+      .is('deleted_at', null)
       .limit(2);
     if (!data || data.length === 0) return 'No client matching "' + client_name + '" found.';
     if (data.length > 1) return 'More than one client matches "' + client_name + '". Specify the client_id.';

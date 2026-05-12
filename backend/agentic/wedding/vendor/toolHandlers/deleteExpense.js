@@ -2,9 +2,8 @@
 //
 // Tool handler for wedding_delete_expense (Session 7, 2026-05-12).
 //
-// Hard delete — matches the existing DELETE /api/expenses/:id endpoint pattern
-// in server.js line 1459. Soft-delete deferred to a schema-migration session
-// per SESSION_BOUNDARIES §125.
+// Updated Session 8.5b (2026-05-13): converted to soft-delete (deleted_at).
+// Sets deleted_at = now() instead of hard DELETE.
 //
 // Resolution: prefer expense_id; fall back to description_match single-match
 // (refuse on ambiguity). Vendor-ownership guard on the delete itself.
@@ -20,6 +19,7 @@ async function deleteExpense(vendorId, { expense_id, description_match }) {
       .from('vendor_expenses')
       .select('id, vendor_id, amount, description')
       .eq('id', expense_id)
+      .is('deleted_at', null)
       .maybeSingle();
     if (!data) return 'Expense not found.';
     if (data.vendor_id !== vendorId) return 'Expense does not belong to this vendor.';
@@ -30,6 +30,7 @@ async function deleteExpense(vendorId, { expense_id, description_match }) {
       .select('id, vendor_id, amount, description')
       .eq('vendor_id', vendorId)
       .ilike('description', '%' + description_match + '%')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(2);
     if (!data || data.length === 0) return 'No expense matching "' + description_match + '" found.';
@@ -41,7 +42,7 @@ async function deleteExpense(vendorId, { expense_id, description_match }) {
 
   const { error } = await supabase
     .from('vendor_expenses')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', target.id)
     .eq('vendor_id', vendorId);
   if (error) throw error;
