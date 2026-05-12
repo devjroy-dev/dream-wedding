@@ -18384,6 +18384,112 @@ app.post('/api/v3/dreamai/vendor-confirm', async (req, res) => {
 
 // ─── PATCH V3-VENDOR-CHAT LOADED ─── //
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/internal/sweep-dreamai-messages — Session 8.5c (2026-05-13)
+//
+// Nightly sweeper for vendor_dreamai_messages. Prunes rows older than 90 days
+// while preserving the most recent 20 rows per vendor regardless of age.
+//
+// Protected by INTERNAL_SWEEP_SECRET env var. Called by Railway cron at 2am IST
+// (20:30 UTC): POST https://<railway-url>/api/internal/sweep-dreamai-messages
+// with header Authorization: Bearer <INTERNAL_SWEEP_SECRET>.
+//
+// Response: { success, vendors_affected, rows_deleted, rows_kept, elapsed_ms }
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post('/api/internal/sweep-dreamai-messages', async (req, res) => {
+  const startedAt = Date.now();
+
+  // Auth check
+  const secret = process.env.INTERNAL_SWEEP_SECRET;
+  if (!secret) {
+    return res.status(503).json({ success: false, error: 'INTERNAL_SWEEP_SECRET not configured' });
+  }
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== secret) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    const KEEP_DAYS = 90;
+    const KEEP_RECENT = 20;
+    const cutoff = new Date(Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    // Step 1: Find all vendors who have messages older than the cutoff
+    const { data: oldVendors, error: vendorErr } = await supabase
+      .from('vendor_dreamai_messages')
+      .select('vendor_id')
+      .lt('created_at', cutoff);
+
+    if (vendorErr) throw vendorErr;
+    if (!oldVendors || oldVendors.length === 0) {
+      return res.json({
+        success: true,
+        vendors_affected: 0,
+        rows_deleted: 0,
+        rows_kept: 0,
+        elapsed_ms: Date.now() - startedAt,
+        message: 'Nothing to sweep.',
+      });
+    }
+
+    // Unique vendor IDs with old messages
+    const vendorIds = [...new Set(oldVendors.map(r => r.vendor_id))];
+    let totalDeleted = 0;
+
+    // Step 2: For each vendor, keep the most recent KEEP_RECENT rows, delete the rest
+    for (const vendorId of vendorIds) {
+      // Fetch all rows for this vendor ordered newest first
+      const { data: rows, error: fetchErr } = await supabase
+        .from('vendor_dreamai_messages')
+        .select('id, created_at')
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+
+      if (fetchErr) {
+        console.error(`[sweep] fetch failed for vendor ${vendorId}:`, fetchErr.message);
+        continue;
+      }
+      if (!rows || rows.length <= KEEP_RECENT) continue;
+
+      // IDs to delete: everything after the first KEEP_RECENT rows
+      const idsToDelete = rows.slice(KEEP_RECENT).map(r => r.id);
+
+      const { error: delErr, count } = await supabase
+        .from('vendor_dreamai_messages')
+        .delete({ count: 'exact' })
+        .in('id', idsToDelete);
+
+      if (delErr) {
+        console.error(`[sweep] delete failed for vendor ${vendorId}:`, delErr.message);
+        continue;
+      }
+      totalDeleted += count || idsToDelete.length;
+    }
+
+    // Step 3: Count remaining rows
+    const { count: keptCount } = await supabase
+      .from('vendor_dreamai_messages')
+      .select('*', { count: 'exact', head: true });
+
+    const elapsed = Date.now() - startedAt;
+    console.log(`[sweep] done — ${vendorIds.length} vendors, ${totalDeleted} rows deleted, ${keptCount} rows kept, ${elapsed}ms`);
+
+    return res.json({
+      success: true,
+      vendors_affected: vendorIds.length,
+      rows_deleted: totalDeleted,
+      rows_kept: keptCount || 0,
+      elapsed_ms: elapsed,
+    });
+
+  } catch (err) {
+    console.error('[sweep] error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ─── Session 2 (2026-05-12) — wire the vendor agentic engine ────────────────
 // Placed at end-of-file so executeToolCall, sendWhatsApp, and normalizePhone
 // are textually defined before their references are captured. The route
