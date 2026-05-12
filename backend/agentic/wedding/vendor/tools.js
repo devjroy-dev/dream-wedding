@@ -217,6 +217,42 @@ const TDW_VENDOR_CHAT_TOOLS = [
     },
   },
 
+  // ─── Session 8.5e — edit tools for tasks and calendar events ───────────────
+  {
+    name: 'wedding_edit_task',
+    description: 'Edit an existing task (title, due date, done/not-done, priority, assigned_to). Internal op — execute directly.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id:     { type: 'string', description: 'Task ID (preferred)' },
+        title_match: { type: 'string', description: 'Substring of existing task title — used if task_id not given' },
+        title:       { type: 'string', description: 'New title (optional)' },
+        due_date:    { type: 'string', description: 'New due date YYYY-MM-DD, or empty string to clear (optional)' },
+        done:        { type: 'boolean', description: 'Mark task complete (true) or incomplete (false) (optional)' },
+        priority:    { type: 'string', description: 'New priority: low | med | high (optional)' },
+        assigned_to: { type: 'string', description: 'Name to assign task to (optional)' },
+      },
+    },
+  },
+  {
+    name: 'wedding_edit_calendar_event',
+    description: 'Edit an existing calendar event (title, date, time, type, client, notes, amount). Internal op — execute directly.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        event_id:    { type: 'string', description: 'Event ID (preferred)' },
+        title_match: { type: 'string', description: 'Substring of existing event title — used if event_id not given' },
+        title:       { type: 'string', description: 'New title (optional)' },
+        event_date:  { type: 'string', description: 'New date YYYY-MM-DD (optional)' },
+        event_time:  { type: 'string', description: 'New time e.g. "14:00", or empty string to clear (optional)' },
+        type:        { type: 'string', description: 'New event type e.g. wedding | shoot | meeting | generic (optional)' },
+        client_name: { type: 'string', description: 'New client name, or empty string to clear (optional)' },
+        notes:       { type: 'string', description: 'New notes, or empty string to clear (optional)' },
+        amount:      { type: 'number', description: 'New amount in rupees (optional)' },
+      },
+    },
+  },
+
   // ─── Session 7 — money depth reads ───────────────────────────────────────
   {
     name: 'wedding_query_tax_summary',

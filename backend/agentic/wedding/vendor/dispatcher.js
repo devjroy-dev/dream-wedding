@@ -25,6 +25,10 @@ const { recordPayment } = require('./toolHandlers/recordPayment');
 
 // Session 7 — edit/delete mutations
 const { editInvoice } = require('./toolHandlers/editInvoice');
+
+// Session 8.5e — edit tools for tasks and calendar events
+const { editTask } = require('./toolHandlers/editTask');
+const { editCalendarEvent } = require('./toolHandlers/editCalendarEvent');
 const { deleteInvoice } = require('./toolHandlers/deleteInvoice');
 const { editExpense } = require('./toolHandlers/editExpense');
 const { deleteExpense } = require('./toolHandlers/deleteExpense');
@@ -106,6 +110,12 @@ async function dispatchTool(toolName, toolInput, vendor) {
       return await editClient(vendor.id, toolInput);
     case 'wedding_delete_client':
       return await deleteClient(vendor.id, toolInput);
+
+    // ─── Session 8.5e: edit tools for tasks and calendar events ──────────────
+    case 'wedding_edit_task':
+      return await editTask(vendor.id, toolInput);
+    case 'wedding_edit_calendar_event':
+      return await editCalendarEvent(vendor.id, toolInput);
 
     // ─── Session 7: money depth reads ────────────────────────────────────
     case 'wedding_query_tax_summary':
