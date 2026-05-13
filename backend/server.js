@@ -2215,17 +2215,19 @@ async function executeToolCall(toolName, toolInput, vendor) {
           .upsert(rows, { onConflict: 'vendor_id,blocked_date', ignoreDuplicates: true });
         if (error) throw error;
         // Also write to vendor_calendar_events so the Calendar reference view
-        // surfaces blocked dates as visible entries. ignoreDuplicates on
-        // (vendor_id, event_date) prevents double entries if blocked again.
+        // surfaces blocked dates as visible entries. Plain insert — no unique
+        // constraint on (vendor_id, event_date) exists, so the prior upsert
+        // with onConflict was silently rejected by Postgres every time.
         const calRows = dates.map(d => ({
           vendor_id: vendor.id,
           title: reasonStr,
           event_date: d,
+          type: 'blocked',
           client_name: client_name || null,
           notes: notes || null,
         }));
-        await supabase.from('vendor_calendar_events')
-          .upsert(calRows, { onConflict: 'vendor_id,event_date', ignoreDuplicates: true });
+        const { error: calErr } = await supabase.from('vendor_calendar_events').insert(calRows);
+        if (calErr) console.error('[block_calendar_dates] calendar insert failed:', calErr.message);
         return `✓ Blocked ${dates.length} date${dates.length > 1 ? 's' : ''} for ${client_name}\n${dates.join(', ')}`;
       }
 
