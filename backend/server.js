@@ -9532,7 +9532,7 @@ app.get('/api/v2/vendor/clients/:vendorId', async (req, res) => {
   try {
     const { vendorId } = req.params;
     // Support both full UUID and short ID (first 8 chars)
-    let query = supabase.from('vendor_clients').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('vendor_clients').select('*').is('deleted_at', null).order('created_at', { ascending: false });
     if (vendorId.length === 36) {
       query = query.eq('vendor_id', vendorId);
     } else {
@@ -9826,8 +9826,8 @@ app.get('/api/v2/vendor/money/:vendorId', async (req, res) => {
 
     // Fetch in parallel
     const [invoicesRes, expensesRes, schedulesRes, tdsRes] = await Promise.all([
-      supabase.from('vendor_invoices').select('*').eq('vendor_id', resolvedId).order('created_at', { ascending: false }),
-      supabase.from('vendor_expenses').select('*').eq('vendor_id', resolvedId).order('created_at', { ascending: false }),
+      supabase.from('vendor_invoices').select('*').eq('vendor_id', resolvedId).is('deleted_at', null).order('created_at', { ascending: false }),
+      supabase.from('vendor_expenses').select('*').eq('vendor_id', resolvedId).is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('vendor_payment_schedules').select('*').eq('vendor_id', resolvedId).order('due_date', { ascending: true }),
       supabase.from('vendor_tds_ledger').select('*').eq('vendor_id', resolvedId).order('created_at', { ascending: false }),
     ]);
