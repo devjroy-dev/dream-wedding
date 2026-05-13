@@ -44,6 +44,9 @@ const { enquiryInboxSummary } = require('./toolHandlers/enquiryInboxSummary');
 const { hotDatesContext } = require('./toolHandlers/hotDatesContext');
 const { readClientMessages } = require('./toolHandlers/readClientMessages');
 
+// unified date read
+const { queryDay } = require('./toolHandlers/queryDay');
+
 // Deprecated unprefixed tool names (pre-Session-3) → current wedding_* names.
 // Any stored tool_use block from before 2026-05-12 references unprefixed names;
 // route them transparently and log a warning so we can confirm zero usage before
@@ -130,6 +133,10 @@ async function dispatchTool(toolName, toolInput, vendor) {
       return await hotDatesContext(toolInput);
     case 'wedding_read_client_messages':
       return await readClientMessages(vendor.id, toolInput);
+
+    // ─── unified date read ──────────────────────────────────────────────────
+    case 'wedding_query_day':
+      return await queryDay(vendor.id, toolInput);
 
     default:
       return 'Unknown tool: ' + toolName;

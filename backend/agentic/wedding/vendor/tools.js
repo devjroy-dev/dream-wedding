@@ -312,6 +312,19 @@ const TDW_VENDOR_CHAT_TOOLS = [
       required: ['client_name'],
     },
   },
+
+  // ─── unified date read ────────────────────────────────────────────────────
+  {
+    name: 'wedding_query_day',
+    description: 'Return everything scheduled on a specific date for the vendor: calendar events, blocked dates, tasks due, invoices due, and payment reminders due. Use this whenever the vendor asks what is happening / scheduled / on / due on a specific date. Prefer this over any other read tool for date-anchored questions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['date'],
+    },
+  },
 ];
 
 module.exports = { TDW_VENDOR_CHAT_TOOLS };
