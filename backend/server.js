@@ -757,7 +757,7 @@ app.patch('/api/guests/:id', async (req, res) => {
 // Routes: leads, invoices, vendor-clients, expenses, broadcasts, todos,
 //         reminders, events, payment-schedules, team, team-payments, team-broadcasts
 // Soft-delete filters (deleted_at IS NULL) added to GET list endpoints.
-app.use('/api', require('./routes/vendor')(supabase));
+app.use('/', require('./routes/vendor')(supabase));
 
 
 // ==================
