@@ -2322,7 +2322,7 @@ async function executeToolCall(toolName, toolInput, vendor) {
       }
 
       case 'create_task': {
-        const { task, client_name = '', assignee = '', due_date = null, priority = 'medium' } = toolInput;
+        const { task, client_name = '', assignee = '', due_date = null, priority = 'med' } = toolInput;
         // Resolve client_id only when exactly one client matches the name.
         let client_id = null;
         let resolved_client_name = client_name || null;
@@ -2336,11 +2336,14 @@ async function executeToolCall(toolName, toolInput, vendor) {
           }
         }
         const assigned_to = assignee ? [assignee] : [vendor.name];
+        // Normalise priority: model may send 'medium', DB uses 'med'.
+        const normPriority = priority === 'medium' ? 'med' : (priority || 'med');
         const { error } = await supabase.from('vendor_todos').insert([{
           vendor_id: vendor.id,
           title: task,
           due_date,
           done: false,
+          priority: normPriority,
           client_id,
           client_name: resolved_client_name,
           assigned_to,
